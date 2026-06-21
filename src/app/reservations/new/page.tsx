@@ -1,12 +1,20 @@
 'use client'
 
+import { Suspense } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import { NewReservationWizard } from '@/components/erp/hotel/NewReservationWizard'
+import { DayCloseGateBanner } from '@/components/erp/admin/DayCloseGateBanner'
 import { CalendarCheck } from 'lucide-react'
 import { AppDevelopedByFooter } from '@/components/AppDevelopedByFooter'
 
-export default function NewReservationPage() {
+function NewReservationPageContent() {
+  const searchParams = useSearchParams()
+  const initialRoomId = searchParams.get('roomId') ?? undefined
+  const initialCheckInDate = searchParams.get('checkIn') ?? undefined
+  const initialCheckOutDate = searchParams.get('checkOut') ?? undefined
+
   return (
     <div className="min-h-screen bg-background">
       <header className="sticky top-0 z-20 border-b border-border bg-background/95 backdrop-blur-sm shadow-sm print:hidden">
@@ -41,9 +49,30 @@ export default function NewReservationPage() {
       </header>
 
       <main className="flex-1 mx-auto w-full max-w-4xl px-4 py-6 sm:px-6 sm:py-8">
-        <NewReservationWizard />
+        <div className="space-y-4">
+          <DayCloseGateBanner />
+          <NewReservationWizard
+            initialRoomId={initialRoomId}
+            initialCheckInDate={initialCheckInDate}
+            initialCheckOutDate={initialCheckOutDate}
+          />
+        </div>
       </main>
       <AppDevelopedByFooter printHidden />
     </div>
+  )
+}
+
+export default function NewReservationPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-background p-8 text-sm text-muted-foreground">
+          Loading reservation wizard...
+        </div>
+      }
+    >
+      <NewReservationPageContent />
+    </Suspense>
   )
 }

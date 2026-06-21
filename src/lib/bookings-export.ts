@@ -11,6 +11,9 @@ import { HOTEL_NAME } from './reservation-terms'
 import { formatBdtForPdf } from './currency'
 import type { BookingsExportFilterLabels } from './booking-date-filter'
 import { getBookingSourceLabel } from './booking-company'
+import { formatBookingListDiscount } from './booking-discount'
+import { computeBookingDisplayVat } from './booking-totals'
+import { resolveBookingRegistrationNumber } from './booking-registration'
 import { getLogoDataUrl } from './reservation-document-html'
 
 export type BookingExportRecord = {
@@ -28,13 +31,24 @@ export type BookingExportRecord = {
   totalRoomCharge: number
   advancePayment: number
   dueAmount: number
+  discountEnabled?: boolean | null
+  discountType?: string | null
+  discountValue?: number | null
+  discountAmount?: number | null
+  vatApplied?: boolean | null
   vatPercent?: number
   vatAmount?: number
+  serviceChargePercent?: number | null
   totalWithVat?: number
   createdAt?: string
-  customer: { name: string; phone: string; email?: string | null }
+  customer: {
+    name: string
+    phone: string
+    email?: string | null
+    registrationNumber?: string | null
+  }
+  companyLedgerGuest?: { registrationNumber?: string | null } | null
   room: { roomNumber: string; type: { name: string } }
-  creator?: { name: string; email?: string | null } | null
 }
 
 export type BookingsExportMeta = {
@@ -97,6 +111,8 @@ export function mapBookingToExportRow(
   booking: BookingExportRecord,
   times: HotelTimes
 ): Record<string, string | number> {
+  const vat = computeBookingDisplayVat(booking)
+  const discount = formatBookingListDiscount(booking)
   return {
     'Confirmation No.': formatConfirmationNumber(booking),
     Guest: booking.customer?.name ?? '',
@@ -108,10 +124,12 @@ export function mapBookingToExportRow(
     'Check-out': formatListBookingCheckOut(booking, times),
     Booking: bookingStatusLabel(booking),
     Company: getBookingSourceLabel(booking),
-    'Reserved by': booking.creator?.name ?? '',
+    'Reg. No.': resolveBookingRegistrationNumber(booking) || '',
+    Discount: discount.amount > 0 ? discount.amount : '',
+    'Discount type': discount.amount > 0 ? discount.label : '',
     'Total (incl. VAT)': booking.totalWithVat ?? booking.totalRoomCharge,
-    'VAT %': booking.vatPercent ?? '',
-    'VAT Amount': booking.vatAmount ?? '',
+    'VAT %': vat.percent,
+    'VAT Amount': vat.amount,
     'Advance Paid': booking.advancePayment,
     'Due (incl. VAT)': booking.dueAmount,
     'Created At': booking.createdAt
@@ -283,10 +301,22 @@ const PDF_COLUMNS: PdfColumn[] = [
   },
   {
     header: 'Company',
-    width: 28,
+    width: 24,
     value: (b) => getBookingSourceLabel(b),
   },
-  { header: 'Reserved by', width: 28, value: (b) => b.creator?.name ?? '—' },
+  {
+    header: 'Reg. No.',
+    width: 22,
+    value: (b) => resolveBookingRegistrationNumber(b) || '—',
+  },
+  {
+    header: 'Discount',
+    width: 18,
+    value: (b) => {
+      const discount = formatBookingListDiscount(b)
+      return discount.amount > 0 ? formatBdtForPdf(discount.amount) : '—'
+    },
+  },
   {
     header: 'Total',
     width: 22,

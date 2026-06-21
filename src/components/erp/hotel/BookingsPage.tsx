@@ -20,15 +20,18 @@ import { StatusBadge } from '../shared/StatusBadge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
-import { Plus, Search, LogIn, LogOut, XCircle, Receipt, FileText, FilePenLine, CalendarRange, FileSpreadsheet, FileDown, Loader2 } from 'lucide-react';
-import { AdjustStayDialog } from './AdjustStayDialog';
+import { Plus, Search, LogIn, LogOut, XCircle, Receipt, FileText, FilePenLine, CalendarRange, FileSpreadsheet, FileDown, Loader2, CreditCard, IdCard, ArrowRightLeft, Eye, UtensilsCrossed, ChevronDown } from 'lucide-react';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { BookingIdUploadDialog } from './BookingIdUploadDialog';
+import { BookingAddPaymentDialog } from './BookingAddPaymentDialog';
+import { BookingRestaurantBillDialog } from './BookingRestaurantBillDialog';
 import { openNewReservationTab, openRegistrationFormTab } from '@/lib/reservation-navigation';
 import { openCheckoutTab } from '@/lib/checkout-navigation';
 import { formatBdt } from '@/lib/currency';
 import { getPaginationPages } from '@/lib/pagination-pages';
 import { cn } from '@/lib/utils';
 import { PAYMENT_METHOD_OPTIONS_WITH_PAYMENT } from '@/lib/payment-method';
-import { computeRefundFromInput } from '@/lib/booking-totals';
+import { computeRefundFromInput, computeBookingDisplayVat, resolveBookingVatListDisplay } from '@/lib/booking-totals';
 import { Switch } from '@/components/ui/switch';
 import { useHotelTimes } from '@/hooks/use-hotel-times';
 import { useAuthStore } from '@/lib/auth-store';
@@ -41,15 +44,22 @@ import {
 import {
   BOOKING_DATE_PRESET_OPTIONS,
   buildBookingsExportFilterLabels,
-  resolveBookingDateRange,
+  formatBookingDateFilterLabel,
+  resolveBookingDateRangeWithBusinessDate,
   type BookingDatePreset,
 } from '@/lib/booking-date-filter';
+import { useBusinessDate } from '@/hooks/use-business-date';
+import { canBookingCheckIn } from '@/lib/reservation-completion-fields';
 import {
   buildBookingsExportQuery,
   downloadBookingsExcel,
   downloadBookingsPdf,
 } from '@/lib/bookings-export';
 import { getBookingSourceLabel, isWalkInBooking } from '@/lib/booking-company';
+import { formatBookingListDiscount } from '@/lib/booking-discount';
+import { resolveBookingRegistrationNumber } from '@/lib/booking-registration';
+import { ReservationEntryConvertDialog } from './ReservationEntryConvertDialog';
+import { ReservationEntryDetailsDialog } from './ReservationEntryDetailsDialog';
 
 interface Booking {
   id: string;
@@ -58,6 +68,9 @@ interface Booking {
   roomId: string;
   status: 'RESERVED' | 'CHECKED_IN' | 'CHECKED_OUT' | 'CANCELLED';
   isInitialReservation?: boolean;
+  isCorporateGuest?: boolean;
+  nidPhysicallyReceived?: boolean;
+  idDocumentCount?: number;
   checkIn: string;
   checkOut: string;
   actualCheckIn?: string | null;
@@ -68,18 +81,68 @@ interface Booking {
   advancePayment: number;
   initialPayment?: number;
   dueAmount: number;
+  vatApplied?: boolean | null;
   vatPercent?: number;
   vatAmount?: number;
+  serviceChargePercent?: number | null;
   totalWithVat?: number;
+  discountEnabled?: boolean;
+  discountType?: string | null;
+  discountValue?: number;
+  discountAmount?: number;
   notes?: string | null;
   createdAt?: string;
   company?: string | null;
   companyLedgerId?: string | null;
   companyLedger?: { id: string; name: string } | null;
-  customer: { id: string; name: string; phone: string; email?: string };
-  room: { id: string; roomNumber: string; type: { name: string; basePrice: number } };
-  creator?: { id: string; name: string; email: string } | null;
+  companyLedgerGuest?: { registrationNumber?: string | null } | null;
+  customer: {
+    id: string;
+    name: string;
+    phone: string;
+    email?: string;
+    registrationNumber?: string | null;
+  };
+  room: { id: string; roomNumber: string; totalPrice: number; type: { name: string } };
 }
+
+type ReservationEntryRow = {
+  id: string;
+  recordType: 'reservation_entry';
+  status: 'RESERVED_ENTRY' | 'RESERVED_ENTRY_PARTIAL' | 'RESERVED_ENTRY_FULFILLED';
+  entryStatus: 'ACTIVE' | 'PARTIALLY_FULFILLED' | 'FULFILLED' | 'CANCELLED';
+  checkIn: string;
+  checkOut: string;
+  guestName: string | null;
+  guestPhone: string | null;
+  guestAddress: string | null;
+  registrationNumber?: string | null;
+  confirmationNumber?: string | null;
+  guestRegistrationNumber?: string | null;
+  company: string | null;
+  companyLedgerId: string | null;
+  companyLedger?: { id: string; name: string } | null;
+  totalAmount: number;
+  advancePayment: number;
+  dueAmount: number;
+  notes: string | null;
+  createdAt: string;
+  lineSummary: string;
+  totalRooms: number;
+  unfulfilledRooms: number;
+  creator: { id: string; name: string };
+  convertedBookings?: Array<{ id: string; confirmationNumber: string | null; roomNumber: string }>;
+  lines: Array<{
+    roomTypeName: string;
+    roomNumber: string | null;
+    quantity: number;
+    unfulfilledCount?: number;
+  }>;
+};
+
+type BookingListItem =
+  | (Booking & { recordType?: 'booking' })
+  | ReservationEntryRow;
 
 interface CancelPreview {
   bookingId: string;
@@ -94,6 +157,10 @@ interface CancelPreview {
   dueAmount: number;
 }
 
+function isReservationEntryRow(item: BookingListItem): item is ReservationEntryRow {
+  return item.recordType === 'reservation_entry' || item.status.startsWith('RESERVED_ENTRY');
+}
+
 function BookingDatetimeCell({ date, time }: { date: string; time: string }) {
   return (
     <>
@@ -103,12 +170,140 @@ function BookingDatetimeCell({ date, time }: { date: string; time: string }) {
   );
 }
 
+/** Shorter booking-column labels so badges fit without overlapping the next column. */
+function bookingListStatusLabel(status: string): string | undefined {
+  switch (status) {
+    case 'RESERVED_ENTRY':
+      return 'Res. entry';
+    case 'RESERVED_ENTRY_PARTIAL':
+      return 'Partial entry';
+    case 'RESERVED_ENTRY_FULFILLED':
+      return 'Fulfilled';
+    default:
+      return undefined;
+  }
+}
+
+function bookingListStatusTitle(status: string): string | undefined {
+  switch (status) {
+    case 'RESERVED_ENTRY':
+      return 'Reserved entry';
+    case 'RESERVED_ENTRY_PARTIAL':
+      return 'Entry (partial)';
+    case 'RESERVED_ENTRY_FULFILLED':
+      return 'Entry fulfilled';
+    default:
+      return undefined;
+  }
+}
+
+function formatReservationEntryLineLabel(line: ReservationEntryRow['lines'][number]) {
+  if (line.roomNumber) {
+    return `${line.roomTypeName} · ${line.roomNumber}`;
+  }
+  return line.quantity > 1 ? `${line.quantity}× ${line.roomTypeName}` : line.roomTypeName;
+}
+
+function formatReservationEntryLineName(line: ReservationEntryRow['lines'][number]) {
+  if (line.roomNumber) {
+    return `${line.roomTypeName} · ${line.roomNumber}`;
+  }
+  return line.roomTypeName;
+}
+
+function reservationEntryLineQuantity(line: ReservationEntryRow['lines'][number]) {
+  return line.roomNumber ? 1 : Math.max(1, line.quantity);
+}
+
+function BookingListRoomCell({ item }: { item: ReservationEntryRow }) {
+  const lines = item.lines ?? [];
+  const showDropdown = item.totalRooms > 1 || lines.length > 1;
+
+  if (!showDropdown) {
+    const line = lines[0];
+    if (line) {
+      return (
+        <>
+          <p className="bl-truncate font-medium" title={line.roomNumber ?? line.roomTypeName}>
+            {line.roomNumber ?? line.roomTypeName}
+          </p>
+          <p
+            className="bl-truncate bl-secondary text-muted-foreground"
+            title={line.roomNumber ? line.roomTypeName : undefined}
+          >
+            {line.roomNumber ? line.roomTypeName : 'Category hold'}
+          </p>
+        </>
+      );
+    }
+    return (
+      <>
+        <p className="bl-truncate font-medium" title={item.lineSummary}>
+          {item.lineSummary || '—'}
+        </p>
+        <p className="bl-truncate bl-secondary text-muted-foreground">1 room</p>
+      </>
+    );
+  }
+
+  const summaryTitle = lines.map(formatReservationEntryLineLabel).join(', ');
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className="group inline-flex max-w-full items-center gap-1 rounded-md text-left hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          title={summaryTitle}
+        >
+          <span className="min-w-0">
+            <span className="bl-truncate block font-medium">
+              {item.totalRooms} room{item.totalRooms === 1 ? '' : 's'}
+            </span>
+            <span className="bl-truncate bl-secondary block text-muted-foreground">
+              {lines.length} line{lines.length === 1 ? '' : 's'}
+            </span>
+          </span>
+          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-64 p-2">
+        <div className="flex items-center justify-between gap-2 px-2 pb-1.5">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Room lines
+          </p>
+          <p className="text-xs font-semibold text-foreground">
+            {item.totalRooms} room{item.totalRooms === 1 ? '' : 's'} total
+          </p>
+        </div>
+        <ul className="max-h-48 space-y-0.5 overflow-y-auto text-sm">
+          {lines.map((line, index) => {
+            const qty = reservationEntryLineQuantity(line);
+            return (
+            <li
+              key={`${line.roomTypeName}-${line.roomNumber ?? 'cat'}-${index}`}
+              className="flex items-center justify-between gap-3 rounded px-2 py-1.5 hover:bg-muted/80"
+            >
+              <span className="min-w-0 font-medium">{formatReservationEntryLineName(line)}</span>
+              <span className="shrink-0 tabular-nums text-xs font-semibold text-muted-foreground">
+                ×{qty}
+              </span>
+            </li>
+            );
+          })}
+        </ul>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 export function BookingsPage() {
   const queryClient = useQueryClient();
   const user = useAuthStore((s) => s.user);
   const { times, formatCheckIn, formatCheckOut } = useHotelTimes();
   const [statusFilter, setStatusFilter] = useState<string>('all');
-  const [datePreset, setDatePreset] = useState<BookingDatePreset>('all');
+  const [entryScopeFilter, setEntryScopeFilter] = useState<'business_day' | 'all'>('business_day');
+  const [datePreset, setDatePreset] = useState<BookingDatePreset>('today');
   const [customDateFrom, setCustomDateFrom] = useState('');
   const [customDateTo, setCustomDateTo] = useState('');
   const [searchInput, setSearchInput] = useState('');
@@ -128,9 +323,17 @@ export function BookingsPage() {
   const [refundAmount, setRefundAmount] = useState('0');
   const [refundMethod, setRefundMethod] = useState('CASH');
   const [cancelReason, setCancelReason] = useState('');
-  const [adjustStayDialogOpen, setAdjustStayDialogOpen] = useState(false);
-  const [adjustStayBookingId, setAdjustStayBookingId] = useState<string | null>(null);
   const [exporting, setExporting] = useState<'excel' | 'pdf' | null>(null);
+  const [idUploadBookingId, setIdUploadBookingId] = useState<string | null>(null);
+  const [idUploadDialogOpen, setIdUploadDialogOpen] = useState(false);
+  const [addPaymentBookingId, setAddPaymentBookingId] = useState<string | null>(null);
+  const [addPaymentDialogOpen, setAddPaymentDialogOpen] = useState(false);
+  const [restaurantBillBookingId, setRestaurantBillBookingId] = useState<string | null>(null);
+  const [restaurantBillDialogOpen, setRestaurantBillDialogOpen] = useState(false);
+  const [convertEntryId, setConvertEntryId] = useState<string | null>(null);
+  const [convertDialogOpen, setConvertDialogOpen] = useState(false);
+  const [detailsEntryId, setDetailsEntryId] = useState<string | null>(null);
+  const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
   useEffect(() => {
     const timer = window.setTimeout(() => {
       setSearchQuery(searchInput.trim());
@@ -139,23 +342,55 @@ export function BookingsPage() {
     return () => window.clearTimeout(timer);
   }, [searchInput]);
 
+  const { data: businessDateRes } = useBusinessDate();
+  const businessDate = businessDateRes?.data?.businessDate;
+
+  const handleNewReservation = () => {
+    openNewReservationTab();
+  };
+
+  const handleOpenCheckIn = (bookingId: string) => {
+    setCheckInBookingId(bookingId);
+    setCheckInDialogOpen(true);
+  };
+
   const dateRange = useMemo(
-    () => resolveBookingDateRange(datePreset, customDateFrom, customDateTo),
-    [datePreset, customDateFrom, customDateTo]
+    () => resolveBookingDateRangeWithBusinessDate(datePreset, customDateFrom, customDateTo, businessDate),
+    [datePreset, customDateFrom, customDateTo, businessDate]
   );
 
   const buildQuery = () => {
     const params: string[] = [`page=${page}`, `limit=${pageSize}`];
-    if (statusFilter !== 'all') params.push(`status=${statusFilter}`);
+    if (statusFilter !== 'all' && statusFilter !== 'RESERVED_ENTRY') {
+      params.push(`status=${statusFilter}`);
+    }
     if (searchQuery) params.push(`search=${encodeURIComponent(searchQuery)}`);
+    if (statusFilter === 'RESERVED_ENTRY') {
+      params.push(`scope=${entryScopeFilter}`);
+      if (entryScopeFilter === 'business_day' && businessDate) {
+        params.push(`businessDate=${encodeURIComponent(businessDate)}`);
+      }
+      return `/reservation-entries?${params.join('&')}`;
+    }
     if (dateRange.dateFrom) params.push(`dateFrom=${dateRange.dateFrom}`);
     if (dateRange.dateTo) params.push(`dateTo=${dateRange.dateTo}`);
     return `/bookings?${params.join('&')}`;
   };
 
+  const isReservationEntryList = statusFilter === 'RESERVED_ENTRY';
+
+  const needsBusinessDate =
+    (datePreset === 'today' || datePreset === 'yesterday') ||
+    (isReservationEntryList && entryScopeFilter === 'business_day');
+  const businessDateReady = !needsBusinessDate || !!businessDate;
+
   const { data: bookingsData, isLoading } = useQuery({
-    queryKey: ['bookings', statusFilter, datePreset, customDateFrom, customDateTo, page, pageSize, searchQuery],
-    queryFn: () => api.get<{ success: boolean; data: Booking[]; meta: { total: number; page: number; totalPages: number } }>(buildQuery()),
+    queryKey: ['bookings', statusFilter, entryScopeFilter, datePreset, customDateFrom, customDateTo, businessDate, page, pageSize, searchQuery],
+    queryFn: () =>
+      api.get<{ success: boolean; data: BookingListItem[]; meta: { total: number; page: number; totalPages: number } }>(
+        buildQuery()
+      ),
+    enabled: businessDateReady,
   });
 
   const { data: cancelPreviewData, isLoading: cancelPreviewLoading } = useQuery({
@@ -165,7 +400,7 @@ export function BookingsPage() {
     enabled: !!cancelBookingId && cancelDialogOpen,
   });
 
-  const bookings = ((bookingsData as any)?.data || []) as Booking[];
+  const bookings = ((bookingsData as any)?.data || []) as BookingListItem[];
   const totalBookings = (bookingsData as any)?.meta?.total || 0;
   const totalPages = Math.max((bookingsData as any)?.meta?.totalPages || 1, 1);
   const rangeStart = totalBookings === 0 ? 0 : (page - 1) * pageSize + 1;
@@ -190,7 +425,9 @@ export function BookingsPage() {
       setCheckInPayment('0');
       setCheckInPaymentMethod('CASH');
     },
-    onError: () => toast.error('Failed to check in'),
+    onError: (err: unknown) => {
+      toast.error(err instanceof Error ? err.message : 'Failed to check in');
+    },
   });
 
   const cancelMutation = useMutation({
@@ -232,6 +469,23 @@ export function BookingsPage() {
       setCancelReason('');
     },
     onError: () => toast.error('Failed to cancel reservation'),
+  });
+
+  const cancelEntryMutation = useMutation({
+    mutationFn: (id: string) => api.post(`/reservation-entries/${id}`, { action: 'cancel' }),
+    onSuccess: (res: any) => {
+      if (!res?.success) {
+        toast.error(res?.error || res?.message || 'Failed to cancel reservation entry');
+        return;
+      }
+      queryClient.invalidateQueries({ queryKey: ['bookings'] });
+      queryClient.invalidateQueries({ queryKey: ['reservation-entries'] });
+      queryClient.invalidateQueries({ queryKey: ['rooms'] });
+      toast.success('Reservation entry cancelled');
+    },
+    onError: (err: unknown) => {
+      toast.error(err instanceof Error ? err.message : 'Failed to cancel reservation entry');
+    },
   });
 
   const generateInvoiceMutation = useMutation({
@@ -345,8 +599,12 @@ export function BookingsPage() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl font-semibold">Reservations</h2>
-          <p className="text-sm text-muted-foreground">{totalBookings} total reservations</p>
+          <h2 className="text-xl font-semibold">Bookings</h2>
+          <p className="text-sm text-muted-foreground">
+            {datePreset === 'today' && businessDate
+              ? `${totalBookings} for business day ${businessDate} — expected arrivals & in-house guests`
+              : `${totalBookings} reservations · ${formatBookingDateFilterLabel(datePreset, customDateFrom, customDateTo)}`}
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Button
@@ -377,7 +635,10 @@ export function BookingsPage() {
             <FileText className="w-4 h-4 mr-2" />
             Registration Form
           </Button>
-          <Button className="bg-amber-600 hover:bg-amber-700 text-white" onClick={openNewReservationTab}>
+          <Button
+            className="bg-amber-600 hover:bg-amber-700 text-white"
+            onClick={handleNewReservation}
+          >
             <Plus className="w-4 h-4 mr-2" />
             New Reservation
           </Button>
@@ -389,7 +650,7 @@ export function BookingsPage() {
         <div className="relative flex-1 min-w-[200px] max-w-xs">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Search guest, phone, or room..."
+            placeholder="Search guest, phone, reg. no., or room..."
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
             className="pl-9"
@@ -402,12 +663,31 @@ export function BookingsPage() {
           <SelectContent>
             <SelectItem value="all">All Status</SelectItem>
             <SelectItem value="RESERVED">Reserved</SelectItem>
+            <SelectItem value="RESERVED_ENTRY">Reserved entry</SelectItem>
             <SelectItem value="CHECKED_IN">Checked In</SelectItem>
             <SelectItem value="CHECKED_OUT">Checked Out</SelectItem>
             <SelectItem value="CANCELLED">Cancelled</SelectItem>
             <SelectItem value="COMPANY">Company</SelectItem>
           </SelectContent>
         </Select>
+        {isReservationEntryList ? (
+          <Select
+            value={entryScopeFilter}
+            onValueChange={(v) => {
+              setEntryScopeFilter(v as 'business_day' | 'all');
+              setPage(1);
+            }}
+          >
+            <SelectTrigger className="w-44">
+              <CalendarRange className="mr-2 h-4 w-4 shrink-0 text-muted-foreground" />
+              <SelectValue placeholder="Scope" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="business_day">Business day</SelectItem>
+              <SelectItem value="all">All</SelectItem>
+            </SelectContent>
+          </Select>
+        ) : (
         <Select
           value={datePreset}
           onValueChange={(v) => {
@@ -427,7 +707,8 @@ export function BookingsPage() {
             ))}
           </SelectContent>
         </Select>
-        {datePreset === 'custom' && (
+        )}
+        {!isReservationEntryList && datePreset === 'custom' && (
           <>
             <div className="space-y-1">
               <Label htmlFor="booking-date-from" className="text-xs text-muted-foreground">
@@ -480,11 +761,12 @@ export function BookingsPage() {
                 <tr className="border-b border-border">
                   <th className="col-guest text-left font-medium">Guest</th>
                   <th className="col-room text-left font-medium">Room</th>
+                  <th className="col-regno text-left font-medium">Reg. No.</th>
                   <th className="col-checkin text-left font-medium">Check-in</th>
                   <th className="col-checkout text-left font-medium">Check-out</th>
                   <th className="col-booking text-left font-medium">Booking</th>
                   <th className="col-company text-left font-medium">Company</th>
-                  <th className="col-reserved text-left font-medium">Reserved by</th>
+                  <th className="col-discount text-right font-medium">Discount</th>
                   <th className="col-vat text-right font-medium" title="VAT amount and rate">VAT</th>
                   <th className="col-total text-right font-medium" title="Total including VAT">Total</th>
                   <th className="col-due text-right font-medium" title="Balance due including VAT">Due</th>
@@ -492,14 +774,153 @@ export function BookingsPage() {
                 </tr>
               </thead>
               <tbody className="bg-background">
-              {bookings.map((booking) => (
+              {bookings.map((item) => {
+                if (isReservationEntryRow(item)) {
+                  return (
+                    <tr key={item.id} className="border-b border-border/60 hover:bg-muted/40">
+                      <td className="col-guest">
+                        <p className="bl-truncate font-medium" title={item.guestName ?? undefined}>
+                          {item.guestName || 'Reservation entry'}
+                        </p>
+                        <p className="bl-truncate bl-secondary text-muted-foreground" title={item.guestPhone ?? undefined}>
+                          {item.guestPhone || item.creator.name}
+                        </p>
+                      </td>
+                      <td className="col-room">
+                        <BookingListRoomCell item={item} />
+                      </td>
+                      <td className="col-regno">
+                        <p
+                          className="bl-truncate font-medium font-mono text-xs"
+                          title={
+                            item.registrationNumber ?? item.guestRegistrationNumber ?? undefined
+                          }
+                        >
+                          {item.registrationNumber ?? item.guestRegistrationNumber ?? '—'}
+                        </p>
+                      </td>
+                      <td className="col-checkin" title={formatListBookingCheckIn(item, times)}>
+                        <BookingDatetimeCell {...getListBookingCheckInParts(item, times, true)} />
+                      </td>
+                      <td className="col-checkout" title={formatListBookingCheckOut(item, times)}>
+                        <BookingDatetimeCell {...getListBookingCheckOutParts(item, times, true)} />
+                      </td>
+                      <td className="col-booking">
+                        <div className="bl-booking-stack">
+                          <StatusBadge
+                            status={item.status}
+                            label={bookingListStatusLabel(item.status)}
+                            title={bookingListStatusTitle(item.status)}
+                            className="text-xs px-2 py-0.5 h-6 font-normal max-w-full"
+                          />
+                          {item.confirmationNumber ? (
+                            <p
+                              className="bl-truncate bl-secondary text-muted-foreground font-mono text-[11px] leading-tight"
+                              title={item.confirmationNumber}
+                            >
+                              {item.confirmationNumber}
+                            </p>
+                          ) : null}
+                          {(item.convertedBookings?.length ?? 0) > 0 ? (
+                            <p
+                              className="bl-truncate bl-secondary text-muted-foreground text-[11px] leading-tight"
+                              title={item.convertedBookings?.map((b) => b.confirmationNumber ?? b.roomNumber).join(', ')}
+                            >
+                              {item.convertedBookings!.length} booking{item.convertedBookings!.length === 1 ? '' : 's'}
+                            </p>
+                          ) : null}
+                        </div>
+                      </td>
+                      <td className="col-company">
+                        {item.companyLedgerId || (item.company && item.company !== 'Direct/Walk in') ? (
+                          <StatusBadge
+                            status="COMPANY"
+                            label={item.companyLedger?.name ?? item.company ?? 'Company'}
+                            className="bl-source-badge text-xs px-2 py-0.5 h-6 font-normal"
+                          />
+                        ) : (
+                          <span className="text-muted-foreground text-xs">—</span>
+                        )}
+                      </td>
+                      <td className="col-discount text-right text-muted-foreground">—</td>
+                      <td className="col-vat text-muted-foreground">—</td>
+                      <td className="col-total font-medium">
+                        {item.totalAmount > 0 ? formatBdt(item.totalAmount) : '—'}
+                      </td>
+                      <td className="col-due text-right">
+                        {item.dueAmount > 0 ? (
+                          <span className="text-red-600 font-medium">{formatBdt(item.dueAmount)}</span>
+                        ) : (
+                          <span className="text-emerald-600">—</span>
+                        )}
+                      </td>
+                      <td className="col-actions">
+                        <div className="bl-actions">
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            className="h-7 w-7 shrink-0"
+                            title="View details"
+                            onClick={() => {
+                              setDetailsEntryId(item.id);
+                              setDetailsDialogOpen(true);
+                            }}
+                          >
+                            <Eye className="w-3 h-3" />
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            className="h-7 w-7 shrink-0 border-sky-500 text-sky-700 hover:bg-sky-50"
+                            title="Reservation entry confirmation"
+                            onClick={() =>
+                              window.open(`/reservation-entry/${item.id}`, '_blank', 'noopener,noreferrer')
+                            }
+                          >
+                            <FileText className="w-3 h-3" />
+                          </Button>
+                          {(item.unfulfilledRooms ?? item.totalRooms) > 0 ? (
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              className="h-7 w-7 shrink-0 border-violet-300 text-violet-700 hover:bg-violet-50"
+                              title="Convert to booking"
+                              onClick={() => {
+                                setConvertEntryId(item.id);
+                                setConvertDialogOpen(true);
+                              }}
+                            >
+                              <ArrowRightLeft className="w-3 h-3" />
+                            </Button>
+                          ) : null}
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 shrink-0 text-red-500 hover:text-red-600"
+                            title="Cancel reservation entry"
+                            disabled={cancelEntryMutation.isPending || (item.convertedBookings?.length ?? 0) > 0}
+                            onClick={() => {
+                              if (!window.confirm('Cancel this reservation entry and release blocked rooms?')) return;
+                              cancelEntryMutation.mutate(item.id);
+                            }}
+                          >
+                            <XCircle className="w-3 h-3" />
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                }
+
+                const booking = item as Booking;
+                return (
                 <tr key={booking.id} className="border-b border-border/60 hover:bg-muted/40">
                   <td className="col-guest">
                     <p className="bl-truncate font-medium" title={booking.customer?.name}>
                       {booking.customer?.name}
                     </p>
-                    <p className="bl-truncate bl-secondary text-muted-foreground" title={booking.customer?.phone}>
-                      {booking.customer?.phone}
+                    <p className="bl-truncate bl-secondary text-muted-foreground" title={booking.customer?.phone ?? undefined}>
+                      {booking.customer?.phone || '—'}
                     </p>
                   </td>
                   <td className="col-room">
@@ -510,6 +931,14 @@ export function BookingsPage() {
                       {booking.room?.type?.name}
                     </p>
                   </td>
+                  <td className="col-regno">
+                    <p
+                      className="bl-truncate font-medium font-mono text-xs"
+                      title={resolveBookingRegistrationNumber(booking) || undefined}
+                    >
+                      {resolveBookingRegistrationNumber(booking) || '—'}
+                    </p>
+                  </td>
                   <td className="col-checkin" title={formatListBookingCheckIn(booking, times)}>
                     <BookingDatetimeCell {...getListBookingCheckInParts(booking, times, true)} />
                   </td>
@@ -517,14 +946,16 @@ export function BookingsPage() {
                     <BookingDatetimeCell {...getListBookingCheckOutParts(booking, times, true)} />
                   </td>
                   <td className="col-booking">
-                    <StatusBadge
-                      status={
-                        booking.isInitialReservation && booking.status === 'RESERVED'
-                          ? 'RESERVED_ND'
-                          : booking.status
-                      }
-                      className="text-xs px-2 py-0.5 h-6 font-normal"
-                    />
+                    <div className="bl-booking-stack">
+                      <StatusBadge
+                        status={
+                          booking.isInitialReservation && booking.status === 'RESERVED'
+                            ? 'RESERVED_ND'
+                            : booking.status
+                        }
+                        className="text-xs px-2 py-0.5 h-6 font-normal max-w-full"
+                      />
+                    </div>
                   </td>
                   <td className="col-company">
                     <StatusBadge
@@ -534,20 +965,33 @@ export function BookingsPage() {
                       className="bl-source-badge text-xs px-2 py-0.5 h-6 font-normal"
                     />
                   </td>
-                  <td className="col-reserved">
-                    <p className="bl-truncate font-medium" title={booking.creator?.name || undefined}>
-                      {booking.creator?.name || '—'}
-                    </p>
+                  <td className="col-discount text-right">
+                    {(() => {
+                      const discount = formatBookingListDiscount(booking);
+                      if (discount.amount <= 0) {
+                        return <span className="text-muted-foreground">—</span>;
+                      }
+                      return (
+                        <>
+                          <p className="font-medium">{formatBdt(discount.amount)}</p>
+                          <p className="bl-secondary text-muted-foreground">{discount.label}</p>
+                        </>
+                      );
+                    })()}
                   </td>
                   <td className="col-vat">
-                    {(booking.vatAmount ?? 0) > 0 ? (
-                      <>
-                        <p className="font-medium">{formatBdt(booking.vatAmount ?? 0)}</p>
-                        <p className="bl-secondary text-muted-foreground">{booking.vatPercent ?? 15}%</p>
-                      </>
-                    ) : (
-                      <span className="text-muted-foreground">Off</span>
-                    )}
+                    {(() => {
+                      const vat = resolveBookingVatListDisplay(booking);
+                      return (
+                        <>
+                          <p className="font-medium">{formatBdt(vat.amount)}</p>
+                          <p className="bl-secondary text-muted-foreground">
+                            {vat.percent}%
+                            {vat.mode === 'included' ? ' incl.' : ''}
+                          </p>
+                        </>
+                      );
+                    })()}
                   </td>
                   <td className="col-total font-medium">
                     {formatBdt(booking.totalWithVat ?? booking.totalRoomCharge)}
@@ -580,8 +1024,10 @@ export function BookingsPage() {
                         <span
                           className="inline-flex"
                           title={
-                            booking.isInitialReservation
-                              ? 'Complete the initial reservation (NID and ID images) using Edit before check-in'
+                            !canBookingCheckIn(booking)
+                              ? booking.nidPhysicallyReceived
+                                ? 'Complete required guest details before check-in'
+                                : 'Complete the initial reservation (ID documents) using Edit before check-in'
                               : 'Check-in'
                           }
                         >
@@ -589,46 +1035,94 @@ export function BookingsPage() {
                             variant="outline"
                             size="icon"
                             className={`h-7 w-7 shrink-0 ${
-                              booking.isInitialReservation
+                              !canBookingCheckIn(booking)
                                 ? 'border-muted-foreground/30 text-muted-foreground'
                                 : 'border-emerald-600 text-emerald-700 hover:bg-emerald-50'
                             }`}
                             onClick={() => {
-                              if (booking.isInitialReservation) return;
-                              setCheckInBookingId(booking.id);
+                              if (!canBookingCheckIn(booking)) return;
                               setCheckInPayment('0');
                               setCheckInPaymentMethod('CASH');
-                              setCheckInDialogOpen(true);
+                              handleOpenCheckIn(booking.id);
                             }}
-                            disabled={checkInMutation.isPending || booking.isInitialReservation}
+                            disabled={checkInMutation.isPending || !canBookingCheckIn(booking)}
                           >
                             <LogIn className="w-3 h-3" />
                           </Button>
                         </span>
+                      )}
+                      {(booking.nidPhysicallyReceived === true || booking.isInitialReservation) &&
+                        (booking.status === 'RESERVED' || booking.status === 'CHECKED_IN') && (
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            className={`h-7 w-7 shrink-0 ${
+                              (booking.idDocumentCount ?? 0) > 0
+                                ? 'border-emerald-600 text-emerald-700 hover:bg-emerald-50'
+                                : 'border-sky-500 text-sky-700 hover:bg-sky-50'
+                            }`}
+                            title={
+                              (booking.idDocumentCount ?? 0) > 0
+                                ? 'ID documents uploaded — update'
+                                : 'Upload ID documents (required before checkout)'
+                            }
+                            onClick={() => {
+                              setIdUploadBookingId(booking.id);
+                              setIdUploadDialogOpen(true);
+                            }}
+                          >
+                            <IdCard className="w-3 h-3" />
+                          </Button>
                       )}
                       {booking.status === 'CHECKED_IN' && (
                         <>
                           <Button
                             variant="outline"
                             size="icon"
-                            className="h-7 w-7 shrink-0"
-                            title="Check-out"
-                            onClick={() => openCheckoutTab(booking.id)}
+                            className="h-7 w-7 shrink-0 border-orange-500 text-orange-700 hover:bg-orange-50"
+                            title="Add restaurant bill"
+                            onClick={() => {
+                              setRestaurantBillBookingId(booking.id);
+                              setRestaurantBillDialogOpen(true);
+                            }}
                           >
-                            <LogOut className="w-3 h-3" />
+                            <UtensilsCrossed className="w-3 h-3" />
                           </Button>
                           <Button
                             variant="outline"
                             size="icon"
-                            className="h-7 w-7 shrink-0 border-amber-500 text-amber-800 hover:bg-amber-50 dark:hover:bg-amber-950/30"
-                            title="Adjust stay"
+                            className="h-7 w-7 shrink-0 border-violet-500 text-violet-700 hover:bg-violet-50"
+                            title="Add payment"
                             onClick={() => {
-                              setAdjustStayBookingId(booking.id);
-                              setAdjustStayDialogOpen(true);
+                              setAddPaymentBookingId(booking.id);
+                              setAddPaymentDialogOpen(true);
                             }}
                           >
-                            <CalendarRange className="w-3 h-3" />
+                            <CreditCard className="w-3 h-3" />
                           </Button>
+                          <span
+                            className="inline-flex"
+                            title={
+                              !booking.isCorporateGuest &&
+                              (booking.idDocumentCount ?? 0) === 0
+                                ? 'Upload ID documents before checkout'
+                                : 'Check-out'
+                            }
+                          >
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              className="h-7 w-7 shrink-0"
+                              title="Check-out"
+                              onClick={() => openCheckoutTab(booking.id)}
+                              disabled={
+                                !booking.isCorporateGuest &&
+                                (booking.idDocumentCount ?? 0) === 0
+                              }
+                            >
+                              <LogOut className="w-3 h-3" />
+                            </Button>
+                          </span>
                         </>
                       )}
                       {booking.status === 'RESERVED' && (
@@ -652,7 +1146,7 @@ export function BookingsPage() {
                       >
                         <FileText className="w-3 h-3" />
                       </Button>
-                      {(booking.status === 'CHECKED_OUT' || booking.status === 'CHECKED_IN') && (
+                      {booking.status === 'CHECKED_OUT' && (
                         <Button
                           variant="outline"
                           size="icon"
@@ -667,10 +1161,13 @@ export function BookingsPage() {
                     </div>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
               {bookings.length === 0 && (
                 <tr>
-                  <td colSpan={11} className="p-8 text-center text-muted-foreground">No reservations found</td>
+                  <td colSpan={12} className="p-8 text-center text-muted-foreground">
+                    {isReservationEntryList ? 'No reservation entries found' : 'No reservations found'}
+                  </td>
                 </tr>
               )}
               </tbody>
@@ -772,12 +1269,18 @@ export function BookingsPage() {
                   <span className="text-muted-foreground">
                     VAT ({(() => {
                       const b = bookings.find(bk => bk.id === checkInBookingId);
-                      return b?.vatPercent ?? 15;
-                    })()}%)
+                      if (!b) return 15;
+                      return computeBookingDisplayVat(b).percent;
+                    })()}%
+                    {(() => {
+                      const b = bookings.find(bk => bk.id === checkInBookingId);
+                      if (b && computeBookingDisplayVat(b).mode === 'included') return ' incl.';
+                      return '';
+                    })()})
                   </span>
                   <span className="font-medium">{formatBdt((() => {
                     const b = bookings.find(bk => bk.id === checkInBookingId);
-                    return b?.vatAmount ?? 0;
+                    return b ? computeBookingDisplayVat(b).amount : 0;
                   })())}</span>
                 </div>
                 <div className="flex justify-between text-sm">
@@ -856,48 +1359,92 @@ export function BookingsPage() {
         </DialogContent>
       </Dialog>
 
-      <AdjustStayDialog
-        bookingId={adjustStayBookingId}
-        open={adjustStayDialogOpen}
+      <BookingIdUploadDialog
+        bookingId={idUploadBookingId}
+        open={idUploadDialogOpen}
         onOpenChange={(open) => {
-          setAdjustStayDialogOpen(open);
-          if (!open) setAdjustStayBookingId(null);
+          setIdUploadDialogOpen(open);
+          if (!open) setIdUploadBookingId(null);
+        }}
+      />
+
+      <BookingAddPaymentDialog
+        bookingId={addPaymentBookingId}
+        open={addPaymentDialogOpen}
+        onOpenChange={(open) => {
+          setAddPaymentDialogOpen(open);
+          if (!open) setAddPaymentBookingId(null);
+        }}
+      />
+
+      <BookingRestaurantBillDialog
+        bookingId={restaurantBillBookingId}
+        guestLabel={(() => {
+          const row = bookings.find((b) => b.id === restaurantBillBookingId);
+          return row && !isReservationEntryRow(row) ? row.customer.name : undefined;
+        })()}
+        roomNumber={(() => {
+          const row = bookings.find((b) => b.id === restaurantBillBookingId);
+          return row && !isReservationEntryRow(row) ? row.room.roomNumber : undefined;
+        })()}
+        open={restaurantBillDialogOpen}
+        onOpenChange={(open) => {
+          setRestaurantBillDialogOpen(open);
+          if (!open) setRestaurantBillBookingId(null);
+        }}
+      />
+
+      <ReservationEntryConvertDialog
+        entryId={convertEntryId}
+        open={convertDialogOpen}
+        onOpenChange={(open) => {
+          setConvertDialogOpen(open);
+          if (!open) setConvertEntryId(null);
+        }}
+      />
+
+      <ReservationEntryDetailsDialog
+        entryId={detailsEntryId}
+        open={detailsDialogOpen}
+        onOpenChange={(open) => {
+          setDetailsDialogOpen(open);
+          if (!open) setDetailsEntryId(null);
         }}
       />
 
       {/* Cancel reservation */}
       <Dialog open={cancelDialogOpen} onOpenChange={setCancelDialogOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
+        <DialogContent className="flex max-h-[90vh] max-w-md flex-col gap-0 overflow-hidden p-0 sm:max-w-md">
+          <DialogHeader className="shrink-0 border-b px-6 py-4">
             <DialogTitle className="flex items-center gap-2 text-red-600">
-              <XCircle className="h-5 w-5" />
+              <XCircle className="h-5 w-5 shrink-0" />
               Cancel reservation
             </DialogTitle>
           </DialogHeader>
-          <div className="space-y-4">
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-4">
             {cancelPreviewLoading ? (
               <Skeleton className="h-20 w-full" />
             ) : cancelPreview ? (
-              <Card className="bg-muted/50 border-border">
-                <CardContent className="p-3 space-y-1 text-sm">
-                  <div className="flex justify-between">
+              <Card className="gap-0 border-border bg-muted/50 py-0 shadow-none">
+                <CardContent className="space-y-1 p-3 text-sm">
+                  <div className="flex justify-between gap-3">
                     <span className="text-muted-foreground">Guest</span>
-                    <span className="font-medium">{cancelPreview.customerName}</span>
+                    <span className="text-right font-medium">{cancelPreview.customerName}</span>
                   </div>
-                  <div className="flex justify-between">
+                  <div className="flex justify-between gap-3">
                     <span className="text-muted-foreground">Room</span>
                     <span className="font-medium">{cancelPreview.roomNumber}</span>
                   </div>
                   {cancelPreview.bookedNights != null && (
                     <>
-                      <div className="flex justify-between">
+                      <div className="flex justify-between gap-3">
                         <span className="text-muted-foreground">Reserved nights</span>
                         <span className="font-medium">{cancelPreview.bookedNights} night(s)</span>
                       </div>
                       {cancelPreview.checkIn && cancelPreview.checkOut && (
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">Reservation dates</span>
-                          <span className="font-medium text-right text-xs">
+                        <div className="flex justify-between gap-3">
+                          <span className="shrink-0 text-muted-foreground">Reservation dates</span>
+                          <span className="text-right text-xs font-medium">
                             {formatCheckIn(cancelPreview.checkIn)} →{' '}
                             {formatCheckOut(cancelPreview.checkOut)}
                           </span>
@@ -905,7 +1452,7 @@ export function BookingsPage() {
                       )}
                     </>
                   )}
-                  <div className="flex justify-between">
+                  <div className="flex justify-between gap-3">
                     <span className="text-muted-foreground">Paid (refundable)</span>
                     <span className="font-medium text-emerald-700">
                       {formatBdt(cancelPreview.maxRefundable)}
@@ -923,112 +1470,118 @@ export function BookingsPage() {
                 onChange={(e) => setCancelReason(e.target.value)}
                 placeholder="Why is this reservation being cancelled?"
                 rows={2}
+                className="w-full resize-none"
               />
             </div>
 
-            <div className="flex items-center justify-between rounded-lg border border-border p-3">
-              <div>
-                <p className="text-sm font-medium text-foreground">Issue refund</p>
-                <p className="text-xs text-muted-foreground">
-                  Off by default — no refund unless you turn this on
-                </p>
+            <div className="overflow-hidden rounded-lg border border-border">
+              <div className="flex items-start justify-between gap-3 p-3">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-foreground">Issue refund</p>
+                  <p className="text-xs text-muted-foreground">
+                    Off by default — no refund unless you turn this on
+                  </p>
+                </div>
+                <Switch
+                  className="mt-0.5 shrink-0"
+                  checked={refundEnabled}
+                  onCheckedChange={(checked) => {
+                    setRefundEnabled(checked);
+                    if (checked && maxRefundable > 0) {
+                      setRefundAmount(String(maxRefundable));
+                    }
+                  }}
+                  disabled={maxRefundable <= 0}
+                />
               </div>
-              <Switch
-                checked={refundEnabled}
-                onCheckedChange={(checked) => {
-                  setRefundEnabled(checked);
-                  if (checked && maxRefundable > 0) {
-                    setRefundAmount(String(maxRefundable));
-                  }
-                }}
-                disabled={maxRefundable <= 0}
-              />
+
+              {refundEnabled && maxRefundable > 0 && (
+                <div className="space-y-3 border-t border-amber-200/60 bg-amber-50/40 p-3 dark:bg-amber-950/20">
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={refundMode === 'percent' ? 'default' : 'outline'}
+                      className={refundMode === 'percent' ? 'bg-amber-600 hover:bg-amber-700' : ''}
+                      onClick={() => setRefundMode('percent')}
+                    >
+                      By %
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={refundMode === 'amount' ? 'default' : 'outline'}
+                      className={refundMode === 'amount' ? 'bg-amber-600 hover:bg-amber-700' : ''}
+                      onClick={() => setRefundMode('amount')}
+                    >
+                      By amount
+                    </Button>
+                  </div>
+
+                  {refundMode === 'percent' ? (
+                    <div className="space-y-2">
+                      <Label htmlFor="refund-percent">Refund percentage</Label>
+                      <Input
+                        id="refund-percent"
+                        type="number"
+                        min={0}
+                        max={100}
+                        step={1}
+                        value={refundPercent}
+                        onChange={(e) => setRefundPercent(e.target.value)}
+                        className="w-full"
+                      />
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <Label htmlFor="refund-amount">Refund amount (BDT)</Label>
+                      <Input
+                        id="refund-amount"
+                        type="number"
+                        min={0}
+                        max={maxRefundable}
+                        step={0.01}
+                        value={refundAmount}
+                        onChange={(e) => setRefundAmount(e.target.value)}
+                        className="w-full"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Maximum: {formatBdt(maxRefundable)}
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="space-y-2">
+                    <Label>Refund method</Label>
+                    <Select value={refundMethod} onValueChange={setRefundMethod}>
+                      <SelectTrigger className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {PAYMENT_METHOD_OPTIONS_WITH_PAYMENT.map((opt) => (
+                          <SelectItem key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <p className="border-t border-amber-200/60 pt-2 text-sm font-semibold text-foreground">
+                    Refund total:{' '}
+                    <span className="text-amber-700">{formatBdt(computedRefundTotal)}</span>
+                  </p>
+                </div>
+              )}
+
+              {refundEnabled && maxRefundable <= 0 && (
+                <p className="border-t border-border px-3 pb-3 text-xs text-muted-foreground">
+                  No payments on this reservation — refund is not available.
+                </p>
+              )}
             </div>
-
-            {refundEnabled && maxRefundable > 0 && (
-              <div className="space-y-3 rounded-lg border border-amber-200/60 bg-amber-50/40 dark:bg-amber-950/20 p-3">
-                <div className="flex gap-2">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant={refundMode === 'percent' ? 'default' : 'outline'}
-                    className={refundMode === 'percent' ? 'bg-amber-600 hover:bg-amber-700' : ''}
-                    onClick={() => setRefundMode('percent')}
-                  >
-                    By %
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant={refundMode === 'amount' ? 'default' : 'outline'}
-                    className={refundMode === 'amount' ? 'bg-amber-600 hover:bg-amber-700' : ''}
-                    onClick={() => setRefundMode('amount')}
-                  >
-                    By amount
-                  </Button>
-                </div>
-
-                {refundMode === 'percent' ? (
-                  <div className="space-y-2">
-                    <Label htmlFor="refund-percent">Refund percentage</Label>
-                    <Input
-                      id="refund-percent"
-                      type="number"
-                      min={0}
-                      max={100}
-                      step={1}
-                      value={refundPercent}
-                      onChange={(e) => setRefundPercent(e.target.value)}
-                    />
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    <Label htmlFor="refund-amount">Refund amount (BDT)</Label>
-                    <Input
-                      id="refund-amount"
-                      type="number"
-                      min={0}
-                      max={maxRefundable}
-                      step={0.01}
-                      value={refundAmount}
-                      onChange={(e) => setRefundAmount(e.target.value)}
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      Maximum: {formatBdt(maxRefundable)}
-                    </p>
-                  </div>
-                )}
-
-                <div className="space-y-2">
-                  <Label>Refund method</Label>
-                  <Select value={refundMethod} onValueChange={setRefundMethod}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {PAYMENT_METHOD_OPTIONS_WITH_PAYMENT.map((opt) => (
-                        <SelectItem key={opt.value} value={opt.value}>
-                          {opt.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <p className="text-sm font-semibold text-foreground border-t border-border pt-2">
-                  Refund total:{' '}
-                  <span className="text-amber-700">{formatBdt(computedRefundTotal)}</span>
-                </p>
-              </div>
-            )}
-
-            {refundEnabled && maxRefundable <= 0 && (
-              <p className="text-xs text-muted-foreground">
-                No payments on this reservation — refund is not available.
-              </p>
-            )}
           </div>
-          <DialogFooter>
+          <DialogFooter className="shrink-0 border-t px-6 py-4 sm:justify-end">
             <Button variant="outline" onClick={() => setCancelDialogOpen(false)}>
               Keep reservation
             </Button>

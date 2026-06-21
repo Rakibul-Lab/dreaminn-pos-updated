@@ -22,6 +22,36 @@ export function computeOrderDue(totalAmount: number, payments: OrderPaymentRow[]
   }
 }
 
+/** Remaining guest-folio balance after restaurant counter payments (pro-rated net/VAT). */
+export function computeOrderFolioBalance(order: {
+  subtotal: number
+  discount: number
+  vatAmount: number
+  totalAmount: number
+  payments?: OrderPaymentRow[]
+}): {
+  paidAmount: number
+  folioDue: number
+  folioNet: number
+  folioVat: number
+} {
+  const { paidAmount, dueAmount: folioDue } = computeOrderDue(
+    order.totalAmount,
+    order.payments ?? []
+  )
+  if (folioDue <= 0.009 || order.totalAmount <= 0) {
+    return { paidAmount, folioDue: 0, folioNet: 0, folioVat: 0 }
+  }
+  const ratio = folioDue / order.totalAmount
+  const baseNet = Math.max(0, order.subtotal - order.discount)
+  return {
+    paidAmount,
+    folioDue,
+    folioNet: baseNet * ratio,
+    folioVat: order.vatAmount * ratio,
+  }
+}
+
 /** Room-service on a guest folio — hotel collects from guest, then pays restaurant. */
 export function isHotelFolioRestaurantOrder(order: {
   orderType: string

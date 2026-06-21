@@ -27,6 +27,20 @@ export function isValidPhone(phone: string): boolean {
   return normalized.length >= 10 && normalized.length <= 11
 }
 
+/** User-facing phone validation for forms (Bangladesh mobile: 11 digits). */
+export function getPhoneValidationMessage(phone: string, label = 'Phone'): string | null {
+  const trimmed = phone.trim()
+  if (!trimmed) return `${label} number is required`
+  if (!isValidPhone(trimmed)) {
+    return `${label} number must be 11 digits (e.g. 01XXXXXXXXX)`
+  }
+  const normalized = normalizePhone(trimmed)
+  if (normalized.length !== 11) {
+    return `${label} number must be 11 digits (e.g. 01XXXXXXXXX)`
+  }
+  return null
+}
+
 /** True when both numbers refer to the same mobile (ignores +880, spaces, dashes). */
 export function phonesMatch(a: string, b: string): boolean {
   const na = normalizePhone(a)

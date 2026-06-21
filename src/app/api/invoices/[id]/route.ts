@@ -2,6 +2,11 @@ import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { requireRole } from '@/lib/auth';
 import { successResponse, errorResponse, notFoundResponse, logActivity } from '@/lib/api-utils';
+import {
+  resolveInvoiceHotelServicePercent,
+  resolveInvoiceHotelVatPercent,
+} from '@/lib/invoice-display';
+import { collectInvoiceNotes } from '@/lib/invoice-notes';
 import { InvoiceStatus } from '@prisma/client';
 
 // GET /api/invoices/[id] - Get invoice detail
@@ -10,7 +15,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const authResult = requireRole(request, 'ADMIN', 'HOTEL_STAFF', 'HOTEL_FD');
+    const authResult = await requireRole(request, 'ADMIN', 'HOTEL_STAFF', 'HOTEL_FD');
     if (authResult instanceof Response) return authResult;
 
     const { id } = await params;
@@ -23,12 +28,20 @@ export async function GET(
             id: true,
             checkIn: true,
             checkOut: true,
+            actualCheckIn: true,
+            actualCheckOut: true,
             adults: true,
             children: true,
             status: true,
             company: true,
+            isCorporateGuest: true,
+            discountEnabled: true,
+            discountType: true,
+            discountValue: true,
             vatApplied: true,
             vatPercent: true,
+            serviceChargePercent: true,
+            notes: true,
             customer: true,
             companyLedger: {
               select: {
@@ -50,12 +63,28 @@ export async function GET(
                 address: true,
                 idType: true,
                 idNumber: true,
+                notes: true,
               },
             },
             creator: { select: { id: true, name: true } },
+            companions: {
+              orderBy: { sortOrder: 'asc' },
+              select: {
+                name: true,
+                companionType: true,
+                nationality: true,
+                idType: true,
+                idNumber: true,
+                phone: true,
+                visaExpiryDate: true,
+              },
+            },
             room: {
-              include: {
-                type: { select: { name: true, basePrice: true } },
+              select: {
+                id: true,
+                roomNumber: true,
+                totalPrice: true,
+                type: { select: { name: true } },
               },
             },
             charges: true,
@@ -69,6 +98,13 @@ export async function GET(
                 vatPercent: true,
                 vatAmount: true,
                 totalAmount: true,
+                createdAt: true,
+              },
+              orderBy: { createdAt: 'asc' },
+            },
+            payments: {
+              select: {
+                notes: true,
                 createdAt: true,
               },
               orderBy: { createdAt: 'asc' },
@@ -91,14 +127,20 @@ export async function GET(
       return notFoundResponse('Invoice');
     }
 
-    const declaredVatPercent =
-      invoice.booking.vatApplied === false
-        ? 0
-        : Math.max(0, invoice.booking.vatPercent ?? 15);
+    const declaredVatPercent = resolveInvoiceHotelVatPercent(invoice.booking);
+    const declaredServiceChargePercent = resolveInvoiceHotelServicePercent(invoice.booking);
+    const invoiceNotes = collectInvoiceNotes({
+      bookingNotes: invoice.booking.notes,
+      customerNotes: invoice.booking.customer.notes,
+      companyLedgerGuestNotes: invoice.booking.companyLedgerGuest?.notes,
+      paymentNotes: invoice.booking.payments.map((payment) => payment.notes),
+    });
 
     return successResponse({
       ...invoice,
       declaredVatPercent,
+      declaredServiceChargePercent,
+      invoiceNotes,
     });
   } catch (error) {
     console.error('Error fetching invoice:', error);
@@ -112,7 +154,7 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const authResult = requireRole(request, 'ADMIN', 'HOTEL_STAFF', 'HOTEL_FD');
+    const authResult = await requireRole(request, 'ADMIN', 'HOTEL_STAFF', 'HOTEL_FD');
     if (authResult instanceof Response) return authResult;
 
     const user = authResult;

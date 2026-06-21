@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api-client';
+import { formatInvoiceNumberDisplay } from '@/lib/invoice-number';
 import { format } from 'date-fns';
 import { Building2, FileText, History, Loader2, Receipt } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -52,6 +53,7 @@ type GuestHistoryStay = {
   booking: {
     id: string;
     confirmationNumber?: string | null;
+    registrationNumber?: string | null;
     status: string;
     checkIn: string;
     checkOut: string;
@@ -249,7 +251,9 @@ export function CompanyLedgerGuestHistoryView({
           </p>
           <p>
             <span className="text-muted-foreground">Registration no.:</span>{' '}
-            {guest.registrationNumber || '—'}
+            {guest.registrationNumber ||
+              stays.find((s) => s.booking.registrationNumber)?.booking.registrationNumber ||
+              '—'}
           </p>
           <p>
             <span className="text-muted-foreground">ID:</span>{' '}
@@ -310,6 +314,11 @@ export function CompanyLedgerGuestHistoryView({
                         </td>
                         <td className="py-3 px-4">
                           <StatusBadge status={b.status} className="text-xs" />
+                          {b.registrationNumber ? (
+                            <p className="text-xs font-mono text-muted-foreground mt-1">
+                              Reg. {b.registrationNumber}
+                            </p>
+                          ) : null}
                         </td>
                         <td className="py-3 px-4 text-right font-medium">
                           {formatBdt(bill?.totalAmount ?? b.totalWithVat)}
@@ -322,7 +331,7 @@ export function CompanyLedgerGuestHistoryView({
                         <td className="py-3 px-4">
                           {invoice ? (
                             <div className="space-y-1">
-                              <p className="font-medium">{invoice.invoiceNumber}</p>
+                              <p className="font-medium">{formatInvoiceNumberDisplay(invoice.invoiceNumber)}</p>
                               <p className="text-xs text-muted-foreground">
                                 {invoice.issuedAt
                                   ? format(new Date(invoice.issuedAt), 'dd/MM/yyyy')

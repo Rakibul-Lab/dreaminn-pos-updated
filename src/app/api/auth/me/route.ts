@@ -17,7 +17,7 @@ const profileSelect = {
 } as const;
 
 export async function GET(request: NextRequest) {
-  const authResult = requireAuth(request);
+  const authResult = await requireAuth(request);
   if (authResult instanceof NextResponse) return authResult;
 
   try {
@@ -43,7 +43,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
-  const authResult = requireAuth(request);
+  const authResult = await requireAuth(request);
   if (authResult instanceof NextResponse) return authResult;
 
   try {

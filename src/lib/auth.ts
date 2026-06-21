@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { RoleType } from '@prisma/client';
+import { db } from '@/lib/db';
 import { isIdleSessionExpired } from '@/lib/session';
+import { parseSessionToken } from '@/lib/session-token';
 import {
   canAccessAdmin as canAccessAdminRole,
   canAccessHotel as canAccessHotelRole,
@@ -10,11 +12,13 @@ import {
 
 export const HOTEL_ACCESS_ROLES: RoleType[] = ['ADMIN', 'HOTEL_STAFF', 'HOTEL_FD'];
 export const HOTEL_MANAGER_ROLES: RoleType[] = ['ADMIN', 'HOTEL_STAFF'];
+export const INVENTORY_ACCESS_ROLES: RoleType[] = ['ADMIN', 'HOUSEKEEPER'];
+/** Create/update cleaning tasks (Rooms menu + Housekeeping) */
+export const HOUSEKEEPING_TASK_ROLES: RoleType[] = [...HOTEL_ACCESS_ROLES, 'HOUSEKEEPER'];
 
 export { canManageRoomInventory };
 
-// Simple session-based auth using headers
-// In production, use proper JWT/NextAuth with secure tokens
+// Session auth: client sends x-user-* + x-token from login; server validates token shape and user record.
 
 export interface AuthUser {
   id: string;
@@ -23,7 +27,7 @@ export interface AuthUser {
   role: RoleType;
 }
 
-export function getAuthUser(request: NextRequest): AuthUser | null {
+function readHeaderUser(request: NextRequest): Omit<AuthUser, 'name'> & { name: string } | null {
   const userId = request.headers.get('x-user-id');
   const userEmail = request.headers.get('x-user-email');
   const userName = request.headers.get('x-user-name');
@@ -55,19 +59,45 @@ export function validateSession(request: NextRequest): NextResponse | null {
   return null;
 }
 
-export function requireAuth(request: NextRequest): AuthUser | NextResponse {
+export async function requireAuth(request: NextRequest): Promise<AuthUser | NextResponse> {
   const sessionError = validateSession(request);
   if (sessionError) return sessionError;
 
-  const user = getAuthUser(request);
-  if (!user) {
+  const headerUser = readHeaderUser(request);
+  const token = request.headers.get('x-token');
+  const parsedToken = parseSessionToken(token);
+
+  if (!headerUser || !parsedToken || parsedToken.userId !== headerUser.id) {
     return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
   }
-  return user;
+
+  const dbUser = await db.user.findUnique({
+    where: { id: headerUser.id },
+    select: { id: true, email: true, name: true, role: true, active: true },
+  });
+
+  if (
+    !dbUser ||
+    !dbUser.active ||
+    dbUser.email !== headerUser.email ||
+    dbUser.role !== headerUser.role
+  ) {
+    return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
+  }
+
+  return {
+    id: dbUser.id,
+    email: dbUser.email,
+    name: dbUser.name,
+    role: dbUser.role,
+  };
 }
 
-export function requireRole(request: NextRequest, ...roles: RoleType[]): AuthUser | NextResponse {
-  const result = requireAuth(request);
+export async function requireRole(
+  request: NextRequest,
+  ...roles: RoleType[]
+): Promise<AuthUser | NextResponse> {
+  const result = await requireAuth(request);
   if (result instanceof NextResponse) return result;
 
   if (!roles.includes(result.role)) {
@@ -77,12 +107,16 @@ export function requireRole(request: NextRequest, ...roles: RoleType[]): AuthUse
   return result;
 }
 
-export function requireHotelAccess(request: NextRequest): AuthUser | NextResponse {
+export async function requireHotelAccess(request: NextRequest): Promise<AuthUser | NextResponse> {
   return requireRole(request, ...HOTEL_ACCESS_ROLES);
 }
 
-export function requireHotelManager(request: NextRequest): AuthUser | NextResponse {
+export async function requireHotelManager(request: NextRequest): Promise<AuthUser | NextResponse> {
   return requireRole(request, ...HOTEL_MANAGER_ROLES);
+}
+
+export async function requireInventoryAccess(request: NextRequest): Promise<AuthUser | NextResponse> {
+  return requireRole(request, ...INVENTORY_ACCESS_ROLES);
 }
 
 // Permission checks

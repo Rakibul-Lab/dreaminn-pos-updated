@@ -1,11 +1,14 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
-import { requireRole } from '@/lib/auth';
+import { requireAuth, requireRole } from '@/lib/auth';
 import { successResponse, errorResponse, notFoundResponse, logActivity } from '@/lib/api-utils';
 
 // GET /api/menu-categories - List all categories with item counts, sorted by sortOrder
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
+    const authResult = await requireAuth(request);
+    if (authResult instanceof Response) return authResult;
+
     const categories = await db.menuCategory.findMany({
       orderBy: { sortOrder: 'asc' },
       include: {
@@ -30,7 +33,7 @@ export async function GET() {
 // POST /api/menu-categories - Create category (ADMIN and RESTAURANT_STAFF only)
 export async function POST(request: NextRequest) {
   try {
-    const authResult = requireRole(request, 'ADMIN');
+    const authResult = await requireRole(request, 'ADMIN');
     if (authResult instanceof Response) return authResult;
 
     const body = await request.json();
@@ -69,7 +72,7 @@ export async function POST(request: NextRequest) {
 // PUT /api/menu-categories - Update category (ADMIN and RESTAURANT_STAFF only)
 export async function PUT(request: NextRequest) {
   try {
-    const authResult = requireRole(request, 'ADMIN');
+    const authResult = await requireRole(request, 'ADMIN');
     if (authResult instanceof Response) return authResult;
 
     const body = await request.json();

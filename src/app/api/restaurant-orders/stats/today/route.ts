@@ -2,27 +2,25 @@ import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { requireAuth, canAccessRestaurant } from '@/lib/auth';
 import { successResponse, errorResponse } from '@/lib/api-utils';
+import { readCurrentBusinessDateString, buildBusinessDateWhere } from '@/lib/business-date';
 
 const TRACKED_STATUSES = ['PENDING', 'COOKING', 'READY', 'DELIVERED'] as const;
 
 export async function GET(request: NextRequest) {
   try {
-    const authResult = requireAuth(request);
+    const authResult = await requireAuth(request);
     if (authResult instanceof Response) return authResult;
 
     if (!canAccessRestaurant(authResult.role)) {
       return errorResponse('You do not have permission to view order stats', 403);
     }
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
+    const businessDate = await readCurrentBusinessDateString();
 
     const groups = await db.restaurantOrder.groupBy({
       by: ['status'],
       where: {
-        createdAt: { gte: today, lt: tomorrow },
+        ...buildBusinessDateWhere(businessDate),
         status: { in: [...TRACKED_STATUSES] },
       },
       _count: { status: true },
@@ -42,7 +40,8 @@ export async function GET(request: NextRequest) {
     }
 
     return successResponse({
-      date: today.toISOString().slice(0, 10),
+      date: businessDate,
+      businessDate,
       counts,
     });
   } catch (error) {

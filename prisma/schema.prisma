@@ -26,6 +26,9 @@ model User {
   restaurantOrders  RestaurantOrder[]
   hotelDeposits     HotelDeposit[]
   hotelClearedBills CompanyLedgerBill[] @relation("HotelClearedBills")
+  dayCloses         DayClose[]
+  hotelBeverageSales HotelBeverageSale[]
+  reservationEntries ReservationEntry[]
 
   @@map("users")
 }
@@ -34,28 +37,31 @@ model RoomType {
   id          String   @id @default(cuid())
   name        String   @unique
   description String?
-  basePrice   Float
   capacity    Int      @default(2)
-  hourlyRate  Float?
   amenities   String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   rooms       Room[]
+  reservationEntryLines ReservationEntryLine[]
 
   @@map("room_types")
 }
 
 model Room {
-  id               String             @id @default(cuid())
-  roomNumber       String             @unique
-  floor            Int                @default(1)
-  status           RoomStatus         @default(AVAILABLE)
-  typeId           String
-  createdAt        DateTime           @default(now())
-  updatedAt        DateTime           @updatedAt
+  id                   String             @id @default(cuid())
+  roomNumber           String             @unique
+  floor                Int                @default(1)
+  status               RoomStatus         @default(AVAILABLE)
+  typeId               String
+  totalPrice           Float              @default(0) @map("total_price")
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
   bookings         Booking[]
   housekeeping     HousekeepingTask[]
   restaurantOrders RestaurantOrder[]
+  hotelBeverageSales HotelBeverageSale[]
+  reservationEntryLines ReservationEntryLine[]
+  reservationEntryLineBookings ReservationEntryLineBooking[]
   type             RoomType           @relation(fields: [typeId], references: [id])
 
   @@index([typeId], map: "rooms_typeId_fkey")
@@ -81,6 +87,7 @@ model CompanyLedger {
   guests        CompanyLedgerGuest[]
   bookings      Booking[]
   bills         CompanyLedgerBill[]
+  reservationEntries ReservationEntry[]
 
   @@map("company_ledgers")
 }
@@ -113,6 +120,7 @@ model CompanyLedgerBill {
   billType          CompanyLedgerBillType @default(BOOKING) @map("bill_type")
   settlementStage   LedgerSettlementStage @default(OPEN) @map("settlement_stage")
   bookingId         String?               @unique @map("booking_id")
+  reservationEntryId String?              @unique @map("reservation_entry_id")
   restaurantOrderId String?               @unique @map("restaurant_order_id")
   invoiceId         String?               @map("invoice_id")
   guestName         String                @map("guest_name")
@@ -128,6 +136,7 @@ model CompanyLedgerBill {
   notes             String?
   companyLedger     CompanyLedger         @relation(fields: [companyLedgerId], references: [id], onDelete: Cascade)
   booking           Booking?              @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  reservationEntry  ReservationEntry?     @relation(fields: [reservationEntryId], references: [id], onDelete: Cascade)
   restaurantOrder   RestaurantOrder?      @relation(fields: [restaurantOrderId], references: [id], onDelete: Cascade)
   hotelClearer      User?                 @relation("HotelClearedBills", fields: [hotelClearedBy], references: [id])
 
@@ -141,13 +150,14 @@ model Customer {
   name      String
   company   String?
   email     String?
-  phone     String
+  phone     String?
   address   String?
   idType       String?
   idNumber             String?
   visaExpiryDate       String? @map("visa_expiry_date")
   registrationNumber   String? @map("registration_number")
   nationality          String?
+  designation          String?
   dateOfBirth  String?
   idDocPath    String?
   notes        String?
@@ -160,11 +170,13 @@ model Customer {
 
 model Booking {
   id                 String            @id @default(cuid())
-  confirmationNumber String?           @unique @map("confirmation_number")
+  confirmationNumber String?           @map("confirmation_number")
+  registrationNumber String?           @map("registration_number")
   customerId       String
   roomId           String
   status               BookingStatus     @default(RESERVED)
   isInitialReservation Boolean           @default(false) @map("is_initial_reservation")
+  isCorporateGuest     Boolean           @default(false) @map("is_corporate_guest")
   checkIn              DateTime
   checkOut         DateTime
   actualCheckIn    DateTime?
@@ -177,6 +189,7 @@ model Booking {
   dueAmount        Float             @default(0)
   vatApplied       Boolean           @default(true) @map("vat_applied")
   vatPercent       Float             @default(15) @map("vat_percent")
+  serviceChargePercent Float?        @default(10) @map("service_charge_percent")
   company          String?
   companyLedgerId      String?           @map("company_ledger_id")
   companyLedgerGuestId String?           @map("company_ledger_guest_id")
@@ -185,6 +198,8 @@ model Booking {
   discountType     String?           @map("discount_type")
   discountValue    Float             @default(0) @map("discount_value")
   billTransferredToBookingId String? @map("bill_transferred_to_booking_id")
+  sourceReservationEntryId   String? @map("source_reservation_entry_id")
+  nidPhysicallyReceived Boolean           @default(true) @map("nid_physically_received")
   notes            String?
   createdBy        String
   createdAt        DateTime          @default(now())
@@ -195,16 +210,91 @@ model Booking {
   companyLedger        CompanyLedger?      @relation(fields: [companyLedgerId], references: [id], onDelete: SetNull)
   companyLedgerGuest   CompanyLedgerGuest? @relation(fields: [companyLedgerGuestId], references: [id], onDelete: SetNull)
   companyLedgerBill    CompanyLedgerBill?
+  sourceReservationEntry ReservationEntry? @relation("EntrySourceBookings", fields: [sourceReservationEntryId], references: [id], onDelete: SetNull)
+  reservationEntryLineBooking ReservationEntryLineBooking?
   invoices         Invoice[]
   payments         Payment[]
   restaurantOrders RestaurantOrder[]
+  hotelBeverageSales HotelBeverageSale[]
   charges          RoomCharge[]
   idDocuments      BookingIdDocument[]
+  companions       BookingCompanion[]
 
   @@index([createdBy], map: "bookings_createdBy_fkey")
   @@index([customerId], map: "bookings_customerId_fkey")
   @@index([roomId], map: "bookings_roomId_fkey")
+  @@index([registrationNumber], map: "bookings_registration_number_idx")
+  @@index([sourceReservationEntryId], map: "bookings_source_reservation_entry_id_fkey")
   @@map("bookings")
+}
+
+model ReservationEntry {
+  id                String                 @id @default(cuid())
+  checkIn           DateTime               @map("check_in")
+  checkOut          DateTime               @map("check_out")
+  guestName         String?                @map("guest_name")
+  guestPhone        String?                @map("guest_phone")
+  guestEmail        String?                @map("guest_email")
+  guestAddress      String?                @map("guest_address")
+  company           String?
+  companyLedgerId   String?                @map("company_ledger_id")
+  totalAmount       Float                  @default(0) @map("total_amount")
+  advancePayment    Float                  @default(0) @map("advance_payment")
+  dueAmount         Float                  @default(0) @map("due_amount")
+  discountEnabled   Boolean                @default(false) @map("discount_enabled")
+  discountType      String?                @map("discount_type")
+  discountValue     Float                  @default(0) @map("discount_value")
+  notes               String?
+  registrationNumber  String?                @unique @map("registration_number")
+  confirmationNumber  String?                @unique @map("confirmation_number")
+  status              ReservationEntryStatus @default(ACTIVE)
+  fulfilledAt         DateTime?              @map("fulfilled_at")
+  createdBy           String                 @map("created_by")
+  createdAt         DateTime               @default(now()) @map("created_at")
+  updatedAt         DateTime               @updatedAt @map("updated_at")
+  creator           User                   @relation(fields: [createdBy], references: [id])
+  companyLedger     CompanyLedger?         @relation(fields: [companyLedgerId], references: [id], onDelete: SetNull)
+  lines             ReservationEntryLine[]
+  payments          Payment[]
+  companyLedgerBill CompanyLedgerBill?
+  sourceBookings    Booking[]              @relation("EntrySourceBookings")
+
+  @@index([createdBy], map: "reservation_entries_created_by_fkey")
+  @@index([status], map: "reservation_entries_status_idx")
+  @@index([companyLedgerId], map: "reservation_entries_company_ledger_id_fkey")
+  @@map("reservation_entries")
+}
+
+model ReservationEntryLine {
+  id                 String           @id @default(cuid())
+  reservationEntryId String           @map("reservation_entry_id")
+  roomTypeId         String           @map("room_type_id")
+  roomId             String?          @map("room_id")
+  quantity           Int              @default(1)
+  reservationEntry   ReservationEntry @relation(fields: [reservationEntryId], references: [id], onDelete: Cascade)
+  roomType           RoomType         @relation(fields: [roomTypeId], references: [id])
+  room               Room?            @relation(fields: [roomId], references: [id], onDelete: SetNull)
+  lineBookings       ReservationEntryLineBooking[]
+
+  @@index([reservationEntryId], map: "reservation_entry_lines_reservation_entry_id_fkey")
+  @@index([roomTypeId], map: "reservation_entry_lines_room_type_id_fkey")
+  @@index([roomId], map: "reservation_entry_lines_room_id_fkey")
+  @@map("reservation_entry_lines")
+}
+
+model ReservationEntryLineBooking {
+  id                     String               @id @default(cuid())
+  reservationEntryLineId String               @map("reservation_entry_line_id")
+  bookingId              String               @unique @map("booking_id")
+  roomId                 String               @map("room_id")
+  createdAt              DateTime             @default(now()) @map("created_at")
+  line                   ReservationEntryLine @relation(fields: [reservationEntryLineId], references: [id], onDelete: Cascade)
+  booking                Booking              @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  room                   Room                 @relation(fields: [roomId], references: [id])
+
+  @@index([reservationEntryLineId], map: "reservation_entry_line_bookings_line_id_fkey")
+  @@index([roomId], map: "reservation_entry_line_bookings_room_id_fkey")
+  @@map("reservation_entry_line_bookings")
 }
 
 model BookingIdDocument {
@@ -219,18 +309,45 @@ model BookingIdDocument {
   @@map("booking_id_documents")
 }
 
+model BookingCompanion {
+  id                 String         @id @default(cuid())
+  bookingId          String         @map("booking_id")
+  sortOrder          Int            @default(0) @map("sort_order")
+  companionType      CompanionType  @default(ADULT) @map("companion_type")
+  name               String
+  company            String?
+  designation        String?
+  phone              String?
+  nationality        String?
+  idType             String?        @map("id_type")
+  idNumber           String?        @map("id_number")
+  visaExpiryDate     String?        @map("visa_expiry_date")
+  registrationNumber String?        @map("registration_number")
+  email              String?
+  address            String?
+  createdAt          DateTime       @default(now()) @map("created_at")
+  updatedAt          DateTime       @updatedAt @map("updated_at")
+  booking            Booking        @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@index([bookingId], map: "booking_companions_booking_id_fkey")
+  @@map("booking_companions")
+}
+
 model RoomCharge {
-  id          String     @id @default(cuid())
-  bookingId   String
-  chargeType  ChargeType @default(ROOM_RATE)
-  description String
-  amount      Float
-  quantity    Int        @default(1)
-  chargeDate  DateTime   @default(now())
-  createdAt   DateTime   @default(now())
-  booking     Booking    @relation(fields: [bookingId], references: [id])
+  id                  String             @id @default(cuid())
+  bookingId           String
+  chargeType          ChargeType         @default(ROOM_RATE)
+  description         String
+  amount              Float
+  quantity            Int                @default(1)
+  chargeDate          DateTime           @default(now())
+  hotelBeverageSaleId String?            @map("hotel_beverage_sale_id")
+  createdAt           DateTime           @default(now())
+  booking             Booking            @relation(fields: [bookingId], references: [id])
+  hotelBeverageSale   HotelBeverageSale? @relation(fields: [hotelBeverageSaleId], references: [id], onDelete: SetNull)
 
   @@index([bookingId], map: "room_charges_bookingId_fkey")
+  @@index([hotelBeverageSaleId], map: "room_charges_hotel_beverage_sale_id_fkey")
   @@map("room_charges")
 }
 
@@ -261,6 +378,7 @@ model MenuItem {
   updatedAt       DateTime     @updatedAt
   category        MenuCategory @relation(fields: [categoryId], references: [id])
   orderItems      OrderItem[]
+  beverageSaleItems HotelBeverageSaleItem[]
 
   @@index([categoryId], map: "menu_items_categoryId_fkey")
   @@map("menu_items")
@@ -311,6 +429,7 @@ model RestaurantOrder {
   notes         String?
   waiterId      String?          @map("waiter_id")
   createdBy     String
+  businessDate  String?          @map("business_date")
   createdAt     DateTime         @default(now())
   updatedAt     DateTime         @updatedAt
   items         OrderItem[]
@@ -352,20 +471,24 @@ model Payment {
   method           PaymentMethod               @default(CASH)
   paymentType      PaymentType
   bookingId        String?
+  reservationEntryId String?               @map("reservation_entry_id")
   orderId          String?
   invoiceId        String?
   reference        String?
   accountLastFour  String?                     @map("account_last_four")
   notes            String?
   settlementSource RestaurantSettlementSource? @map("settlement_source")
+  businessDate     String?                     @map("business_date")
   receivedBy       String
   createdAt        DateTime                    @default(now())
   booking     Booking?         @relation(fields: [bookingId], references: [id])
+  reservationEntry ReservationEntry? @relation(fields: [reservationEntryId], references: [id])
   invoice     Invoice?         @relation(fields: [invoiceId], references: [id])
   order       RestaurantOrder? @relation(fields: [orderId], references: [id])
   receiver    User             @relation(fields: [receivedBy], references: [id])
 
   @@index([bookingId], map: "payments_bookingId_fkey")
+  @@index([reservationEntryId], map: "payments_reservation_entry_id_fkey")
   @@index([invoiceId], map: "payments_invoiceId_fkey")
   @@index([orderId], map: "payments_orderId_fkey")
   @@index([receivedBy], map: "payments_receivedBy_fkey")
@@ -380,6 +503,7 @@ model HotelDeposit {
   accountLastFour String?       @map("account_last_four")
   reference       String?
   notes           String?
+  businessDate    String?       @map("business_date")
   depositedBy     String        @map("deposited_by")
   depositedAt     DateTime      @default(now()) @map("deposited_at")
   createdAt       DateTime      @default(now())
@@ -405,6 +529,7 @@ model Invoice {
   paidAmount    Float         @default(0)
   dueAmount     Float         @default(0)
   status        InvoiceStatus @default(DRAFT)
+  businessDate  String?       @map("business_date")
   issuedAt      DateTime?
   paidAt        DateTime?
   createdAt     DateTime      @default(now())
@@ -532,11 +657,76 @@ model Setting {
   @@map("settings")
 }
 
+model DayClose {
+  id           String   @id @default(cuid())
+  businessDate String   @map("business_date")
+  openedAt     DateTime @map("opened_at")
+  closedAt     DateTime @map("closed_at")
+  closedBy     String   @map("closed_by")
+  snapshot     Json
+  notes        String?
+  createdAt    DateTime @default(now()) @map("created_at")
+  closer       User     @relation(fields: [closedBy], references: [id])
+
+  @@unique([businessDate])
+  @@index([closedBy], map: "day_closes_closed_by_fkey")
+  @@index([closedAt], map: "day_closes_closed_at_idx")
+  @@map("day_closes")
+}
+
+enum HotelBeverageSaleType {
+  WALK_IN
+  ROOM
+}
+
+model HotelBeverageSale {
+  id            String                  @id @default(cuid())
+  saleNumber    String                  @unique @map("sale_number")
+  saleType      HotelBeverageSaleType     @map("sale_type")
+  bookingId     String?                 @map("booking_id")
+  roomId        String?                 @map("room_id")
+  customerName  String?                 @map("customer_name")
+  customerPhone String?                 @map("customer_phone")
+  subtotal      Float                   @default(0)
+  totalAmount   Float                   @default(0) @map("total_amount")
+  paymentMethod PaymentMethod?          @map("payment_method")
+  notes         String?
+  createdBy     String?                 @map("created_by")
+  createdAt     DateTime                @default(now()) @map("created_at")
+  booking       Booking?                @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+  room          Room?                   @relation(fields: [roomId], references: [id], onDelete: SetNull)
+  creator       User?                   @relation(fields: [createdBy], references: [id], onDelete: SetNull)
+  items         HotelBeverageSaleItem[]
+  roomCharges   RoomCharge[]
+
+  @@index([bookingId], map: "hotel_beverage_sales_booking_id_fkey")
+  @@index([roomId], map: "hotel_beverage_sales_room_id_fkey")
+  @@index([createdBy], map: "hotel_beverage_sales_created_by_fkey")
+  @@map("hotel_beverage_sales")
+}
+
+model HotelBeverageSaleItem {
+  id         String            @id @default(cuid())
+  saleId     String            @map("sale_id")
+  menuItemId String?           @map("menu_item_id")
+  itemName   String            @map("item_name")
+  quantity   Int               @default(1)
+  unitPrice  Float             @map("unit_price")
+  lineTotal  Float             @map("line_total")
+  sale       HotelBeverageSale @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  menuItem   MenuItem?         @relation(fields: [menuItemId], references: [id], onDelete: SetNull)
+
+  @@index([saleId], map: "hotel_beverage_sale_items_sale_id_fkey")
+  @@index([menuItemId], map: "hotel_beverage_sale_items_menu_item_id_fkey")
+  @@map("hotel_beverage_sale_items")
+}
+
 enum RoleType {
   ADMIN
   HOTEL_STAFF
   HOTEL_FD
   RESTAURANT_STAFF
+  HOUSEKEEPER
 }
 
 enum RoomStatus {
@@ -552,6 +742,18 @@ enum BookingStatus {
   CHECKED_IN
   CHECKED_OUT
   CANCELLED
+}
+
+enum ReservationEntryStatus {
+  ACTIVE
+  PARTIALLY_FULFILLED
+  FULFILLED
+  CANCELLED
+}
+
+enum CompanionType {
+  ADULT
+  CHILD
 }
 
 enum ChargeType {
@@ -621,6 +823,7 @@ enum InvoiceStatus {
 enum CompanyLedgerBillType {
   BOOKING
   RESTAURANT_ORDER
+  RESERVATION_ENTRY
 }
 
 enum LedgerSettlementStage {
@@ -633,26 +836,4 @@ enum HousekeepingStatus {
   PENDING
   IN_PROGRESS
   COMPLETED
-}
-
-model EmailVerificationOtp {
-  id        String   @id @default(cuid())
-  email     String
-  codeHash  String   @map("code_hash")
-  expiresAt DateTime @map("expires_at")
-  createdAt DateTime @default(now())
-
-  @@index([email])
-  @@map("email_verification_otps")
-}
-
-model EmailVerificationSession {
-  id        String   @id @default(cuid())
-  email     String
-  token     String   @unique
-  expiresAt DateTime @map("expires_at")
-  createdAt DateTime @default(now())
-
-  @@index([email])
-  @@map("email_verification_sessions")
 }

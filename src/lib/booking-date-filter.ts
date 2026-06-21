@@ -4,6 +4,7 @@ import {
   endOfWeek,
   endOfYear,
   format,
+  parseISO,
   startOfDay,
   startOfMonth,
   startOfWeek,
@@ -21,14 +22,35 @@ export type BookingDatePreset =
   | 'custom'
 
 export const BOOKING_DATE_PRESET_OPTIONS: { value: BookingDatePreset; label: string }[] = [
+  { value: 'today', label: 'Business today (in-house + arrivals)' },
   { value: 'all', label: 'All dates' },
-  { value: 'today', label: 'Today' },
   { value: 'yesterday', label: 'Yesterday' },
   { value: 'this_week', label: 'This week' },
   { value: 'this_month', label: 'This month' },
   { value: 'this_year', label: 'This year' },
   { value: 'custom', label: 'Custom range' },
 ]
+
+/** Resolve date filters using the hotel business date as "today" when provided. */
+export function resolveBookingDateRangeWithBusinessDate(
+  preset: BookingDatePreset,
+  customFrom?: string,
+  customTo?: string,
+  businessDate?: string
+): { dateFrom?: string; dateTo?: string } {
+  if (businessDate) {
+    if (preset === 'today') {
+      return { dateFrom: businessDate, dateTo: businessDate }
+    }
+    if (preset === 'yesterday') {
+      const prev = format(subDays(parseISO(`${businessDate}T12:00:00`), 1), 'yyyy-MM-dd')
+      return { dateFrom: prev, dateTo: prev }
+    }
+    const now = parseISO(`${businessDate}T12:00:00`)
+    return resolveBookingDateRange(preset, customFrom, customTo, now)
+  }
+  return resolveBookingDateRange(preset, customFrom, customTo)
+}
 
 export function resolveBookingDateRange(
   preset: BookingDatePreset,

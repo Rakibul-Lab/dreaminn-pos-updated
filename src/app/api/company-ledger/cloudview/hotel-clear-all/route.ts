@@ -10,7 +10,7 @@ import { RoleType } from '@prisma/client';
 
 export async function POST(request: NextRequest) {
   try {
-    const authResult = requireRole(request, 'ADMIN' as RoleType, 'HOTEL_STAFF' as RoleType, 'HOTEL_FD' as RoleType);
+    const authResult = await requireRole(request, 'ADMIN' as RoleType, 'HOTEL_STAFF' as RoleType, 'HOTEL_FD' as RoleType);
     if (authResult instanceof Response) return authResult;
 
     const ledger = await ensureCloudViewRestaurantLedger(db);

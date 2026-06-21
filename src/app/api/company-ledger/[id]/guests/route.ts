@@ -15,7 +15,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const authResult = requireRole(request, 'ADMIN' as RoleType, 'HOTEL_STAFF' as RoleType, 'HOTEL_FD' as RoleType);
+    const authResult = await requireRole(request, 'ADMIN' as RoleType, 'HOTEL_STAFF' as RoleType, 'HOTEL_FD' as RoleType);
     if (authResult instanceof Response) return authResult;
 
     const { id: companyLedgerId } = await params;
@@ -38,10 +38,33 @@ export async function GET(
         { registrationNumber: { contains: search } },
         { address: { contains: search } },
         { idNumber: { contains: search } },
+        {
+          bookings: {
+            some: {
+              OR: [
+                { registrationNumber: { contains: search } },
+                { customer: { registrationNumber: { contains: search } } },
+              ],
+            },
+          },
+        },
       ];
       const searchDigits = search.replace(/\D/g, '');
       if (searchDigits.length >= 6) {
         orConditions.push({ phone: { contains: searchDigits.slice(-10) } });
+      }
+      if (searchDigits.length >= 4) {
+        orConditions.push({ registrationNumber: { contains: searchDigits } });
+        orConditions.push({
+          bookings: {
+            some: {
+              OR: [
+                { registrationNumber: { contains: searchDigits } },
+                { customer: { registrationNumber: { contains: searchDigits } } },
+              ],
+            },
+          },
+        });
       }
       where.OR = orConditions;
     }
@@ -58,6 +81,7 @@ export async function GET(
         bookings: {
           where: { status: { not: 'CANCELLED' } },
           select: {
+            registrationNumber: true,
             checkIn: true,
             checkOut: true,
             actualCheckIn: true,
@@ -85,9 +109,16 @@ export async function GET(
       const primaryStay = pickGuestStayBooking(bookings, dateFrom, dateTo, hasDateFilter);
       const relevantBookings = relevantBookingsFor(bookings);
 
+      const displayRegistrationNumber =
+        primaryStay?.registrationNumber?.trim() ||
+        relevantBookings.find((b) => b.registrationNumber?.trim())?.registrationNumber?.trim() ||
+        guest.registrationNumber?.trim() ||
+        null;
+
       return {
         ...guest,
-        totalDue: bookings.reduce(
+        registrationNumber: displayRegistrationNumber,
+        totalDue: relevantBookings.reduce(
           (sum, booking) => sum + (booking.companyLedgerBill?.dueAmount ?? 0),
           0
         ),
@@ -127,7 +158,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const authResult = requireRole(request, 'ADMIN' as RoleType, 'HOTEL_STAFF' as RoleType, 'HOTEL_FD' as RoleType);
+    const authResult = await requireRole(request, 'ADMIN' as RoleType, 'HOTEL_STAFF' as RoleType, 'HOTEL_FD' as RoleType);
     if (authResult instanceof Response) return authResult;
 
     const { id: companyLedgerId } = await params;

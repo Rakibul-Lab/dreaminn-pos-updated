@@ -9,7 +9,7 @@ export const runtime = 'nodejs';
 // GET /api/notifications - List notifications with filters
 export async function GET(request: NextRequest) {
   try {
-    const authResult = requireAuth(request);
+    const authResult = await requireAuth(request);
     if (authResult instanceof Response) return authResult;
 
     const user = authResult;
@@ -75,7 +75,7 @@ export async function GET(request: NextRequest) {
 // PUT /api/notifications - Mark notification as read
 export async function PUT(request: NextRequest) {
   try {
-    const authResult = requireAuth(request);
+    const authResult = await requireAuth(request);
     if (authResult instanceof Response) return authResult;
 
     const user = authResult;

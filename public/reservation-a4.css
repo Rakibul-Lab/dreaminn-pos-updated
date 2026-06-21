@@ -92,7 +92,80 @@
 }
 
 .reservation-a4-sheet .rd-block {
-  margin-bottom: 4.5mm;
+  margin-bottom: 3mm;
+}
+
+.reservation-a4-sheet .rd-terms-block {
+  margin-bottom: 2mm;
+}
+
+.reservation-a4-sheet .rd-guest-table-wrap {
+  margin-top: 2.5mm;
+  width: 100%;
+  clear: both;
+}
+
+.reservation-a4-sheet .rd-guest-table-title {
+  margin: 0 0 1.5mm;
+  font-size: 9pt;
+  font-weight: 700;
+  text-align: left;
+}
+
+.reservation-a4-sheet .rd-guest-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 7.8pt;
+  line-height: 1.28;
+}
+
+.reservation-a4-sheet .rd-guest-table th,
+.reservation-a4-sheet .rd-guest-table td {
+  border: 0.2mm solid #cccccc;
+  padding: 1mm 1.5mm;
+  vertical-align: top;
+  text-align: left;
+}
+
+.reservation-a4-sheet .rd-guest-table th {
+  font-weight: 700;
+  background: #f7f7f7;
+}
+
+.reservation-a4-sheet .rd-guest-role {
+  display: block;
+  font-size: 7pt;
+  color: #666666;
+}
+
+.reservation-a4-sheet .rd-guest-name {
+  display: block;
+  font-weight: 600;
+}
+
+.reservation-a4-sheet .rd-guest-children-note {
+  margin: 1.5mm 0 0;
+  font-size: 7.8pt;
+  color: #444444;
+}
+
+.reservation-a4-sheet .rd-details-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5mm 5mm;
+  align-items: start;
+}
+
+.reservation-a4-sheet .rd-details-col p {
+  margin: 0 0 1.4mm;
+  font-size: 9.5pt;
+  line-height: 1.38;
+  word-wrap: break-word;
+  overflow-wrap: anywhere;
+}
+
+.reservation-a4-sheet .rd-room-summary {
+  word-break: break-word;
 }
 
 .reservation-a4-sheet .rd-line {
@@ -103,9 +176,34 @@
 
 /* Sharper text when rasterizing for PDF download */
 .reservation-a4-sheet.reservation-pdf-capture {
+  display: flex !important;
+  flex-direction: column !important;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: geometricPrecision;
+}
+
+.reservation-a4-sheet.reservation-pdf-capture .rd-document-footer {
+  margin-top: auto !important;
+  flex-shrink: 0;
+}
+
+.reservation-a4-sheet.reservation-pdf-capture.reservation-a4-sheet--entry .rd-document-footer {
+  margin-top: 0 !important;
+}
+
+.reservation-a4-sheet.reservation-pdf-capture .rd-signatures {
+  align-items: flex-end;
+}
+
+.reservation-a4-sheet.reservation-pdf-capture .rd-signature-col--guest {
+  margin-top: 0 !important;
+  padding-top: 0 !important;
+  justify-content: flex-end;
+}
+
+.reservation-a4-sheet.reservation-pdf-capture .rd-prepared-by {
+  align-self: flex-end;
 }
 
 .reservation-a4-sheet.reservation-pdf-capture .rd-details-col p,
@@ -133,19 +231,6 @@
 
 .reservation-a4-sheet .rd-row-2 p {
   margin: 0;
-  font-size: 10pt;
-  line-height: 1.45;
-}
-
-.reservation-a4-sheet .rd-details-cols {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 1.8mm 6mm;
-  align-items: start;
-}
-
-.reservation-a4-sheet .rd-details-col p {
-  margin: 0 0 1.8mm;
   font-size: 10pt;
   line-height: 1.45;
 }
@@ -178,6 +263,206 @@
   margin-top: auto;
   width: 100%;
   padding-top: 8mm;
+  flex-shrink: 0;
+}
+
+/* Reserved entry — one A4 page; content flows naturally, footer pinned to bottom */
+.reservation-a4-sheet--entry {
+  display: flex;
+  flex-direction: column;
+  min-height: 297mm;
+  box-sizing: border-box;
+}
+
+.reservation-a4-sheet--entry .rd-entry-main {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.reservation-a4-sheet--entry .rd-entry-fill {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.reservation-a4-sheet--entry .rd-block {
+  margin-bottom: 3mm;
+  flex-shrink: 0;
+}
+
+.reservation-a4-sheet--entry .rd-header {
+  flex-shrink: 0;
+}
+
+.reservation-a4-sheet--entry .rd-terms-block {
+  margin-top: 2mm;
+  margin-bottom: 0;
+  flex-shrink: 0;
+}
+
+.reservation-a4-sheet--entry .rd-terms-title {
+  text-align: left;
+  text-decoration: underline;
+}
+
+.reservation-a4-sheet--entry .rd-terms-list {
+  padding-left: 4mm;
+}
+
+.reservation-a4-sheet--entry .rd-guest-table-wrap {
+  margin-top: 3mm;
+}
+
+.reservation-a4-sheet--entry .rd-document-footer {
+  flex-shrink: 0;
+  padding-top: 4mm;
+}
+
+.reservation-a4-sheet--entry .rd-signatures {
+  align-items: end;
+  min-height: 0;
+}
+
+.reservation-a4-sheet--entry .rd-prepared-by {
+  align-self: end;
+  padding-top: 0;
+}
+
+.reservation-a4-sheet--entry .rd-signature-col {
+  padding-top: 0;
+  justify-content: flex-end;
+}
+
+.reservation-a4-sheet--entry .rd-signature-col--guest {
+  margin-top: 0;
+}
+
+/* 1 category — open spacing */
+.reservation-a4-sheet--entry.reservation-a4-sheet--density-1 .rd-block {
+  margin-bottom: 4mm;
+}
+
+.reservation-a4-sheet--entry.reservation-a4-sheet--density-1 .rd-header {
+  margin-bottom: 1mm;
+}
+
+.reservation-a4-sheet--entry.reservation-a4-sheet--density-1 .rd-details-col p {
+  margin-bottom: 1.8mm;
+  line-height: 1.42;
+}
+
+.reservation-a4-sheet--entry.reservation-a4-sheet--density-1 .rd-terms-list li {
+  margin-bottom: 2.4mm;
+  line-height: 1.38;
+}
+
+.reservation-a4-sheet--entry.reservation-a4-sheet--density-1 .rd-document-footer {
+  padding-top: 8mm;
+}
+
+.reservation-a4-sheet--entry.reservation-a4-sheet--density-1 .rd-signatures {
+  min-height: 32mm;
+}
+
+/* 2–3 categories */
+.reservation-a4-sheet--entry.reservation-a4-sheet--density-2 {
+  font-size: 9.5pt;
+  line-height: 1.32;
+}
+
+.reservation-a4-sheet--entry.reservation-a4-sheet--density-2 .rd-block {
+  margin-bottom: 2.2mm;
+}
+
+.reservation-a4-sheet--entry.reservation-a4-sheet--density-2 .rd-details-col p {
+  margin-bottom: 1.1mm;
+  font-size: 9pt;
+}
+
+.reservation-a4-sheet--entry.reservation-a4-sheet--density-2 .rd-guest-table {
+  font-size: 7.5pt;
+}
+
+.reservation-a4-sheet--entry.reservation-a4-sheet--density-2 .rd-terms-list {
+  font-size: 8pt;
+}
+
+.reservation-a4-sheet--entry.reservation-a4-sheet--density-2 .rd-terms-list li {
+  margin-bottom: 1.4mm;
+}
+
+.reservation-a4-sheet--entry.reservation-a4-sheet--density-2 .rd-document-footer {
+  padding-top: 5mm;
+}
+
+/* 4+ categories — compact but continuous (no forced mid-page gaps) */
+.reservation-a4-sheet--entry.reservation-a4-sheet--density-4 {
+  font-size: 9pt;
+  line-height: 1.28;
+}
+
+.reservation-a4-sheet--entry.reservation-a4-sheet--density-4 .rd-block {
+  margin-bottom: 1.8mm;
+}
+
+.reservation-a4-sheet--entry.reservation-a4-sheet--density-4 .rd-header {
+  margin-bottom: 0.5mm;
+}
+
+.reservation-a4-sheet--entry.reservation-a4-sheet--density-4 .rd-row-2 {
+  gap: 1mm 4mm;
+  margin-bottom: 1mm;
+}
+
+.reservation-a4-sheet--entry.reservation-a4-sheet--density-4 .rd-details-col p {
+  margin-bottom: 0.9mm;
+  font-size: 8.6pt;
+  line-height: 1.28;
+}
+
+.reservation-a4-sheet--entry.reservation-a4-sheet--density-4 .rd-guest-table-wrap {
+  margin-top: 2mm;
+}
+
+.reservation-a4-sheet--entry.reservation-a4-sheet--density-4 .rd-guest-table {
+  font-size: 7pt;
+  line-height: 1.2;
+}
+
+.reservation-a4-sheet--entry.reservation-a4-sheet--density-4 .rd-guest-table th,
+.reservation-a4-sheet--entry.reservation-a4-sheet--density-4 .rd-guest-table td {
+  padding: 0.6mm 1.2mm;
+}
+
+.reservation-a4-sheet--entry.reservation-a4-sheet--density-4 .rd-terms-block {
+  margin-top: 1.5mm;
+}
+
+.reservation-a4-sheet--entry.reservation-a4-sheet--density-4 .rd-terms-title {
+  font-size: 9pt;
+  margin-bottom: 1.5mm;
+}
+
+.reservation-a4-sheet--entry.reservation-a4-sheet--density-4 .rd-terms-list {
+  font-size: 7.2pt;
+  line-height: 1.24;
+}
+
+.reservation-a4-sheet--entry.reservation-a4-sheet--density-4 .rd-terms-list li {
+  margin-bottom: 1mm;
+}
+
+.reservation-a4-sheet--entry.reservation-a4-sheet--density-4 .rd-document-footer {
+  padding-top: 4mm;
+}
+
+.reservation-a4-sheet--entry.reservation-a4-sheet--density-4 .rd-prepared-by-details {
+  font-size: 8.5pt;
+}
+
+.reservation-a4-sheet--entry.reservation-a4-sheet--density-4 .rd-footer-text {
+  font-size: 7.5pt;
 }
 
 .reservation-a4-sheet .rd-signatures {
@@ -307,6 +592,233 @@
   break-before: page;
 }
 
+/* Multi-guest: tighter layout so page 1 fits A4 with guest table + terms */
+.reservation-a4-sheet--multi-guest {
+  font-size: 9.5pt;
+  line-height: 1.32;
+}
+
+.reservation-a4-sheet--multi-guest .rd-block {
+  margin-bottom: 2mm;
+}
+
+.reservation-a4-sheet--multi-guest .rd-header {
+  margin-bottom: 2.5mm;
+}
+
+.reservation-a4-sheet--multi-guest .rd-intro {
+  margin-top: 1.5mm;
+  font-size: 9.5pt;
+  line-height: 1.35;
+}
+
+.reservation-a4-sheet--multi-guest .rd-row-2 {
+  gap: 1.2mm 4mm;
+  margin-bottom: 1.2mm;
+}
+
+.reservation-a4-sheet--multi-guest .rd-row-2 p,
+.reservation-a4-sheet--multi-guest .rd-line {
+  font-size: 9.5pt;
+  line-height: 1.35;
+}
+
+.reservation-a4-sheet--multi-guest .rd-details-cols {
+  gap: 1mm 4mm;
+}
+
+.reservation-a4-sheet--multi-guest .rd-details-col p {
+  margin: 0 0 1mm;
+  font-size: 9pt;
+  line-height: 1.32;
+}
+
+.reservation-a4-sheet--multi-guest .rd-guest-table-wrap {
+  margin-top: 1.5mm;
+}
+
+.reservation-a4-sheet--multi-guest .rd-guest-table {
+  font-size: 7.2pt;
+  line-height: 1.22;
+}
+
+.reservation-a4-sheet--multi-guest .rd-guest-table th,
+.reservation-a4-sheet--multi-guest .rd-guest-table td {
+  padding: 0.7mm 1.2mm;
+}
+
+.reservation-a4-sheet--multi-guest .rd-terms-block {
+  margin-bottom: 1mm;
+}
+
+.reservation-a4-sheet--multi-guest .rd-terms-title {
+  margin-bottom: 1.5mm;
+  font-size: 9.5pt;
+}
+
+.reservation-a4-sheet--multi-guest .rd-terms-list {
+  font-size: 7.8pt;
+  line-height: 1.28;
+}
+
+.reservation-a4-sheet--multi-guest .rd-terms-list li {
+  margin-bottom: 1.2mm;
+}
+
+.reservation-a4-sheet--multi-guest .rd-document-footer {
+  padding-top: 4mm;
+}
+
+.reservation-a4-sheet--multi-guest .rd-signatures {
+  gap: 5mm 10mm;
+  min-height: 30mm;
+}
+
+.reservation-a4-sheet--multi-guest .rd-prepared-by-details {
+  font-size: 8.8pt;
+}
+
+.reservation-a4-sheet--multi-guest .rd-footer-text {
+  margin-top: 3mm;
+  padding-top: 2mm;
+  font-size: 7.5pt;
+}
+
+/* Reserved entry — many room categories / lines */
+.reservation-a4-sheet--many-rooms {
+  font-size: 9pt;
+  line-height: 1.28;
+}
+
+.reservation-a4-sheet--many-rooms .rd-block {
+  margin-bottom: 1.5mm;
+}
+
+.reservation-a4-sheet--many-rooms .rd-header {
+  margin-bottom: 2mm;
+}
+
+.reservation-a4-sheet--many-rooms .rd-row-2 {
+  gap: 1mm 3mm;
+  margin-bottom: 1mm;
+}
+
+.reservation-a4-sheet--many-rooms .rd-row-2 p,
+.reservation-a4-sheet--many-rooms .rd-line {
+  font-size: 9pt;
+  line-height: 1.3;
+}
+
+.reservation-a4-sheet--many-rooms .rd-intro {
+  margin-top: 1.2mm;
+  font-size: 9pt;
+  line-height: 1.32;
+}
+
+.reservation-a4-sheet--many-rooms .rd-details-cols {
+  gap: 0.8mm 3mm;
+}
+
+.reservation-a4-sheet--many-rooms .rd-details-col p {
+  margin: 0 0 0.8mm;
+  font-size: 8.6pt;
+  line-height: 1.28;
+}
+
+.reservation-a4-sheet--many-rooms .rd-guest-table-wrap {
+  margin-top: 1.2mm;
+}
+
+.reservation-a4-sheet--many-rooms .rd-guest-table {
+  font-size: 6.8pt;
+  line-height: 1.18;
+  table-layout: fixed;
+}
+
+.reservation-a4-sheet--many-rooms .rd-guest-table th,
+.reservation-a4-sheet--many-rooms .rd-guest-table td {
+  padding: 0.55mm 1mm;
+  word-break: break-word;
+}
+
+.reservation-a4-sheet--many-rooms .rd-room-line-table th:nth-child(1),
+.reservation-a4-sheet--many-rooms .rd-room-line-table td:nth-child(1) {
+  width: 44%;
+}
+
+.reservation-a4-sheet--many-rooms .rd-room-line-table th:nth-child(2),
+.reservation-a4-sheet--many-rooms .rd-room-line-table td:nth-child(2) {
+  width: 36%;
+}
+
+.reservation-a4-sheet--many-rooms .rd-room-line-table th:nth-child(3),
+.reservation-a4-sheet--many-rooms .rd-room-line-table td:nth-child(3) {
+  width: 20%;
+  text-align: center;
+}
+
+.reservation-a4-sheet--many-rooms .rd-terms-block {
+  margin-bottom: 0.8mm;
+}
+
+.reservation-a4-sheet--many-rooms .rd-terms-title {
+  margin-bottom: 1.2mm;
+  font-size: 9pt;
+}
+
+.reservation-a4-sheet--many-rooms .rd-terms-list {
+  font-size: 7.2pt;
+  line-height: 1.22;
+}
+
+.reservation-a4-sheet--many-rooms .rd-terms-list li {
+  margin-bottom: 0.8mm;
+}
+
+.reservation-a4-sheet--many-rooms .rd-document-footer {
+  padding-top: 3mm;
+}
+
+.reservation-a4-sheet--many-rooms .rd-signatures {
+  gap: 4mm 8mm;
+  min-height: 24mm;
+}
+
+.reservation-a4-sheet--many-rooms .rd-prepared-by-details {
+  font-size: 8.2pt;
+}
+
+.reservation-a4-sheet--many-rooms .rd-footer-text {
+  margin-top: 2mm;
+  padding-top: 1.5mm;
+  font-size: 7pt;
+}
+
+.reservation-a4-sheet .rd-room-line-table {
+  table-layout: fixed;
+}
+
+.reservation-a4-sheet .rd-room-line-table th:nth-child(1),
+.reservation-a4-sheet .rd-room-line-table td:nth-child(1) {
+  width: 42%;
+}
+
+.reservation-a4-sheet .rd-room-line-table th:nth-child(2),
+.reservation-a4-sheet .rd-room-line-table td:nth-child(2) {
+  width: 38%;
+}
+
+.reservation-a4-sheet .rd-room-line-table th:nth-child(3),
+.reservation-a4-sheet .rd-room-line-table td:nth-child(3) {
+  width: 20%;
+  text-align: center;
+}
+
+.reservation-a4-sheet .rd-room-line-table th,
+.reservation-a4-sheet .rd-room-line-table td {
+  word-break: break-word;
+}
+
 @media print {
   @page {
     size: A4 portrait;
@@ -326,13 +838,34 @@
     width: 210mm !important;
     max-width: 210mm !important;
     min-height: 297mm !important;
-    height: 297mm !important;
+    height: auto !important;
     margin: 0 auto !important;
     padding: 12mm 14mm 18mm !important;
     box-shadow: none !important;
     box-sizing: border-box !important;
+    overflow: visible !important;
+    page-break-inside: auto;
+  }
+
+  /* Reserved entry: exactly one A4 page, footer at bottom */
+  .reservation-a4-sheet--entry {
+    height: 297mm !important;
+    min-height: 297mm !important;
+    max-height: 297mm !important;
+    overflow: hidden !important;
+    page-break-inside: avoid !important;
+    page-break-after: avoid !important;
+  }
+
+  .reservation-a4-sheet--entry .rd-document-footer {
+    flex-shrink: 0 !important;
+  }
+
+  .reservation-a4-sheet .rd-terms-block,
+  .reservation-a4-sheet .rd-guest-table-wrap,
+  .reservation-a4-sheet .rd-document-footer {
+    break-inside: avoid;
     page-break-inside: avoid;
-    overflow: hidden;
   }
 
   .reservation-a4-sheet:not(:last-child) {
@@ -345,8 +878,24 @@
     break-before: page;
   }
 
-  .reservation-a4-sheet .rd-document-footer {
+  .reservation-a4-sheet--entry.reservation-a4-sheet--density-1 .rd-document-footer {
+    padding-top: 8mm !important;
+  }
+
+  .reservation-a4-sheet--entry.reservation-a4-sheet--density-2 .rd-document-footer {
+    padding-top: 5mm !important;
+  }
+
+  .reservation-a4-sheet--entry.reservation-a4-sheet--density-4 .rd-document-footer {
+    padding-top: 4mm !important;
+  }
+
+  .reservation-a4-sheet:not(.reservation-a4-sheet--entry) .rd-document-footer {
     margin-top: auto !important;
     padding-top: 12mm !important;
+  }
+
+  .reservation-a4-sheet--multi-guest:not(.reservation-a4-sheet--entry) .rd-document-footer {
+    padding-top: 6mm !important;
   }
 }

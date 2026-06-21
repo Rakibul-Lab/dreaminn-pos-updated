@@ -15,6 +15,7 @@ import { getLogoDataUrl } from './reservation-document-html'
 export type GuestHistoryBooking = BookingListDatetimeFields & {
   id: string
   confirmationNumber?: string | null
+  registrationNumber?: string | null
   status: string
   totalRoomCharge: number
   totalWithVat?: number
@@ -63,26 +64,31 @@ type PdfColumn = {
 
 const PDF_COLUMNS: PdfColumn[] = [
   {
+    header: 'Reg. no.',
+    width: 22,
+    value: (b) => b.registrationNumber?.trim() || '—',
+  },
+  {
     header: 'Confirmation',
-    width: 28,
+    width: 24,
     value: (b) => formatConfirmationNumber(b),
   },
-  { header: 'Room', width: 16, value: (b) => b.room?.roomNumber ?? '—' },
-  { header: 'Type', width: 24, value: (b) => b.room?.type?.name ?? '—' },
+  { header: 'Room', width: 14, value: (b) => b.room?.roomNumber ?? '—' },
+  { header: 'Type', width: 20, value: (b) => b.room?.type?.name ?? '—' },
   {
     header: 'Check-in',
-    width: 34,
+    width: 30,
     value: (b, t) => formatListBookingCheckIn(b, t),
   },
   {
     header: 'Check-out',
-    width: 34,
+    width: 30,
     value: (b, t) => formatListBookingCheckOut(b, t),
   },
-  { header: 'Status', width: 22, value: (b) => statusLabel(b.status) },
+  { header: 'Status', width: 20, value: (b) => statusLabel(b.status) },
   {
     header: 'Total',
-    width: 24,
+    width: 22,
     value: (b) => formatBdtForPdf(b.totalWithVat ?? b.totalRoomCharge),
   },
 ]

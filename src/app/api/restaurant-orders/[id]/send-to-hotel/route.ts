@@ -16,7 +16,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const authResult = requireRole(
+    const authResult = await requireRole(
       request,
       'ADMIN' as RoleType,
       'RESTAURANT_STAFF' as RoleType
@@ -37,7 +37,7 @@ export async function POST(
 
     if (!canSendOrderToHotel(order)) {
       return errorResponse(
-        'Only delivered room-service orders with no payment can be sent to hotel billing',
+        'Only delivered room-service orders with a remaining balance can be sent to hotel billing',
         400
       );
     }

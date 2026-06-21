@@ -2,6 +2,22 @@ import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { requireAuth, canAccessHotel, canAccessRestaurant, canAccessAdmin } from '@/lib/auth';
 import { successResponse, errorResponse } from '@/lib/api-utils';
+import {
+  buildBusinessDayArrivalsWhere,
+  buildBusinessDayDeparturesWhere,
+  buildExpectedArrivalsOnBusinessDateWhere,
+  buildInHouseOnBusinessDateWhere,
+  getOpenBusinessDayWindow,
+  readCurrentBusinessDateString,
+} from '@/lib/business-date';
+import {
+  buildHotelDailyArrivalsReport,
+  buildHotelDailyCollectionsReport,
+  buildHotelDailyDeparturesReport,
+  buildHotelDailySalesReport,
+  resolveBusinessDayReportWindow,
+} from '@/lib/hotel-pms-reports';
+import { buildHotelDiscountReportForDateRange } from '@/lib/hotel-daily-discount-report';
 
 function buildReportDateFilter(startDate: string | null, endDate: string | null): Record<string, unknown> {
   const dateFilter: Record<string, unknown> = {};
@@ -31,7 +47,7 @@ function buildReportDateFilter(startDate: string | null, endDate: string | null)
 // GET /api/reports?type=... - Reports based on type
 export async function GET(request: NextRequest) {
   try {
-    const authResult = requireAuth(request);
+    const authResult = await requireAuth(request);
     if (authResult instanceof Response) return authResult;
 
     const user = authResult;
@@ -40,9 +56,14 @@ export async function GET(request: NextRequest) {
     const type = searchParams.get('type');
     const startDate = searchParams.get('startDate');
     const endDate = searchParams.get('endDate');
+    const businessDate = searchParams.get('businessDate');
+    const dateFrom = searchParams.get('dateFrom');
+    const dateTo = searchParams.get('dateTo');
 
     if (!type) {
-      return errorResponse('Report type is required. Valid types: restaurant-daily, restaurant-monthly, hotel-revenue, hotel-occupancy, food-charges-by-room, combined-revenue, admin-summary, order-status');
+      return errorResponse(
+        'Report type is required. Valid types: restaurant-daily, restaurant-monthly, hotel-revenue, hotel-occupancy, food-charges-by-room, combined-revenue, admin-summary, order-status, hotel-daily-sales, hotel-daily-arrivals, hotel-daily-departures, hotel-daily-collections, hotel-daily-discounts'
+      );
     }
 
     const dateFilter = buildReportDateFilter(startDate, endDate);
@@ -64,6 +85,16 @@ export async function GET(request: NextRequest) {
         return await handleAdminSummary(user, dateFilter);
       case 'order-status':
         return await handleOrderStatus(user, dateFilter);
+      case 'hotel-daily-sales':
+        return await handleHotelDailySales(user, businessDate);
+      case 'hotel-daily-arrivals':
+        return await handleHotelDailyArrivals(user, businessDate);
+      case 'hotel-daily-departures':
+        return await handleHotelDailyDepartures(user, businessDate);
+      case 'hotel-daily-collections':
+        return await handleHotelDailyCollections(user, businessDate);
+      case 'hotel-daily-discounts':
+        return await handleHotelDailyDiscounts(user, businessDate, dateFrom, dateTo);
       default:
         return errorResponse('Invalid report type', 400);
     }
@@ -79,12 +110,11 @@ async function handleRestaurantDaily(user: { role: string }, dateFilter: Record<
     return errorResponse('Access denied. RESTAURANT_STAFF or ADMIN only.', 403);
   }
 
-  const today = new Date();
-  const orderDateFilter = dateFilter;
+  const businessDate = await readCurrentBusinessDateString();
 
   const orders = await db.restaurantOrder.findMany({
     where: {
-      ...orderDateFilter,
+      ...dateFilter,
       status: { not: 'CANCELLED' },
     },
     include: {
@@ -134,7 +164,8 @@ async function handleRestaurantDaily(user: { role: string }, dateFilter: Record<
 
   return successResponse({
     reportType: 'restaurant-daily',
-    date: today.toISOString().slice(0, 10),
+    date: businessDate,
+    businessDate,
     allTime: Object.keys(dateFilter).length === 0,
     totalOrders,
     totalSales,
@@ -308,24 +339,25 @@ async function handleHotelOccupancy(user: { role: string }, dateFilter: Record<s
     },
   });
 
-  // Today's check-ins and check-outs
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const tomorrow = new Date(today);
-  tomorrow.setDate(tomorrow.getDate() + 1);
+  // Business-day activity (open window + in-house guests on business calendar day)
+  const businessDate = await readCurrentBusinessDateString();
+  const { openedAt } = await getOpenBusinessDayWindow();
+  const now = new Date();
 
   const todayCheckins = await db.booking.count({
-    where: {
-      checkIn: { gte: today, lt: tomorrow },
-      status: { not: 'CANCELLED' },
-    },
+    where: buildBusinessDayArrivalsWhere(businessDate, openedAt, now),
+  });
+
+  const expectedArrivals = await db.booking.count({
+    where: buildExpectedArrivalsOnBusinessDateWhere(businessDate),
   });
 
   const todayCheckouts = await db.booking.count({
-    where: {
-      checkOut: { gte: today, lt: tomorrow },
-      status: { not: 'CANCELLED' },
-    },
+    where: buildBusinessDayDeparturesWhere(businessDate),
+  });
+
+  const inHouseGuests = await db.booking.count({
+    where: { AND: [buildInHouseOnBusinessDateWhere(businessDate), { status: 'CHECKED_IN' }] },
   });
 
   // Floor-wise occupancy
@@ -355,7 +387,10 @@ async function handleHotelOccupancy(user: { role: string }, dateFilter: Record<s
     occupancyRate: Math.round(occupancyRate * 100) / 100,
     activeBookings,
     todayCheckins,
+    expectedArrivals,
     todayCheckouts,
+    inHouseGuests,
+    businessDate,
     statusBreakdown,
     floorData,
   });
@@ -611,4 +646,65 @@ async function handleOrderStatus(user: { role: string }, dateFilter: Record<stri
     typeDistribution,
     totalOrders,
   });
+}
+
+async function handleHotelDailySales(user: { role: string }, businessDateParam: string | null) {
+  if (!canAccessHotel(user.role as 'ADMIN' | 'HOTEL_STAFF' | 'RESTAURANT_STAFF')) {
+    return errorResponse('Access denied. HOTEL_STAFF or ADMIN only.', 403);
+  }
+  const window = await resolveBusinessDayReportWindow(businessDateParam);
+  const report = await buildHotelDailySalesReport(window);
+  return successResponse(report);
+}
+
+async function handleHotelDailyArrivals(user: { role: string }, businessDateParam: string | null) {
+  if (!canAccessHotel(user.role as 'ADMIN' | 'HOTEL_STAFF' | 'RESTAURANT_STAFF')) {
+    return errorResponse('Access denied. HOTEL_STAFF or ADMIN only.', 403);
+  }
+  const window = await resolveBusinessDayReportWindow(businessDateParam);
+  const report = await buildHotelDailyArrivalsReport(window);
+  return successResponse(report);
+}
+
+async function handleHotelDailyDepartures(user: { role: string }, businessDateParam: string | null) {
+  if (!canAccessHotel(user.role as 'ADMIN' | 'HOTEL_STAFF' | 'RESTAURANT_STAFF')) {
+    return errorResponse('Access denied. HOTEL_STAFF or ADMIN only.', 403);
+  }
+  const window = await resolveBusinessDayReportWindow(businessDateParam);
+  const report = await buildHotelDailyDeparturesReport(window);
+  return successResponse(report);
+}
+
+async function handleHotelDailyCollections(user: { role: string }, businessDateParam: string | null) {
+  if (!canAccessHotel(user.role as 'ADMIN' | 'HOTEL_STAFF' | 'RESTAURANT_STAFF')) {
+    return errorResponse('Access denied. HOTEL_STAFF or ADMIN only.', 403);
+  }
+  const window = await resolveBusinessDayReportWindow(businessDateParam);
+  const report = await buildHotelDailyCollectionsReport(window);
+  return successResponse(report);
+}
+
+async function handleHotelDailyDiscounts(
+  user: { role: string },
+  businessDateParam: string | null,
+  dateFromParam: string | null,
+  dateToParam: string | null
+) {
+  if (!canAccessHotel(user.role as 'ADMIN' | 'HOTEL_STAFF' | 'RESTAURANT_STAFF')) {
+    return errorResponse('Access denied. HOTEL_STAFF or ADMIN only.', 403);
+  }
+  if (dateFromParam || dateToParam) {
+    const report = await buildHotelDiscountReportForDateRange(
+      dateFromParam ?? undefined,
+      dateToParam ?? undefined
+    );
+    return successResponse(report);
+  }
+  if (businessDateParam) {
+    const window = await resolveBusinessDayReportWindow(businessDateParam);
+    const report = await buildHotelDiscountReportForDateRange(window.businessDate, window.businessDate);
+    return successResponse(report);
+  }
+  const report = await buildHotelDiscountReportForDateRange();
+  return successResponse(report);
 }

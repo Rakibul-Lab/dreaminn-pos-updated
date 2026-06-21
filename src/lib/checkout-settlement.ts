@@ -1,8 +1,9 @@
 import { computeHotelDiscountAmount, parseBookingDiscountType } from '@/lib/booking-discount'
 import {
+  bookingDiscountInput,
   bookingVatOptions,
   computeRoomBookingTotals,
-  sumBookingNetPaid,
+  sumCheckoutBookingPaid,
 } from '@/lib/booking-totals'
 import {
   computeAdjustedRoomCharge,
@@ -10,6 +11,8 @@ import {
   countBookedNights,
   type StayAdjustmentMode,
 } from '@/lib/booking-stay'
+import { filterGuestFolioRestaurantOrders } from '@/lib/restaurant-order-billing'
+import { computeOrderFolioBalance } from '@/lib/restaurant-order-dues'
 
 type BookingCharge = {
   chargeType: string
@@ -22,6 +25,9 @@ type RestaurantOrderRow = {
   discount: number
   vatAmount: number
   totalAmount: number
+  billingDisposition?: string | null
+  status?: string
+  payments?: { amount: number; paymentType: string }[]
 }
 
 export type CheckoutSettlementParams = {
@@ -44,6 +50,10 @@ export type CheckoutSettlementParams = {
   includeExtraCharges?: boolean
   /** Pending damage charge for preview (not yet saved) or explicit amount to include. */
   damageChargeAmount?: number
+  /** Manual late checkout amount at checkout (not from settings). */
+  lateCheckoutAmount?: number | null
+  /** Override room charge total at checkout (BDT). */
+  roomChargeOverride?: number | null
   asOf?: Date
 }
 
@@ -57,6 +67,8 @@ export type CheckoutSettlementResult = {
   roomCharges: number
   stayAdjusted: boolean
   includeExtraCharges: boolean
+  /** Minibar, laundry, and other posted folio charges (always on invoice). */
+  postedExtraCharges: number
   extraChargesStored: number
   lateCheckoutCharge: number
   extraChargesIfIncluded: number
@@ -117,7 +129,11 @@ export function computeCheckoutSettlement(
     .reduce((sum, c) => sum + c.amount * c.quantity, 0)
 
   const roomCharges =
-    individualRoomCharges > 0 ? individualRoomCharges : booking.totalRoomCharge
+    params.roomChargeOverride != null && params.roomChargeOverride >= 0
+      ? params.roomChargeOverride
+      : individualRoomCharges > 0
+        ? individualRoomCharges
+        : booking.totalRoomCharge
 
   const chargeableNights =
     nightlyRate > 0 && roomCharges > 0
@@ -133,20 +149,26 @@ export function computeCheckoutSettlement(
 
   const lateInDb = sumLateFromCharges(booking.charges)
   const damageInDb = sumDamageFromCharges(booking.charges)
-  const otherExtras = sumNonRoomCharges(booking.charges, true)
-  const lateWouldBe = lateInDb > 0 ? lateInDb : lateCheckoutCharge
+  const postedExtraCharges = sumNonRoomCharges(booking.charges, true)
+  const manualLate =
+    params.lateCheckoutAmount != null ? Math.max(0, params.lateCheckoutAmount) : null
+  const lateWouldBe = lateInDb > 0 ? lateInDb : includeExtraCharges ? (manualLate ?? 0) : 0
   const pendingDamage = Math.max(0, params.damageChargeAmount ?? 0)
   const damageCharge = damageInDb > 0 ? damageInDb : pendingDamage
-  const extraChargesIfIncluded = otherExtras + lateWouldBe
-  const lateApplied = includeExtraCharges ? lateWouldBe : 0
-  const extraCharges = (includeExtraCharges ? extraChargesIfIncluded : 0) + damageCharge
+  const extraChargesIfIncluded = postedExtraCharges + lateWouldBe
+  const extraCharges = postedExtraCharges + (includeExtraCharges ? lateWouldBe : 0) + damageCharge
 
-  const restaurantNet = restaurantOrders.reduce(
-    (sum, order) => sum + Math.max(0, order.subtotal - order.discount),
-    0
-  )
-  const restaurantVat = restaurantOrders.reduce((sum, order) => sum + order.vatAmount, 0)
-  const restaurantTotal = restaurantOrders.reduce((sum, order) => sum + order.totalAmount, 0)
+  const folioRestaurantOrders = filterGuestFolioRestaurantOrders(restaurantOrders)
+
+  let restaurantNet = 0
+  let restaurantVat = 0
+  let restaurantTotal = 0
+  for (const order of folioRestaurantOrders) {
+    const folio = computeOrderFolioBalance(order)
+    restaurantNet += folio.folioNet
+    restaurantVat += folio.folioVat
+    restaurantTotal += folio.folioDue
+  }
   const foodCharges = restaurantNet
 
   const hotelBase = roomCharges + extraCharges
@@ -165,7 +187,7 @@ export function computeCheckoutSettlement(
   const vatAmount = hotelVat + restaurantVat
   const totalAmount = hotelBase - discount + hotelVat + restaurantTotal
 
-  const totalPaid = sumBookingNetPaid(payments)
+  const totalPaid = sumCheckoutBookingPaid(payments)
   const dueBeforeSettlement = totalAmount - totalPaid
   const creditAmount = dueBeforeSettlement < 0 ? Math.abs(dueBeforeSettlement) : 0
 
@@ -179,7 +201,8 @@ export function computeCheckoutSettlement(
     roomCharges,
     stayAdjusted,
     includeExtraCharges,
-    extraChargesStored: otherExtras,
+    postedExtraCharges,
+    extraChargesStored: postedExtraCharges,
     lateCheckoutCharge: lateWouldBe,
     extraChargesIfIncluded,
     extraCharges,
@@ -203,11 +226,18 @@ export function computeCheckoutSettlement(
 export function bookingDueAfterPayments(
   totalRoomCharge: number,
   totalPaid: number,
-  booking: { vatApplied?: boolean | null; vatPercent?: number | null }
+  booking: {
+    vatApplied?: boolean | null
+    vatPercent?: number | null
+    discountEnabled?: boolean | null
+    discountType?: string | null
+    discountValue?: number | null
+  }
 ): number {
   return computeRoomBookingTotals(
     totalRoomCharge,
     totalPaid,
-    bookingVatOptions(booking)
+    bookingVatOptions(booking),
+    bookingDiscountInput(booking)
   ).dueAmount
 }

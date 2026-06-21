@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useRef, useCallback, useEffect } from 'react'
+import dynamic from 'next/dynamic'
 import Image from 'next/image'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useAuthStore, canAccessHotel, canAccessRestaurant, canAccessAdmin } from '@/lib/auth-store'
@@ -14,7 +15,7 @@ import {
   ScrollText, Package, LogOut, Hotel, UtensilsCrossed, Menu, X,
   Bed, CalendarCheck, UserCircle, SprayCan, ShoppingCart,
   ChefHat, Grid3X3, ClipboardList, DoorOpen, Tag, Bell, Loader2, User, UserRound,
-  ChevronLeft, ChevronRight, Building2, Landmark,
+  ChevronLeft, ChevronRight, Building2, Landmark, Lock, CalendarClock, Coffee,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -34,35 +35,75 @@ import { useToast } from '@/hooks/use-toast'
 import { ThemeToggle } from '@/components/theme-toggle'
 import { AppDevelopedByFooter } from '@/components/AppDevelopedByFooter'
 
-// Page components - Hotel (named exports)
-import { Dashboard as HotelDashboard } from '@/components/erp/hotel/Dashboard'
-import { RoomsPage } from '@/components/erp/hotel/RoomsPage'
-import { RoomTypesPage } from '@/components/erp/hotel/RoomTypesPage'
-import { BookingsPage } from '@/components/erp/hotel/BookingsPage'
-import { CustomersPage } from '@/components/erp/hotel/CustomersPage'
-import { CompanyLedgerPage } from '@/components/erp/hotel/CompanyLedgerPage'
-import { HousekeepingPage } from '@/components/erp/hotel/HousekeepingPage'
-import POSPage from '@/components/erp/restaurant/POSPage'
-import MenuPage from '@/components/erp/restaurant/MenuPage'
-import OrdersPage from '@/components/erp/restaurant/OrdersPage'
-import KitchenPage from '@/components/erp/restaurant/KitchenPage'
-import TablesPage from '@/components/erp/restaurant/TablesPage'
-import WaitersPage from '@/components/erp/restaurant/WaitersPage'
-import InvoicesPage from '@/components/erp/billing/InvoicesPage'
-import PaymentsPage from '@/components/erp/billing/PaymentsPage'
-import DepositsPage from '@/components/erp/billing/DepositsPage'
-import ReportsPage from '@/components/erp/reports/ReportsPage'
-import AdminDashboard from '@/components/erp/admin/AdminDashboard'
-import SettingsPage from '@/components/erp/admin/SettingsPage'
-import UsersPage from '@/components/erp/admin/UsersPage'
-import ActivityLogsPage from '@/components/erp/admin/ActivityLogsPage'
-import InventoryPage from '@/components/erp/admin/InventoryPage'
-import { ProfilePage } from '@/components/erp/auth/ProfilePage'
+import { DayCloseGateBanner } from '@/components/erp/admin/DayCloseGateBanner'
+import { useBusinessDate } from '@/hooks/use-business-date'
+
+function ErpPageLoader() {
+  return (
+    <div className="flex min-h-[16rem] items-center justify-center">
+      <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+    </div>
+  )
+}
+
+const dynamicPage = <T extends React.ComponentType<unknown>>(
+  loader: () => Promise<T>
+) =>
+  dynamic(loader, {
+    loading: () => <ErpPageLoader />,
+  })
+
+const HotelDashboard = dynamicPage(() =>
+  import('@/components/erp/hotel/Dashboard').then((m) => m.Dashboard)
+)
+const RoomsPage = dynamicPage(() =>
+  import('@/components/erp/hotel/RoomsPage').then((m) => m.RoomsPage)
+)
+const RoomTypesPage = dynamicPage(() =>
+  import('@/components/erp/hotel/RoomTypesPage').then((m) => m.RoomTypesPage)
+)
+const BookingsPage = dynamicPage(() =>
+  import('@/components/erp/hotel/BookingsPage').then((m) => m.BookingsPage)
+)
+const CustomersPage = dynamicPage(() =>
+  import('@/components/erp/hotel/CustomersPage').then((m) => m.CustomersPage)
+)
+const CompanyLedgerPage = dynamicPage(() =>
+  import('@/components/erp/hotel/CompanyLedgerPage').then((m) => m.CompanyLedgerPage)
+)
+const HousekeepingPage = dynamicPage(() =>
+  import('@/components/erp/hotel/HousekeepingPage').then((m) => m.HousekeepingPage)
+)
+const HotelBeverageSalesPage = dynamicPage(() =>
+  import('@/components/erp/hotel/HotelBeverageSalesPage').then((m) => m.HotelBeverageSalesPage)
+)
+const POSPage = dynamicPage(() => import('@/components/erp/restaurant/POSPage'))
+const MenuPage = dynamicPage(() => import('@/components/erp/restaurant/MenuPage'))
+const OrdersPage = dynamicPage(() => import('@/components/erp/restaurant/OrdersPage'))
+const KitchenPage = dynamicPage(() => import('@/components/erp/restaurant/KitchenPage'))
+const TablesPage = dynamicPage(() => import('@/components/erp/restaurant/TablesPage'))
+const WaitersPage = dynamicPage(() => import('@/components/erp/restaurant/WaitersPage'))
+const InvoicesPage = dynamicPage(() => import('@/components/erp/billing/InvoicesPage'))
+const PaymentsPage = dynamicPage(() => import('@/components/erp/billing/PaymentsPage'))
+const DepositsPage = dynamicPage(() => import('@/components/erp/billing/DepositsPage'))
+const ReportsPage = dynamicPage(() => import('@/components/erp/reports/ReportsPage'))
+const AdminDashboard = dynamicPage(() => import('@/components/erp/admin/AdminDashboard'))
+const SettingsPage = dynamicPage(() => import('@/components/erp/admin/SettingsPage'))
+const UsersPage = dynamicPage(() => import('@/components/erp/admin/UsersPage'))
+const ActivityLogsPage = dynamicPage(() => import('@/components/erp/admin/ActivityLogsPage'))
+const InventoryPage = dynamicPage(() => import('@/components/erp/admin/InventoryPage'))
+const DayClosePage = dynamicPage(() => import('@/components/erp/admin/DayClosePage'))
+const BusinessDayReportsPage = dynamicPage(() =>
+  import('@/components/erp/admin/BusinessDayReportsPage')
+)
+const ProfilePage = dynamicPage(() =>
+  import('@/components/erp/auth/ProfilePage').then((m) => m.ProfilePage)
+)
 
 type PageKey = 
-  | 'hotel-dashboard' | 'rooms' | 'room-types' | 'bookings' | 'customers' | 'company-ledger' | 'housekeeping'
+  | 'hotel-dashboard' | 'rooms' | 'room-types' | 'bookings' | 'customers' | 'company-ledger' | 'housekeeping' | 'hotel-beverage-sales'
   | 'pos' | 'menu' | 'orders' | 'kitchen' | 'tables' | 'waiters'
-  | 'invoices' | 'payments' | 'deposits' | 'reports'
+  | 'invoices' | 'payments' | 'deposits' | 'reports' | 'day-close' | 'business-day-reports'
   | 'admin-dashboard' | 'users' | 'settings' | 'logs' | 'inventory'
   | 'profile'
 
@@ -88,10 +129,14 @@ const navItems: NavItem[] = [
   { key: 'hotel-dashboard', label: 'Dashboard', icon: <LayoutDashboard className="h-4 w-4" />, allowedRoles: ['ADMIN', 'HOTEL_STAFF', 'HOTEL_FD'], group: 'RRP Dream Inn' },
   { key: 'rooms', label: 'Rooms', icon: <Bed className="h-4 w-4" />, allowedRoles: ['ADMIN', 'HOTEL_STAFF', 'HOTEL_FD'], group: 'RRP Dream Inn' },
   { key: 'room-types', label: 'Room Types', icon: <Tag className="h-4 w-4" />, allowedRoles: ['ADMIN', 'HOTEL_STAFF'], group: 'RRP Dream Inn' },
-  { key: 'bookings', label: 'Reservations', icon: <CalendarCheck className="h-4 w-4" />, allowedRoles: ['ADMIN', 'HOTEL_STAFF', 'HOTEL_FD'], group: 'RRP Dream Inn' },
+  { key: 'bookings', label: 'Bookings', icon: <CalendarCheck className="h-4 w-4" />, allowedRoles: ['ADMIN', 'HOTEL_STAFF', 'HOTEL_FD'], group: 'RRP Dream Inn' },
   { key: 'customers', label: 'Guests', icon: <UserCircle className="h-4 w-4" />, allowedRoles: ['ADMIN', 'HOTEL_STAFF', 'HOTEL_FD'], group: 'RRP Dream Inn' },
   { key: 'company-ledger', label: 'Company Ledger', icon: <Building2 className="h-4 w-4" />, allowedRoles: ['ADMIN', 'HOTEL_STAFF', 'HOTEL_FD'], group: 'RRP Dream Inn' },
   { key: 'housekeeping', label: 'Housekeeping', icon: <SprayCan className="h-4 w-4" />, allowedRoles: ['ADMIN', 'HOTEL_STAFF', 'HOTEL_FD'], group: 'RRP Dream Inn' },
+  { key: 'hotel-beverage-sales', label: 'Beverage Sales', icon: <Coffee className="h-4 w-4" />, allowedRoles: ['ADMIN', 'HOTEL_STAFF', 'HOTEL_FD'], group: 'RRP Dream Inn' },
+  // Housekeeper — rooms (view only) + inventory
+  { key: 'rooms', label: 'Rooms', icon: <Bed className="h-4 w-4" />, allowedRoles: ['HOUSEKEEPER'], group: 'Housekeeping' },
+  { key: 'inventory', label: 'Inventory', icon: <Package className="h-4 w-4" />, allowedRoles: ['HOUSEKEEPER'], group: 'Housekeeping' },
   // Restaurant - CloudView
   { key: 'hotel-dashboard', label: 'Dashboard', icon: <LayoutDashboard className="h-4 w-4" />, allowedRoles: ['RESTAURANT_STAFF'], group: 'CloudView' },
   { key: 'pos', label: 'POS Terminal', icon: <ShoppingCart className="h-4 w-4" />, allowedRoles: ['ADMIN', 'RESTAURANT_STAFF'], group: 'CloudView' },
@@ -106,6 +151,8 @@ const navItems: NavItem[] = [
   { key: 'deposits', label: 'Deposits', icon: <Landmark className="h-4 w-4" />, allowedRoles: ['ADMIN', 'HOTEL_STAFF', 'HOTEL_FD'], group: 'Billing' },
   // Analytics
   { key: 'reports', label: 'Reports', icon: <BarChart3 className="h-4 w-4" />, allowedRoles: ['ADMIN', 'HOTEL_STAFF', 'HOTEL_FD', 'RESTAURANT_STAFF'], group: 'Analytics' },
+  { key: 'day-close', label: 'Day Close', icon: <Lock className="h-4 w-4" />, allowedRoles: ['ADMIN', 'HOTEL_STAFF', 'HOTEL_FD'], group: 'Analytics' },
+  { key: 'business-day-reports', label: 'Business Day Reports', icon: <CalendarClock className="h-4 w-4" />, allowedRoles: ['ADMIN', 'HOTEL_STAFF', 'HOTEL_FD', 'RESTAURANT_STAFF'], group: 'Analytics' },
   // Admin
   { key: 'admin-dashboard', label: 'Admin Overview', icon: <LayoutDashboard className="h-4 w-4" />, allowedRoles: ['ADMIN'], group: 'System' },
   { key: 'users', label: 'Users', icon: <Users className="h-4 w-4" />, allowedRoles: ['ADMIN'], group: 'System' },
@@ -113,7 +160,7 @@ const navItems: NavItem[] = [
   { key: 'settings', label: 'Settings', icon: <Settings className="h-4 w-4" />, allowedRoles: ['ADMIN'], group: 'System' },
   { key: 'logs', label: 'Activity Logs', icon: <ScrollText className="h-4 w-4" />, allowedRoles: ['ADMIN'], group: 'System' },
   // Account
-  { key: 'profile', label: 'My Profile', icon: <User className="h-4 w-4" />, allowedRoles: ['ADMIN', 'HOTEL_STAFF', 'HOTEL_FD', 'RESTAURANT_STAFF'], group: 'Account' },
+  { key: 'profile', label: 'My Profile', icon: <User className="h-4 w-4" />, allowedRoles: ['ADMIN', 'HOTEL_STAFF', 'HOTEL_FD', 'RESTAURANT_STAFF', 'HOUSEKEEPER'], group: 'Account' },
 ]
 
 const SIDEBAR_COLLAPSED_KEY = 'erp_sidebar_collapsed'
@@ -158,7 +205,7 @@ function LoginForm() {
             name: u.name,
             avatar: u.avatar ?? null,
             phone: u.phone ?? null,
-            role: u.role as 'ADMIN' | 'HOTEL_STAFF' | 'HOTEL_FD' | 'RESTAURANT_STAFF',
+            role: u.role as 'ADMIN' | 'HOTEL_STAFF' | 'HOTEL_FD' | 'RESTAURANT_STAFF' | 'HOUSEKEEPER',
           },
           res.data.token
         )
@@ -241,6 +288,7 @@ function LoginForm() {
 
 function getDefaultPage(role: string | undefined): PageKey {
   if (role === 'ADMIN') return 'admin-dashboard'
+  if (role === 'HOUSEKEEPER') return 'rooms'
   if (role === 'HOTEL_STAFF' || role === 'HOTEL_FD') return 'hotel-dashboard'
   if (role === 'RESTAURANT_STAFF') return 'hotel-dashboard'
   return 'hotel-dashboard'
@@ -250,10 +298,11 @@ const pageTitles: Record<PageKey, string> = {
   'hotel-dashboard': 'Hotel Dashboard',
   'rooms': 'Room Management',
   'room-types': 'Room Types',
-  'bookings': 'Reservations',
+  'bookings': 'Bookings',
   'customers': 'Guest Management',
   'company-ledger': 'Company Ledger',
   'housekeeping': 'Housekeeping',
+  'hotel-beverage-sales': 'Beverage Sales',
   'pos': 'POS Terminal',
   'menu': 'Menu Management',
   'orders': 'Order Management',
@@ -264,6 +313,8 @@ const pageTitles: Record<PageKey, string> = {
   'payments': 'Payments',
   'deposits': 'Deposits',
   'reports': 'Reports & Analytics',
+  'day-close': 'Day Close',
+  'business-day-reports': 'Business Day Reports',
   'admin-dashboard': 'Admin Dashboard',
   'users': 'User Management',
   'settings': 'System Settings',
@@ -275,6 +326,7 @@ const pageTitles: Record<PageKey, string> = {
 function ERPApp() {
   const { user, logout } = useAuthStore()
   const queryClient = useQueryClient()
+  const { data: businessDateRes } = useBusinessDate()
   const [currentPage, setCurrentPage] = useState<PageKey>(readSavedPageKey)
   const [pageRefreshNonce, setPageRefreshNonce] = useState(0)
   const [headerLoading, setHeaderLoading] = useState(false)
@@ -350,6 +402,7 @@ function ERPApp() {
     HOTEL_STAFF: 'bg-emerald-50 text-emerald-700 border-emerald-200',
     HOTEL_FD: 'bg-teal-50 text-teal-700 border-teal-200',
     RESTAURANT_STAFF: 'bg-amber-50 text-amber-700 border-amber-200',
+    HOUSEKEEPER: 'bg-violet-50 text-violet-700 border-violet-200',
   }
 
   const handlePageNavigation = useCallback((page: PageKey) => {
@@ -378,6 +431,7 @@ function ERPApp() {
       case 'customers': return <CustomersPage />
       case 'company-ledger': return <CompanyLedgerPage />
       case 'housekeeping': return <HousekeepingPage />
+      case 'hotel-beverage-sales': return <HotelBeverageSalesPage />
       case 'pos': return <POSPage />
       case 'menu': return <MenuPage />
       case 'orders': return <OrdersPage />
@@ -388,7 +442,9 @@ function ERPApp() {
       case 'payments': return <PaymentsPage />
       case 'deposits': return <DepositsPage />
       case 'reports': return <ReportsPage />
-      case 'admin-dashboard': return <AdminDashboard />
+      case 'day-close': return <DayClosePage />
+      case 'business-day-reports': return <BusinessDayReportsPage />
+      case 'admin-dashboard': return <AdminDashboard onNavigate={handlePageNavigation} />
       case 'users': return <UsersPage />
       case 'settings': return <SettingsPage />
       case 'logs': return <ActivityLogsPage />
@@ -602,6 +658,24 @@ function ERPApp() {
           </div>
           <div className="flex items-center gap-2">
             <div className="flex flex-row flex-wrap items-center justify-end gap-2">
+              {businessDateRes?.data?.businessDate && (
+                <div
+                  className={cn(
+                    'rounded-md border px-2.5 py-1 text-[11px] font-semibold sm:text-xs',
+                    businessDateRes.data.dayCloseRequired
+                      ? 'border-amber-400 bg-amber-50 text-amber-800'
+                      : 'border-amber-300 bg-amber-50 text-amber-800'
+                  )}
+                  title={
+                    businessDateRes.data.dayCloseRequired
+                      ? businessDateRes.data.dayCloseMessage ?? 'Day close pending'
+                      : undefined
+                  }
+                >
+                  Business: {businessDateRes.data.businessDate}
+                  {businessDateRes.data.dayCloseRequired ? ' · Close pending' : ''}
+                </div>
+              )}
               <div className="rounded-md border border-border bg-card px-2.5 py-1 text-[11px] font-medium text-muted-foreground sm:text-xs">
                 {now.toLocaleDateString('en-US', {
                   weekday: 'short',
@@ -725,6 +799,12 @@ function ERPApp() {
             </DropdownMenu>
           </div>
         </header>
+
+        {businessDateRes?.data?.dayCloseRequired && canAccessHotel(user?.role) && (
+          <div className="px-4 md:px-6 pt-3">
+            <DayCloseGateBanner onGoToDayClose={() => handlePageNavigation('day-close')} />
+          </div>
+        )}
 
         {/* Page Content */}
         <div key={`${currentPage}-${pageRefreshNonce}`} className="flex-1 p-4 md:p-6 overflow-auto">

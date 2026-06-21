@@ -2,11 +2,23 @@ import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { requireAuth, canAccessHotel, canAccessRestaurant, canAccessAdmin } from '@/lib/auth';
 import { successResponse, errorResponse } from '@/lib/api-utils';
+import {
+  buildBusinessDayArrivalsWhere,
+  buildBusinessDayDeparturesWhere,
+  buildBusinessDayWindowWhere,
+  buildCurrentOpenDayActivityWhere,
+  buildExpectedArrivalsOnBusinessDateWhere,
+  buildInHouseOnBusinessDateWhere,
+  getCalendarDayBounds,
+  getOpenBusinessDayWindow,
+  readCurrentBusinessDateString,
+} from '@/lib/business-date';
+import { sumBookingNetPaid } from '@/lib/booking-totals';
 
 // GET /api/dashboard - Dashboard stats based on user role
 export async function GET(request: NextRequest) {
   try {
-    const authResult = requireAuth(request);
+    const authResult = await requireAuth(request);
     if (authResult instanceof Response) return authResult;
 
     const user = authResult;
@@ -30,36 +42,66 @@ export async function GET(request: NextRequest) {
 
 // Admin Dashboard - Full system overview
 async function handleAdminDashboard() {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const tomorrow = new Date(today);
-  tomorrow.setDate(tomorrow.getDate() + 1);
+  const businessDate = await readCurrentBusinessDateString();
+  const { openedAt } = await getOpenBusinessDayWindow();
+  const now = new Date();
+  const openDayWhere = await buildCurrentOpenDayActivityWhere();
+  const { start: today } = getCalendarDayBounds(businessDate);
+  const todayEnd = new Date(today);
+  todayEnd.setHours(23, 59, 59, 999);
+  const tomorrow = new Date(todayEnd);
+  tomorrow.setMilliseconds(tomorrow.getMilliseconds() + 1);
 
-  // Today's check-ins
-  const todaysCheckins = await db.booking.findMany({
-    where: {
-      checkIn: { gte: today, lt: tomorrow },
-      status: { not: 'CANCELLED' },
-    },
-    include: {
-      customer: { select: { id: true, name: true, phone: true } },
-      room: { select: { id: true, roomNumber: true, type: { select: { name: true } } } },
-    },
-    take: 10,
-  });
+  // Expected arrivals + actual check-ins for the business day
+  const [todaysCheckinCount, todaysCheckins, expectedArrivals] = await Promise.all([
+    db.booking.count({
+      where: buildBusinessDayArrivalsWhere(businessDate, openedAt, now),
+    }),
+    db.booking.findMany({
+      where: buildBusinessDayArrivalsWhere(businessDate, openedAt, now),
+      include: {
+        customer: { select: { id: true, name: true, phone: true } },
+        room: { select: { id: true, roomNumber: true, type: { select: { name: true } } } },
+      },
+      orderBy: [{ status: 'asc' }, { checkIn: 'asc' }],
+      take: 20,
+    }),
+    db.booking.count({
+      where: buildExpectedArrivalsOnBusinessDateWhere(businessDate),
+    }),
+  ]);
 
-  // Today's check-outs
-  const todaysCheckouts = await db.booking.findMany({
-    where: {
-      checkOut: { gte: today, lt: tomorrow },
-      status: { not: 'CANCELLED' },
-    },
-    include: {
-      customer: { select: { id: true, name: true } },
-      room: { select: { id: true, roomNumber: true } },
-    },
-    take: 10,
-  });
+  // Check-outs during the open business day window + scheduled departures
+  const [todaysCheckoutCount, todaysCheckouts] = await Promise.all([
+    db.booking.count({
+      where: buildBusinessDayDeparturesWhere(businessDate),
+    }),
+    db.booking.findMany({
+      where: buildBusinessDayDeparturesWhere(businessDate),
+      include: {
+        customer: { select: { id: true, name: true } },
+        room: { select: { id: true, roomNumber: true } },
+      },
+      orderBy: { checkOut: 'asc' },
+      take: 20,
+    }),
+  ]);
+
+  // In-house guests on the current business day (multi-day stays included)
+  const [inHouseGuestCount, inHouseGuests] = await Promise.all([
+    db.booking.count({
+      where: { AND: [buildInHouseOnBusinessDateWhere(businessDate), { status: 'CHECKED_IN' }] },
+    }),
+    db.booking.findMany({
+      where: { AND: [buildInHouseOnBusinessDateWhere(businessDate), { status: 'CHECKED_IN' }] },
+      include: {
+        customer: { select: { id: true, name: true, phone: true } },
+        room: { select: { id: true, roomNumber: true, type: { select: { name: true } } } },
+      },
+      take: 20,
+      orderBy: { actualCheckIn: 'asc' },
+    }),
+  ]);
 
   // Room status summary
   const totalRooms = await db.room.count();
@@ -68,11 +110,9 @@ async function handleAdminDashboard() {
   const cleaningRooms = await db.room.count({ where: { status: 'CLEANING' } });
   const maintenanceRooms = await db.room.count({ where: { status: 'MAINTENANCE' } });
 
-  // Today's restaurant orders
+  // Today's restaurant orders (open business day window)
   const todaysOrders = await db.restaurantOrder.findMany({
-    where: {
-      createdAt: { gte: today, lt: tomorrow },
-    },
+    where: openDayWhere,
   });
 
   const todaysOrderCount = todaysOrders.length;
@@ -81,25 +121,42 @@ async function handleAdminDashboard() {
     .reduce((sum, o) => sum + o.totalAmount, 0);
 
   // Revenue summary
-  const allBookings = await db.booking.findMany({
+  const bookingTotals = await db.booking.aggregate({
     where: { status: { not: 'CANCELLED' } },
+    _sum: { totalRoomCharge: true, dueAmount: true },
   });
 
-  const hotelRevenue = allBookings.reduce((sum, b) => sum + b.totalRoomCharge, 0);
-  const totalDue = allBookings.reduce((sum, b) => sum + b.dueAmount, 0);
+  const hotelRevenue = bookingTotals._sum.totalRoomCharge ?? 0;
+  const totalDue = bookingTotals._sum.dueAmount ?? 0;
 
-  const allOrders = await db.restaurantOrder.findMany({
+  const orderTotals = await db.restaurantOrder.aggregate({
     where: { status: { not: 'CANCELLED' } },
+    _sum: { totalAmount: true },
   });
 
-  const restaurantRevenue = allOrders.reduce((sum, o) => sum + o.totalAmount, 0);
+  const restaurantRevenue = orderTotals._sum.totalAmount ?? 0;
 
-  // Today's payments
+  // Today's payments (open business day window)
   const todaysPayments = await db.payment.findMany({
-    where: { createdAt: { gte: today, lt: tomorrow } },
+    where: openDayWhere,
   });
 
-  const todaysRevenue = todaysPayments.reduce((sum, p) => sum + p.amount, 0);
+  const todaysRevenue = sumBookingNetPaid(todaysPayments);
+
+  const businessDayInvoices = await db.invoice.findMany({
+    where: {
+      status: { not: 'CANCELLED' },
+      OR: [
+        { businessDate },
+        {
+          businessDate: null,
+          createdAt: { gte: openedAt, lte: now },
+        },
+      ],
+    },
+    select: { totalAmount: true },
+  });
+  const businessDayHotelSales = businessDayInvoices.reduce((sum, inv) => sum + inv.totalAmount, 0);
 
   // Recent activities
   const recentActivities = await db.activityLog.findMany({
@@ -144,9 +201,12 @@ async function handleAdminDashboard() {
 
   return successResponse({
     role: 'ADMIN',
-    today: today.toISOString().slice(0, 10),
-    checkIns: { count: todaysCheckins.length, items: todaysCheckins },
-    checkOuts: { count: todaysCheckouts.length, items: todaysCheckouts },
+    today: businessDate,
+    businessDate,
+    calendarDate: new Date().toISOString().slice(0, 10),
+    checkIns: { count: todaysCheckinCount, items: todaysCheckins, expectedArrivals },
+    checkOuts: { count: todaysCheckoutCount, items: todaysCheckouts },
+    inHouseGuests: { count: inHouseGuestCount, items: inHouseGuests },
     rooms: {
       total: totalRooms,
       occupied: occupiedRooms,
@@ -166,6 +226,9 @@ async function handleAdminDashboard() {
       totalRevenue: hotelRevenue + restaurantRevenue,
       totalDue,
       todaysRevenue,
+      businessDayHotelSales,
+      businessDayRestaurantSales: todaysFoodSales,
+      businessDayCollections: todaysRevenue,
     },
     activeBookings,
     pendingInvoices,
@@ -178,10 +241,9 @@ async function handleAdminDashboard() {
 
 // Hotel Staff Dashboard - Hotel-focused
 async function handleHotelDashboard(role: 'HOTEL_STAFF' | 'HOTEL_FD') {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const tomorrow = new Date(today);
-  tomorrow.setDate(tomorrow.getDate() + 1);
+  const businessDate = await readCurrentBusinessDateString();
+  const { openedAt } = await getOpenBusinessDayWindow();
+  const now = new Date();
 
   // Rooms by status
   const totalRooms = await db.room.count();
@@ -198,33 +260,57 @@ async function handleHotelDashboard(role: 'HOTEL_STAFF' | 'HOTEL_FD') {
   const occupiedRooms = roomStatusMap['OCCUPIED'] || 0;
   const availableRooms = roomStatusMap['AVAILABLE'] || 0;
 
-  // Today's arrivals
-  const todaysArrivals = await db.booking.findMany({
-    where: {
-      checkIn: { gte: today, lt: tomorrow },
-      status: { not: 'CANCELLED' },
-    },
-    include: {
-      customer: { select: { id: true, name: true, phone: true } },
-      room: { select: { id: true, roomNumber: true, type: { select: { name: true, basePrice: true } } } },
-    },
-    orderBy: { checkIn: 'asc' },
-  });
+  const [arrivalCount, todaysArrivals, expectedArrivals] = await Promise.all([
+    db.booking.count({
+      where: buildBusinessDayArrivalsWhere(businessDate, openedAt, now),
+    }),
+    db.booking.findMany({
+      where: buildBusinessDayArrivalsWhere(businessDate, openedAt, now),
+      include: {
+        customer: { select: { id: true, name: true, phone: true } },
+        room: { select: { id: true, roomNumber: true, totalPrice: true, type: { select: { name: true } } } },
+      },
+      orderBy: [{ status: 'asc' }, { checkIn: 'asc' }],
+      take: 50,
+    }),
+    db.booking.count({
+      where: buildExpectedArrivalsOnBusinessDateWhere(businessDate),
+    }),
+  ]);
 
-  // Today's departures
-  const todaysDepartures = await db.booking.findMany({
-    where: {
-      checkOut: { gte: today, lt: tomorrow },
-      status: { not: 'CANCELLED' },
-    },
-    include: {
-      customer: { select: { id: true, name: true } },
-      room: { select: { id: true, roomNumber: true } },
-    },
-    orderBy: { checkOut: 'asc' },
-  });
+  // Scheduled departures + completed check-outs on the business day
+  const [departureCount, todaysDepartures] = await Promise.all([
+    db.booking.count({
+      where: buildBusinessDayDeparturesWhere(businessDate),
+    }),
+    db.booking.findMany({
+      where: buildBusinessDayDeparturesWhere(businessDate),
+      include: {
+        customer: { select: { id: true, name: true } },
+        room: { select: { id: true, roomNumber: true } },
+      },
+      orderBy: { checkOut: 'asc' },
+      take: 50,
+    }),
+  ]);
 
-  // Active bookings
+  // In-house guests on the current business day (multi-day stays included)
+  const [inHouseGuestCount, inHouseGuests] = await Promise.all([
+    db.booking.count({
+      where: { AND: [buildInHouseOnBusinessDateWhere(businessDate), { status: 'CHECKED_IN' }] },
+    }),
+    db.booking.findMany({
+      where: { AND: [buildInHouseOnBusinessDateWhere(businessDate), { status: 'CHECKED_IN' }] },
+      include: {
+        customer: { select: { id: true, name: true, phone: true } },
+        room: { select: { id: true, roomNumber: true, type: { select: { name: true } } } },
+      },
+      take: 50,
+      orderBy: { actualCheckIn: 'asc' },
+    }),
+  ]);
+
+  // Active bookings (reserved + checked in)
   const activeBookings = await db.booking.findMany({
     where: { status: { in: ['CHECKED_IN', 'RESERVED'] } },
     include: {
@@ -264,7 +350,9 @@ async function handleHotelDashboard(role: 'HOTEL_STAFF' | 'HOTEL_FD') {
 
   return successResponse({
     role,
-    today: today.toISOString().slice(0, 10),
+    today: businessDate,
+    businessDate,
+    calendarDate: new Date().toISOString().slice(0, 10),
     rooms: {
       total: totalRooms,
       byStatus: roomStatusMap,
@@ -272,8 +360,9 @@ async function handleHotelDashboard(role: 'HOTEL_STAFF' | 'HOTEL_FD') {
       available: availableRooms,
       occupancyRate: totalRooms > 0 ? Math.round((occupiedRooms / totalRooms) * 10000) / 100 : 0,
     },
-    arrivals: { count: todaysArrivals.length, items: todaysArrivals },
-    departures: { count: todaysDepartures.length, items: todaysDepartures },
+    arrivals: { count: arrivalCount, items: todaysArrivals, expectedArrivals },
+    departures: { count: departureCount, items: todaysDepartures },
+    inHouseGuests: { count: inHouseGuestCount, items: inHouseGuests },
     activeBookings: { count: activeBookings.length, items: activeBookings },
     roomServiceOrders: recentRoomOrders,
     housekeeping: {
@@ -285,10 +374,8 @@ async function handleHotelDashboard(role: 'HOTEL_STAFF' | 'HOTEL_FD') {
 
 // Restaurant Staff Dashboard - Restaurant-focused
 async function handleRestaurantDashboard() {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const tomorrow = new Date(today);
-  tomorrow.setDate(tomorrow.getDate() + 1);
+  const businessDate = await readCurrentBusinessDateString();
+  const openDayWhere = await buildCurrentOpenDayActivityWhere();
 
   // Active orders
   const activeOrders = await db.restaurantOrder.findMany({
@@ -304,10 +391,10 @@ async function handleRestaurantDashboard() {
     take: 20,
   });
 
-  // Today's sales
+  // Today's sales (open business day window)
   const todaysOrders = await db.restaurantOrder.findMany({
     where: {
-      createdAt: { gte: today, lt: tomorrow },
+      ...openDayWhere,
       status: { not: 'CANCELLED' },
     },
   });
@@ -367,7 +454,9 @@ async function handleRestaurantDashboard() {
 
   return successResponse({
     role: 'RESTAURANT_STAFF',
-    today: today.toISOString().slice(0, 10),
+    today: businessDate,
+    businessDate,
+    calendarDate: new Date().toISOString().slice(0, 10),
     activeOrders: { count: activeOrders.length, items: activeOrders },
     sales: {
       todaysSales,

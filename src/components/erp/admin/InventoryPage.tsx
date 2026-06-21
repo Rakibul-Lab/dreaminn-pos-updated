@@ -3,11 +3,11 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api-client'
-import { useAuthStore, canAccessAdmin } from '@/lib/auth-store'
+import { useAuthStore, canAccessInventory } from '@/lib/auth-store'
 import { useToast } from '@/hooks/use-toast'
 import {
   Package, Plus, Edit2, ArrowUpCircle, ArrowDownCircle, AlertTriangle,
-  RefreshCw, Filter, Search
+  RefreshCw, Filter, FileDown, Loader2
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -26,6 +26,12 @@ import {
 import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
 import { Separator } from '@/components/ui/separator'
+import {
+  buildInventoryExportQuery,
+  downloadInventoryExcel,
+  downloadInventoryPdf,
+  type InventoryExportRecord,
+} from '@/lib/inventory-export'
 
 interface InventoryItem {
   id: string
@@ -52,6 +58,7 @@ export default function InventoryPage() {
   const [showTransactionDialog, setShowTransactionDialog] = useState(false)
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null)
   const [selectedItemId, setSelectedItemId] = useState<string>('')
+  const [exporting, setExporting] = useState<'excel' | 'pdf' | null>(null)
 
   const [itemForm, setItemForm] = useState({
     name: '',
@@ -81,7 +88,7 @@ export default function InventoryPage() {
       const res = await api.get<{ success: boolean; data: InventoryItem[]; meta?: { total: number; totalPages: number } }>(`/inventory?${params.toString()}`)
       return res
     },
-    enabled: !!user && canAccessAdmin(user?.role),
+    enabled: !!user && canAccessInventory(user?.role),
   })
 
   // Create/Update item mutation
@@ -157,12 +164,12 @@ export default function InventoryPage() {
     setShowTransactionDialog(true)
   }
 
-  if (!user || !canAccessAdmin(user.role)) {
+  if (!user || !canAccessInventory(user.role)) {
     return (
       <Card className="border-amber-200 bg-amber-50">
         <CardContent className="p-6 text-center">
           <p className="text-amber-700 font-medium">Access Denied</p>
-          <p className="text-amber-600 text-sm mt-1">Only administrators can manage inventory.</p>
+          <p className="text-amber-600 text-sm mt-1">You do not have permission to manage inventory.</p>
         </CardContent>
       </Card>
     )
@@ -175,6 +182,64 @@ export default function InventoryPage() {
   // Extract unique categories
   const categories = [...new Set(items.map((i) => i.category).filter(Boolean))] as string[]
 
+  const buildExportMeta = () => ({
+    exportedAt: new Date(),
+    generatedBy: user ? { name: user.name, email: user.email, role: user.role } : undefined,
+    category: categoryFilter,
+    lowStockOnly: showLowStock,
+  })
+
+  const fetchExportRows = async (): Promise<InventoryExportRecord[]> => {
+    const path = buildInventoryExportQuery({
+      category: categoryFilter,
+      lowStock: showLowStock,
+    })
+    const res = await api.get<{ success: boolean; data: InventoryExportRecord[] }>(path)
+    return res.data ?? []
+  }
+
+  const handleExportExcel = async () => {
+    setExporting('excel')
+    try {
+      const rows = await fetchExportRows()
+      if (!rows.length) {
+        toast({ title: 'No items to export', description: 'Adjust filters to include inventory items.', variant: 'destructive' })
+        return
+      }
+      await downloadInventoryExcel(rows, buildExportMeta())
+      toast({ title: 'Export complete', description: `Exported ${rows.length} item(s) to Excel` })
+    } catch (err) {
+      toast({
+        title: 'Export failed',
+        description: err instanceof Error ? err.message : 'Could not export inventory',
+        variant: 'destructive',
+      })
+    } finally {
+      setExporting(null)
+    }
+  }
+
+  const handleExportPdf = async () => {
+    setExporting('pdf')
+    try {
+      const rows = await fetchExportRows()
+      if (!rows.length) {
+        toast({ title: 'No items to export', description: 'Adjust filters to include inventory items.', variant: 'destructive' })
+        return
+      }
+      await downloadInventoryPdf(rows, buildExportMeta())
+      toast({ title: 'Export complete', description: `Exported ${rows.length} item(s) to PDF` })
+    } catch (err) {
+      toast({
+        title: 'Export failed',
+        description: err instanceof Error ? err.message : 'Could not export inventory',
+        variant: 'destructive',
+      })
+    } finally {
+      setExporting(null)
+    }
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
@@ -185,7 +250,33 @@ export default function InventoryPage() {
           </h2>
           <p className="text-muted-foreground text-sm mt-1">Manage stock items and supplies</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void handleExportExcel()}
+            disabled={!!exporting || isLoading}
+          >
+            {exporting === 'excel' ? (
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            ) : (
+              <FileDown className="h-4 w-4 mr-2" />
+            )}
+            Export Excel
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void handleExportPdf()}
+            disabled={!!exporting || isLoading}
+          >
+            {exporting === 'pdf' ? (
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            ) : (
+              <FileDown className="h-4 w-4 mr-2" />
+            )}
+            Export PDF
+          </Button>
           <Button
             variant="outline"
             size="sm"

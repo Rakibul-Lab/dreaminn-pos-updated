@@ -10,7 +10,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const authResult = requireAuth(request);
+    const authResult = await requireAuth(request);
     if (authResult instanceof Response) return authResult;
 
     const { id } = await params;
@@ -59,6 +59,10 @@ export async function GET(
           name: true,
           email: true,
         },
+      },
+      payments: {
+        select: { amount: true, paymentType: true, settlementSource: true },
+        orderBy: { createdAt: 'asc' },
       },
     };
 

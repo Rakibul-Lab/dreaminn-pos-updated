@@ -6,7 +6,7 @@ import { successResponse, errorResponse, logActivity } from '@/lib/api-utils';
 /** List waiters for POS (`forPos=1`) or management (default, includes order counts). */
 export async function GET(request: NextRequest) {
   try {
-    const authResult = requireAuth(request);
+    const authResult = await requireAuth(request);
     if (authResult instanceof Response) return authResult;
 
     if (!canAccessRestaurant(authResult.role)) {
@@ -46,7 +46,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const authResult = requireRole(request, 'ADMIN', 'RESTAURANT_STAFF');
+    const authResult = await requireRole(request, 'ADMIN', 'RESTAURANT_STAFF');
     if (authResult instanceof Response) return authResult;
 
     const body = await request.json();

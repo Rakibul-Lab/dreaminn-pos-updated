@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
 // POST /api/restaurant-tables - Create table (ADMIN and RESTAURANT_STAFF only)
 export async function POST(request: NextRequest) {
   try {
-    const authResult = requireRole(request, 'ADMIN', 'RESTAURANT_STAFF');
+    const authResult = await requireRole(request, 'ADMIN', 'RESTAURANT_STAFF');
     if (authResult instanceof Response) return authResult;
 
     const body = await request.json();
@@ -68,7 +68,7 @@ export async function POST(request: NextRequest) {
 // PUT /api/restaurant-tables - Update table status (ADMIN and RESTAURANT_STAFF only)
 export async function PUT(request: NextRequest) {
   try {
-    const authResult = requireRole(request, 'ADMIN', 'RESTAURANT_STAFF');
+    const authResult = await requireRole(request, 'ADMIN', 'RESTAURANT_STAFF');
     if (authResult instanceof Response) return authResult;
 
     const body = await request.json();

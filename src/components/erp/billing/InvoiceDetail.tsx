@@ -3,6 +3,11 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api-client'
+import { formatInvoiceNumberDisplay } from '@/lib/invoice-number'
+import {
+  resolveInvoiceHotelServicePercent,
+  resolveInvoiceRoomVatAmount,
+} from '@/lib/invoice-display'
 import { useToast } from '@/hooks/use-toast'
 import { format } from 'date-fns'
 import Image from 'next/image'
@@ -66,6 +71,7 @@ interface InvoiceData {
   paidAmount: number
   dueAmount: number
   declaredVatPercent?: number
+  declaredServiceChargePercent?: number
   status: string
   issuedAt: string | null
   paidAt: string | null
@@ -76,7 +82,7 @@ interface InvoiceData {
     checkOut: string
     status: string
     customer: { id: string; name: string; phone: string; email: string | null; address: string | null }
-    room: { id: string; roomNumber: string; type: { name: string; basePrice: number } }
+    room: { id: string; roomNumber: string; totalPrice: number; type: { name: string } }
     charges: Array<{ id: string; chargeType: string; description: string; amount: number; quantity: number }>
     restaurantOrders?: Array<{
       id: string
@@ -137,12 +143,19 @@ export default function InvoiceDetail({ invoiceId, onClose }: InvoiceDetailProps
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['invoice-detail', invoiceId] })
       queryClient.invalidateQueries({ queryKey: ['invoices'] })
-      toast({ title: 'Payment Recorded', description: 'Payment has been recorded successfully' })
-      setShowPaymentDialog(false)
-      setPaymentForm({ amount: '', method: 'CASH', paymentType: 'PARTIAL', reference: '', notes: '' })
+      toast({
+        title: 'Payment Recorded',
+        description: 'Payment saved — enter another or close when done',
+      })
+      setPaymentForm((f) => ({
+        ...f,
+        amount: '',
+        reference: '',
+        notes: '',
+      }))
     },
-    onError: () => {
-      toast({ title: 'Error', description: 'Failed to record payment', variant: 'destructive' })
+    onError: (err: Error) => {
+      toast({ title: 'Error', description: err.message || 'Failed to record payment', variant: 'destructive' })
     },
   })
 
@@ -160,13 +173,25 @@ export default function InvoiceDetail({ invoiceId, onClose }: InvoiceDetailProps
   const restaurantBill = Math.max(0, restaurantSubtotal - restaurantDiscount)
   const extraBill = invoice?.extraCharges || 0
   const restaurantVat = restaurantOrders.reduce((sum, o) => sum + o.vatAmount, 0)
-  const roomVat = Math.max(0, (invoice?.vatAmount || 0) - restaurantVat)
+  const roomVat = invoice
+    ? resolveInvoiceRoomVatAmount({
+        invoiceVatAmount: invoice.vatAmount || 0,
+        restaurantVat,
+        roomCharges: roomBill,
+        discount: invoice.discount || 0,
+        booking: invoice.booking,
+      })
+    : 0
   const hotelVatPercent = invoice?.declaredVatPercent ?? 15
+  const hotelServiceChargePercent = invoice?.declaredServiceChargePercent ?? 10
+  const vatInclusiveRoom = invoice?.booking?.vatApplied === false
   const vatRates = Array.from(new Set(restaurantOrders.map((o) => Number(o.vatPercent || 0))))
     .filter((v) => Number.isFinite(v))
     .sort((a, b) => a - b)
   const restaurantVatLabel = vatRates.length ? vatRates.map((r) => `${r}%`).join(', ') : '-'
-  const hotelPartTotal = roomBill + roomVat + extraBill
+  const hotelPartTotal = vatInclusiveRoom
+    ? roomBill + extraBill
+    : roomBill + roomVat + extraBill
   const restaurantPartTotal = restaurantBill + restaurantVat
 
   if (isLoading) {
@@ -199,7 +224,9 @@ export default function InvoiceDetail({ invoiceId, onClose }: InvoiceDetailProps
               </h2>
             </div>
           </div>
-          <p className="font-mono text-lg text-amber-700 mt-1">{invoice.invoiceNumber}</p>
+          <p className="font-mono text-lg text-amber-700 mt-1">
+            {formatInvoiceNumberDisplay(invoice.invoiceNumber)}
+          </p>
           <p className="text-sm text-muted-foreground">
             Issued: {invoice.issuedAt ? format(new Date(invoice.issuedAt), 'MMM dd, yyyy HH:mm') : 'N/A'}
           </p>
@@ -397,6 +424,10 @@ export default function InvoiceDetail({ invoiceId, onClose }: InvoiceDetailProps
                 <span>Hotel VAT Rate</span>
                 <span>{hotelVatPercent}%</span>
               </div>
+              <div className="flex justify-between text-xs text-muted-foreground">
+                <span>Service Charge Rate</span>
+                <span>{hotelServiceChargePercent}%</span>
+              </div>
               {extraBill > 0 && (
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Extra Charges</span>
@@ -557,7 +588,7 @@ export default function InvoiceDetail({ invoiceId, onClose }: InvoiceDetailProps
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowPaymentDialog(false)}>Cancel</Button>
+            <Button variant="outline" onClick={() => setShowPaymentDialog(false)}>Done</Button>
             <Button
               className="bg-emerald-600 hover:bg-emerald-700 text-white"
               disabled={!paymentForm.amount || parseFloat(paymentForm.amount) <= 0 || recordPaymentMutation.isPending}

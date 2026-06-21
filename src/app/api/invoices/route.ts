@@ -1,15 +1,29 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
-import { requireRole, canAccessHotel } from '@/lib/auth';
+import { requireRole } from '@/lib/auth';
 import { successResponse, errorResponse, paginatedResponse, notFoundResponse, logActivity, generateInvoiceNumber } from '@/lib/api-utils';
 import { InvoiceStatus } from '@prisma/client';
 import { bookingVatOptions, sumBookingNetPaid } from '@/lib/booking-totals';
-import { buildInvoiceLineItems, replaceInvoiceLineItems } from '@/lib/invoice-line-items';
+import {
+  buildInvoiceLineItems,
+  buildManualInvoiceLineItems,
+  replaceInvoiceLineItems,
+} from '@/lib/invoice-line-items';
+import { computeHotelDiscountAmount, parseBookingDiscountType } from '@/lib/booking-discount';
+import { resolveInvoiceBooking } from '@/lib/invoice-booking-resolve';
+import { isStayDatetimeRangeValid } from '@/lib/hotel-times';
+import { stampCurrentBusinessDate } from '@/lib/business-date';
+
+function parseOptionalAmount(value: unknown): number | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  const parsed = parseFloat(String(value));
+  return Number.isNaN(parsed) ? undefined : Math.max(0, parsed);
+}
 
 // GET /api/invoices - List invoices with filters
 export async function GET(request: NextRequest) {
   try {
-    const authResult = requireRole(request, 'ADMIN', 'HOTEL_STAFF', 'HOTEL_FD');
+    const authResult = await requireRole(request, 'ADMIN', 'HOTEL_STAFF', 'HOTEL_FD');
     if (authResult instanceof Response) return authResult;
 
     const { searchParams } = new URL(request.url);
@@ -21,7 +35,6 @@ export async function GET(request: NextRequest) {
 
     const skip = (page - 1) * limit;
 
-    // Build where clause
     const where: Record<string, unknown> = {};
 
     if (bookingId) {
@@ -75,38 +88,135 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// POST /api/invoices - Generate unified invoice for a booking
+// POST /api/invoices - Generate invoice (auto or manual amounts / guest fields)
 export async function POST(request: NextRequest) {
   try {
-    const authResult = requireRole(request, 'ADMIN', 'HOTEL_STAFF', 'HOTEL_FD');
+    const authResult = await requireRole(request, 'ADMIN', 'HOTEL_STAFF', 'HOTEL_FD');
     if (authResult instanceof Response) return authResult;
 
     const user = authResult;
     const body = await request.json();
-    const { bookingId } = body;
+    const { bookingId: bookingIdInput, roomId, guest } = body;
 
-    if (!bookingId) {
-      return errorResponse('Booking ID is required');
+    const roomChargesOverride = parseOptionalAmount(body.roomCharges);
+    const foodChargesOverride = parseOptionalAmount(body.foodCharges);
+    const serviceChargesOverride = parseOptionalAmount(body.extraCharges ?? body.serviceCharges);
+    const discountOverride = parseOptionalAmount(body.discount);
+    const vatPercentOverride = parseOptionalAmount(body.vatPercent);
+    const paidAmountOverride = parseOptionalAmount(body.paidAmount);
+
+    let stayCheckIn: Date | undefined;
+    let stayCheckOut: Date | undefined;
+    if (body.checkIn && body.checkOut) {
+      stayCheckIn = new Date(body.checkIn);
+      stayCheckOut = new Date(body.checkOut);
+      if (
+        Number.isNaN(stayCheckIn.getTime()) ||
+        Number.isNaN(stayCheckOut.getTime()) ||
+        !isStayDatetimeRangeValid(stayCheckIn, stayCheckOut)
+      ) {
+        return errorResponse('Check-out must be after check-in');
+      }
     }
 
-    // Fetch booking with customer and room
-    const booking = await db.booking.findUnique({
-      where: { id: bookingId },
-      include: {
-        customer: true,
-        room: {
-          include: { type: true },
+    const manualMode =
+      roomChargesOverride !== undefined ||
+      foodChargesOverride !== undefined ||
+      serviceChargesOverride !== undefined ||
+      discountOverride !== undefined ||
+      vatPercentOverride !== undefined ||
+      paidAmountOverride !== undefined ||
+      !!guest ||
+      !!stayCheckIn;
+
+    let booking;
+    if (bookingIdInput) {
+      booking = await db.booking.findUnique({
+        where: { id: bookingIdInput },
+        include: {
+          customer: true,
+          room: {
+            include: { type: true },
+          },
+          charges: true,
+          payments: true,
         },
-        charges: true,
-        payments: true,
-      },
-    });
+      });
 
-    if (!booking) {
-      return notFoundResponse('Booking');
+      if (!booking) {
+        return notFoundResponse('Booking');
+      }
+
+      if (guest && typeof guest === 'object') {
+        const customerUpdate: Record<string, unknown> = {};
+        if (guest.name !== undefined) customerUpdate.name = String(guest.name || '').trim();
+        if (guest.phone !== undefined) customerUpdate.phone = String(guest.phone || '').trim();
+        if (guest.email !== undefined) customerUpdate.email = guest.email?.trim() || null;
+        if (guest.address !== undefined) customerUpdate.address = guest.address?.trim() || null;
+        if (guest.nationality !== undefined) customerUpdate.nationality = guest.nationality?.trim() || null;
+        if (guest.idNumber !== undefined) customerUpdate.idNumber = guest.idNumber?.trim() || null;
+        if (guest.registrationNumber !== undefined) {
+          customerUpdate.registrationNumber = guest.registrationNumber?.trim() || null;
+        }
+        if (Object.keys(customerUpdate).length > 0) {
+          await db.customer.update({
+            where: { id: booking.customerId },
+            data: customerUpdate,
+          });
+          Object.assign(booking.customer, customerUpdate);
+        }
+      }
+
+      if (stayCheckIn && stayCheckOut) {
+        booking = await db.booking.update({
+          where: { id: booking.id },
+          data: { checkIn: stayCheckIn, checkOut: stayCheckOut },
+          include: {
+            customer: true,
+            room: { include: { type: true } },
+            charges: true,
+            payments: true,
+          },
+        });
+      }
+    } else if (
+      roomId &&
+      stayCheckIn &&
+      stayCheckOut &&
+      guest &&
+      typeof guest === 'object' &&
+      String(guest.name || '').trim() &&
+      String(guest.phone || '').trim()
+    ) {
+      try {
+        booking = await resolveInvoiceBooking({
+          roomId: String(roomId),
+          checkIn: stayCheckIn,
+          checkOut: stayCheckOut,
+          guest: {
+            name: String(guest.name).trim(),
+            phone: String(guest.phone).trim(),
+            email: guest.email,
+            address: guest.address,
+            nationality: guest.nationality,
+            idNumber: guest.idNumber,
+            registrationNumber: guest.registrationNumber,
+          },
+          roomCharges: roomChargesOverride ?? 0,
+          userId: user.id,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to resolve booking';
+        return errorResponse(message);
+      }
+    } else {
+      return errorResponse('Room, check-in, check-out, and guest name/phone are required');
     }
 
-    // Check if an invoice already exists for this booking (non-cancelled)
+    const bookingId = booking.id;
+    const invoiceCheckIn = stayCheckIn ?? booking.checkIn;
+    const invoiceCheckOut = stayCheckOut ?? booking.checkOut;
+
     const existingInvoice = await db.invoice.findFirst({
       where: {
         bookingId,
@@ -114,20 +224,17 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // Auto-fetch all room charges for the booking
-    // Include both individual RoomCharge entries and the booking's totalRoomCharge
     const individualRoomCharges = booking.charges
       .filter((c) => c.chargeType === 'ROOM_RATE')
       .reduce((sum, c) => sum + c.amount * c.quantity, 0);
 
-    const extraCharges = booking.charges
+    const autoExtraCharges = booking.charges
       .filter((c) => c.chargeType !== 'ROOM_RATE')
       .reduce((sum, c) => sum + c.amount * c.quantity, 0);
 
-    // Use booking's totalRoomCharge if no individual room charge entries exist
-    const roomCharges = individualRoomCharges > 0 ? individualRoomCharges : booking.totalRoomCharge;
+    const autoRoomCharges =
+      individualRoomCharges > 0 ? individualRoomCharges : booking.totalRoomCharge;
 
-    // Auto-fetch all restaurant orders linked to the booking
     const restaurantOrders = await db.restaurantOrder.findMany({
       where: {
         bookingId,
@@ -142,63 +249,82 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // Restaurant financials (from order source of truth)
-    const restaurantNet = restaurantOrders.reduce(
+    const autoRestaurantNet = restaurantOrders.reduce(
       (sum, order) => sum + Math.max(0, order.subtotal - order.discount),
       0
     );
     const restaurantVat = restaurantOrders.reduce((sum, order) => sum + order.vatAmount, 0);
     const restaurantTotal = restaurantOrders.reduce((sum, order) => sum + order.totalAmount, 0);
 
-    // Hotel taxable base
-    const hotelBase = roomCharges + extraCharges;
+    const roomCharges = roomChargesOverride ?? autoRoomCharges;
+    const foodCharges = foodChargesOverride ?? autoRestaurantNet;
+    const extraCharges = serviceChargesOverride ?? (manualMode ? 0 : autoExtraCharges);
 
     const vatOpts = bookingVatOptions(booking);
     const vatApplied = vatOpts.vatApplied !== false;
-    const vatPercent = vatApplied ? Math.max(0, vatOpts.vatPercent ?? 0) : 0;
+    const vatPercent =
+      vatPercentOverride !== undefined
+        ? vatPercentOverride
+        : vatApplied
+          ? Math.max(0, vatOpts.vatPercent ?? 0)
+          : 0;
 
-    const { computeHotelDiscountAmount, parseBookingDiscountType } = await import(
-      '@/lib/booking-discount'
-    );
-    const discount = computeHotelDiscountAmount(
-      hotelBase,
-      booking.discountEnabled === true,
-      parseBookingDiscountType(booking.discountType),
-      Number(booking.discountValue) || 0
-    );
+    const hotelBase = roomCharges + extraCharges;
+    const discount =
+      discountOverride !== undefined
+        ? discountOverride
+        : computeHotelDiscountAmount(
+            hotelBase,
+            booking.discountEnabled === true,
+            parseBookingDiscountType(booking.discountType),
+            Number(booking.discountValue) || 0
+          );
 
-    const hotelVat =
-      vatPercent > 0 ? ((hotelBase - discount) * vatPercent) / 100 : 0;
-    const vatAmount = hotelVat + restaurantVat;
-    const foodCharges = restaurantNet;
-    const subtotal = hotelBase + restaurantNet;
-    const totalAmount = (hotelBase - discount + hotelVat) + restaurantTotal;
+    const hotelVat = vatPercent > 0 ? ((hotelBase - discount) * vatPercent) / 100 : 0;
+    const vatAmount = manualMode ? hotelVat : hotelVat + restaurantVat;
+    const subtotal = hotelBase + foodCharges;
+    const totalAmount = manualMode
+      ? hotelBase - discount + hotelVat + foodCharges
+      : hotelBase - discount + hotelVat + restaurantTotal;
 
-    // Calculate paid amount from all payments linked to this booking
-    const paidAmount = sumBookingNetPaid(booking.payments);
+    const paidAmount =
+      paidAmountOverride !== undefined
+        ? paidAmountOverride
+        : sumBookingNetPaid(booking.payments);
     const dueAmount = totalAmount - paidAmount;
-
-    // Determine status based on dueAmount
     const status: InvoiceStatus = dueAmount <= 0 ? 'PAID' : 'ISSUED';
-
-    // Generate invoice number
     const invoiceNumber = generateInvoiceNumber();
+    const businessDate = await stampCurrentBusinessDate();
 
-    const lineItems = buildInvoiceLineItems({
-      roomNumber: booking.room.roomNumber,
-      roomTypeName: booking.room.type?.name || '',
-      checkIn: booking.checkIn,
-      checkOut: booking.checkOut,
-      charges: booking.charges,
-      restaurantOrders,
-      roomCharges,
-      includeExtraCharges: true,
-      discount,
-      hotelVat,
-      hotelVatPercent: vatPercent,
-      vatApplied,
-      restaurantVat,
-    });
+    const lineItems = manualMode
+      ? buildManualInvoiceLineItems({
+          roomNumber: booking.room.roomNumber,
+          roomTypeName: booking.room.type?.name || '',
+          checkIn: invoiceCheckIn,
+          checkOut: invoiceCheckOut,
+          roomCharges,
+          foodCharges,
+          serviceCharges: extraCharges,
+          discount,
+          hotelVat,
+          hotelVatPercent: vatPercent,
+          vatApplied: vatPercent > 0,
+        })
+      : buildInvoiceLineItems({
+          roomNumber: booking.room.roomNumber,
+          roomTypeName: booking.room.type?.name || '',
+          checkIn: invoiceCheckIn,
+          checkOut: invoiceCheckOut,
+          charges: booking.charges,
+          restaurantOrders,
+          roomCharges,
+          includeExtraCharges: true,
+          discount,
+          hotelVat,
+          hotelVatPercent: vatPercent,
+          vatApplied: vatPercent > 0,
+          restaurantVat,
+        });
 
     const invoice = await db.$transaction(async (tx) => {
       const inv = existingInvoice
@@ -215,6 +341,7 @@ export async function POST(request: NextRequest) {
               paidAmount,
               dueAmount: Math.max(0, dueAmount),
               status,
+              businessDate,
               issuedAt: existingInvoice.issuedAt || new Date(),
               paidAt: status === 'PAID' ? new Date() : null,
             },
@@ -223,6 +350,7 @@ export async function POST(request: NextRequest) {
             data: {
               invoiceNumber,
               bookingId,
+              businessDate,
               roomCharges,
               foodCharges,
               extraCharges,
@@ -242,7 +370,6 @@ export async function POST(request: NextRequest) {
       return inv;
     });
 
-    // Fetch the complete invoice with items
     const completeInvoice = await db.invoice.findUnique({
       where: { id: invoice.id },
       include: {
@@ -257,18 +384,18 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // Log activity
     await logActivity(
       user.id,
       'INVOICE_GENERATED',
       'billing',
       JSON.stringify({
         invoiceId: invoice.id,
-        invoiceNumber,
+        invoiceNumber: completeInvoice?.invoiceNumber ?? invoiceNumber,
         bookingId,
         totalAmount,
         dueAmount: Math.max(0, dueAmount),
         status,
+        manualMode,
       })
     );
 

@@ -1,14 +1,20 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
-import { requireRole } from '@/lib/auth';
+import { requireHotelAccess, requireRole } from '@/lib/auth';
 import { successResponse, paginatedResponse, errorResponse, logActivity } from '@/lib/api-utils';
-import { generateConfirmationNumber } from '@/lib/confirmation-number';
+import { generateConfirmationNumber } from '@/lib/confirmation-number.server';
 import { attachIdDocumentsToBooking } from '@/lib/booking-id-documents';
+import {
+  replaceBookingCompanions,
+  validateCompanionInputs,
+  validateCorporateCompanionInputs,
+  type CompanionInput,
+} from '@/lib/booking-companions';
 import { isNonePaymentMethod, parseReservationPaymentMethod } from '@/lib/payment-method';
 import {
-  bookingVatOptions,
+  computeBookingRoomDue,
   computeRoomBookingTotals,
-  getHotelVatPercent,
+  resolveBookingDisplayDue,
   sumBookingNetPaid,
 } from '@/lib/booking-totals';
 import { formatGuestCompany } from '@/lib/reservation-terms';
@@ -17,10 +23,71 @@ import {
   resolveCompanyLedgerBooking,
 } from '@/lib/company-ledger-billing';
 import { resolveBookingCheckInOut } from '@/lib/app-settings';
+import { readCurrentBusinessDateString } from '@/lib/business-date';
+import { isArrivalOnOrBeforeBusinessDate } from '@/lib/room-effective-status';
+import { getRoomNightlyTotal } from '@/lib/room-pricing';
 import { Prisma, RoleType } from '@prisma/client';
+import { processAllOverdueStayExtensions } from '@/lib/auto-stay-extension';
+import { ensureCustomerRegistrationNumber, generateGuestRegistrationNumber } from '@/lib/guest-registration-number';
+import { getCorporateGuestMissingFields, getPhysicalIdMissingFields } from '@/lib/reservation-completion-fields';
+import { hasBookingCompany } from '@/lib/booking-company';
+import { buildGuestStayOverlapWhere } from '@/lib/guest-stay-date-filter';
+import { assertRoomAvailableForBooking, listReservationEntries } from '@/lib/reservation-entry';
+
+const bookingListInclude = {
+  customer: true,
+  room: { include: { type: true } },
+  companyLedgerGuest: { select: { registrationNumber: true } },
+  sourceReservationEntry: { select: { registrationNumber: true } },
+  creator: { select: { id: true, name: true, email: true } },
+  payments: { select: { amount: true, paymentType: true } },
+  invoices: {
+    where: { status: { not: 'CANCELLED' as const } },
+    orderBy: { createdAt: 'desc' as const },
+    take: 1,
+    select: { dueAmount: true, status: true },
+  },
+  _count: { select: { idDocuments: true } },
+} satisfies Prisma.BookingInclude;
+
+type BookingListRow = Prisma.BookingGetPayload<{ include: typeof bookingListInclude }>;
+
+function enrichBookingListRow(booking: BookingListRow) {
+  const latestInvoice = booking.invoices[0] ?? null;
+  const totals = computeBookingRoomDue(booking, booking.payments);
+  const dueAmount = resolveBookingDisplayDue(booking, booking.payments, latestInvoice);
+  const { payments: _payments, invoices: _invoices, _count, ...rest } = booking;
+  return {
+    ...rest,
+    recordType: 'booking' as const,
+    idDocumentCount: _count.idDocuments,
+    vatPercent: totals.vatPercent,
+    vatAmount: totals.vatAmount,
+    totalWithVat: totals.totalWithVat,
+    discountAmount: totals.discountAmount,
+    dueAmount,
+  };
+}
+
+function sortMergedBookingList<T extends { checkIn: string | Date; createdAt: string | Date }>(
+  items: T[],
+  byStayDate: boolean
+): T[] {
+  return [...items].sort((a, b) => {
+    if (byStayDate) {
+      return new Date(a.checkIn).getTime() - new Date(b.checkIn).getTime();
+    }
+    return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+  });
+}
 
 export async function GET(request: NextRequest) {
   try {
+    const authResult = await requireHotelAccess(request);
+    if (authResult instanceof Response) return authResult;
+
+    await processAllOverdueStayExtensions(db);
+
     const { searchParams } = new URL(request.url);
     const page = parseInt(searchParams.get('page') || '1');
     const limit = parseInt(searchParams.get('limit') || '20');
@@ -34,7 +101,11 @@ export async function GET(request: NextRequest) {
     const skip = (page - 1) * limit;
 
     const where: Prisma.BookingWhereInput = {};
-    if (status) where.status = status as Prisma.EnumBookingStatusFilter['equals'];
+    if (status === 'COMPANY') {
+      where.companyLedgerId = { not: null };
+    } else if (status) {
+      where.status = status as Prisma.EnumBookingStatusFilter['equals'];
+    }
     if (roomId) where.roomId = roomId;
     if (customerId) where.customerId = customerId;
 
@@ -42,65 +113,78 @@ export async function GET(request: NextRequest) {
       where.OR = [
         { customer: { name: { contains: search } } },
         { customer: { phone: { contains: search } } },
+        { customer: { registrationNumber: { contains: search } } },
+        { registrationNumber: { contains: search } },
+        { companyLedgerGuest: { registrationNumber: { contains: search } } },
+        { sourceReservationEntry: { registrationNumber: { contains: search } } },
         { room: { roomNumber: { contains: search } } },
         { confirmationNumber: { contains: search } },
       ];
     }
 
-    // Date range filter: reservations created within the range (inclusive days)
-    if (dateFrom || dateTo) {
-      const dateFilter: Prisma.DateTimeFilter = {};
-      if (dateFrom) {
-        const start = new Date(dateFrom);
-        if (!Number.isNaN(start.getTime())) {
-          start.setHours(0, 0, 0, 0);
-          dateFilter.gte = start;
-        }
-      }
-      if (dateTo) {
-        const end = new Date(dateTo);
-        if (!Number.isNaN(end.getTime())) {
-          end.setHours(23, 59, 59, 999);
-          dateFilter.lte = end;
-        }
-      }
-      if (dateFilter.gte || dateFilter.lte) {
-        where.createdAt = dateFilter;
-      }
+    // Date range: guests in-house during the period (not only created that day)
+    const stayOverlapFilter = buildGuestStayOverlapWhere(dateFrom, dateTo);
+    if (stayOverlapFilter) {
+      const existingAnd = where.AND
+        ? Array.isArray(where.AND)
+          ? where.AND
+          : [where.AND]
+        : [];
+      where.AND = [...existingAnd, stayOverlapFilter];
+    }
+
+    const includeReservationEntries = !status;
+
+    if (includeReservationEntries) {
+      const entryScope =
+        dateFrom && dateTo && dateFrom === dateTo ? ('business_day' as const) : ('all' as const);
+
+      const [{ rows: entryRows }, allBookings] = await Promise.all([
+        listReservationEntries({
+          page: 1,
+          limit: 500,
+          dateFrom,
+          dateTo,
+          search,
+          scope: entryScope,
+          businessDate: entryScope === 'business_day' ? dateFrom : null,
+        }),
+        db.booking.findMany({
+          where,
+          include: bookingListInclude,
+          orderBy:
+            dateFrom || dateTo
+              ? [{ status: 'asc' }, { checkIn: 'asc' }]
+              : { createdAt: 'desc' },
+        }),
+      ]);
+
+      const enrichedBookings = allBookings.map(enrichBookingListRow);
+      const merged = sortMergedBookingList(
+        [...entryRows, ...enrichedBookings],
+        !!(dateFrom || dateTo)
+      );
+      const total = merged.length;
+      const paged = merged.slice(skip, skip + limit);
+
+      return paginatedResponse(paged, total, page, limit);
     }
 
     const [bookings, total] = await Promise.all([
       db.booking.findMany({
         where,
-        include: {
-          customer: true,
-          room: { include: { type: true } },
-          creator: { select: { id: true, name: true, email: true } },
-          payments: { select: { amount: true, paymentType: true } },
-        },
+        include: bookingListInclude,
         skip,
         take: limit,
-        orderBy: { createdAt: 'desc' },
+        orderBy:
+          dateFrom || dateTo
+            ? [{ status: 'asc' }, { checkIn: 'asc' }]
+            : { createdAt: 'desc' },
       }),
       db.booking.count({ where }),
     ]);
 
-    const enriched = bookings.map((booking) => {
-      const totalPaid = sumBookingNetPaid(booking.payments);
-      const totals = computeRoomBookingTotals(
-        booking.totalRoomCharge,
-        totalPaid,
-        bookingVatOptions(booking)
-      );
-      const { payments: _payments, ...rest } = booking;
-      return {
-        ...rest,
-        vatPercent: totals.vatPercent,
-        vatAmount: totals.vatAmount,
-        totalWithVat: totals.totalWithVat,
-        dueAmount: totals.dueAmount,
-      };
-    });
+    const enriched = bookings.map(enrichBookingListRow);
 
     return paginatedResponse(enriched, total, page, limit);
   } catch (error) {
@@ -111,7 +195,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const authResult = requireRole(request, 'ADMIN' as RoleType, 'HOTEL_STAFF' as RoleType, 'HOTEL_FD' as RoleType);
+    const authResult = await requireRole(request, 'ADMIN' as RoleType, 'HOTEL_STAFF' as RoleType, 'HOTEL_FD' as RoleType);
     if (authResult instanceof Response) return authResult;
 
     const authUser = await db.user.findUnique({
@@ -145,9 +229,15 @@ export async function POST(request: NextRequest) {
       discountValue,
       companyLedgerId,
       nationality: nationalityBody,
+      companions,
+      nidPhysicallyReceived,
+      serviceChargePercent: serviceChargePercentBody,
+      bookingPayments,
+      isCorporateGuest,
     } = body;
 
-    const initialReservation = isInitialReservation === true;
+    const corporateGuest = isCorporateGuest === true;
+    const initialReservation = isCorporateGuest ? false : isInitialReservation === true;
 
     if (initialReservation && checkInNow === true) {
       return errorResponse(
@@ -165,9 +255,69 @@ export async function POST(request: NextRequest) {
       return errorResponse('Customer not found');
     }
 
-    if (!customer.nationality?.trim()) {
+    if (!customer.nationality?.trim() && !corporateGuest) {
       return errorResponse('Guest nationality is required');
     }
+
+    const adultCount = Math.max(1, parseInt(String(adults ?? 1), 10) || 1);
+    const childCount = Math.max(0, parseInt(String(children ?? 0), 10) || 0);
+    const hasCompanySelected = hasBookingCompany({
+      companyLedgerId: companyLedgerId ?? null,
+      company: company ?? customer.company,
+    });
+    if (!corporateGuest) {
+      const companionError = validateCompanionInputs(
+        adultCount,
+        childCount,
+        (companions as CompanionInput[]) ?? [],
+        { requireIdFields: !hasCompanySelected }
+      );
+      if (companionError) {
+        return errorResponse(companionError);
+      }
+    }
+
+    const nidReceived = corporateGuest ? false : nidPhysicallyReceived !== false;
+
+    if (nidReceived && !corporateGuest && !hasCompanySelected) {
+      const idMissing = getPhysicalIdMissingFields({
+        idNumber: customer.idNumber ?? '',
+      });
+      if (idMissing.length > 0) {
+        return errorResponse(`Required when ID documents are physically received: ${idMissing.join(', ')}`);
+      }
+    }
+
+    if (corporateGuest) {
+      const corporateMissing = getCorporateGuestMissingFields({
+        guestName: customer.name,
+        guestCompany: customer.company ?? '',
+        guestPhone: customer.phone,
+        guestDesignation: customer.designation ?? '',
+        guestAddress: customer.address ?? '',
+      });
+      if (corporateMissing.length > 0) {
+        return errorResponse(`Corporate guest details required: ${corporateMissing.join(', ')}`);
+      }
+
+      const companionError = validateCorporateCompanionInputs(
+        adultCount,
+        ((companions as CompanionInput[]) ?? []).map((c) => ({
+          name: c.name,
+          company: c.company ?? '',
+          phone: c.phone ?? '',
+          designation: c.designation ?? '',
+          address: c.address ?? '',
+        }))
+      );
+      if (companionError) {
+        return errorResponse(companionError);
+      }
+    }
+
+    await ensureCustomerRegistrationNumber(customerId);
+
+    const bookingRegistrationNumber = await generateGuestRegistrationNumber();
 
     // Verify room exists and is available
     const room = await db.room.findUnique({
@@ -178,7 +328,7 @@ export async function POST(request: NextRequest) {
       return errorResponse('Room not found');
     }
 
-    if (room.status !== 'AVAILABLE') {
+    if (['OCCUPIED', 'CLEANING', 'MAINTENANCE'].includes(room.status)) {
       return errorResponse(
         `Room is not available for booking (current status: ${room.status.toLowerCase().replace('_', ' ')})`
       );
@@ -218,15 +368,49 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Calculate total room charge (ex-VAT) and due per reservation VAT options
-    const totalRoomCharge = days * room.type.basePrice;
-    const advance = advancePayment ? parseFloat(String(advancePayment)) : 0;
-    const defaultVat = await getHotelVatPercent();
-    const applyVat = vatApplied !== false;
-    let bookingVatPercent = defaultVat;
-    if (vatPercentBody !== undefined && vatPercentBody !== null && vatPercentBody !== '') {
-      const parsed = parseFloat(String(vatPercentBody));
-      if (!Number.isNaN(parsed) && parsed >= 0) bookingVatPercent = parsed;
+    const entryBlockError = await assertRoomAvailableForBooking(
+      roomId,
+      room.typeId,
+      checkInDate,
+      checkOutDate
+    );
+    if (entryBlockError) {
+      return errorResponse(entryBlockError);
+    }
+
+    // Room totalPrice is inclusive of VAT and service charge
+    const totalRoomCharge = days * getRoomNightlyTotal(room);
+    const paymentLines: Array<{ amount: number; method: ReturnType<typeof parseReservationPaymentMethod> }> = [];
+    if (Array.isArray(bookingPayments)) {
+      for (const row of bookingPayments) {
+        const amount = parseFloat(String((row as { amount?: unknown }).amount ?? 0));
+        if (amount > 0) {
+          paymentLines.push({
+            amount,
+            method: parseReservationPaymentMethod((row as { method?: string }).method),
+          });
+        }
+      }
+    }
+    const advance =
+      paymentLines.length > 0
+        ? paymentLines.reduce((sum, p) => sum + p.amount, 0)
+        : advancePayment
+          ? parseFloat(String(advancePayment))
+          : 0;
+    const applyVat = vatApplied === true;
+    let bookingVatPercent = 0;
+    if (applyVat) {
+      bookingVatPercent = 15;
+      if (vatPercentBody !== undefined && vatPercentBody !== null && vatPercentBody !== '') {
+        const parsed = parseFloat(String(vatPercentBody));
+        if (!Number.isNaN(parsed) && parsed >= 0) bookingVatPercent = parsed;
+      }
+    }
+    let bookingServiceChargePercent = 10;
+    if (serviceChargePercentBody !== undefined && serviceChargePercentBody !== null && serviceChargePercentBody !== '') {
+      const parsed = parseFloat(String(serviceChargePercentBody));
+      if (!Number.isNaN(parsed) && parsed >= 0) bookingServiceChargePercent = parsed;
     }
     const applyDiscount = discountEnabled === true;
     const resolvedDiscountType = discountType === 'FIXED' ? 'FIXED' : 'PERCENTAGE';
@@ -249,11 +433,13 @@ export async function POST(request: NextRequest) {
     );
 
     const confirmationNumber = await generateConfirmationNumber();
-    let resolvedCompany = formatGuestCompany(company ?? customer.company);
+    let resolvedCompany = corporateGuest
+      ? (company?.trim() || customer.company?.trim() || null)
+      : formatGuestCompany(company ?? customer.company);
     let resolvedCompanyLedgerId: string | null = null;
     let resolvedCompanyLedgerGuestId: string | null = null;
 
-    if (companyLedgerId) {
+    if (!corporateGuest && companyLedgerId) {
       const ledgerResult = await resolveCompanyLedgerBooking(db, companyLedgerId, null);
       if ('error' in ledgerResult) {
         return errorResponse(ledgerResult.error);
@@ -268,7 +454,7 @@ export async function POST(request: NextRequest) {
           phone: customer.phone,
           email: customer.email,
           nationality: customer.nationality,
-          registrationNumber: customer.registrationNumber,
+          registrationNumber: bookingRegistrationNumber,
           address: customer.address,
           idType: customer.idType,
           idNumber: customer.idNumber,
@@ -279,6 +465,7 @@ export async function POST(request: NextRequest) {
     const booking = await db.booking.create({
       data: {
         confirmationNumber,
+        registrationNumber: bookingRegistrationNumber,
         customerId,
         roomId,
         company: resolvedCompany,
@@ -286,15 +473,18 @@ export async function POST(request: NextRequest) {
         companyLedgerGuestId: resolvedCompanyLedgerGuestId,
         checkIn: checkInDate,
         checkOut: checkOutDate,
-        adults: adults || 1,
-        children: children || 0,
+        adults: adultCount,
+        children: childCount,
         totalRoomCharge,
         advancePayment: advance,
         dueAmount,
         vatApplied: applyVat,
         vatPercent: bookingVatPercent,
+        serviceChargePercent: bookingServiceChargePercent,
+        nidPhysicallyReceived: nidReceived,
         notes,
         isInitialReservation: initialReservation,
+        isCorporateGuest: corporateGuest,
         withMeal: withMeal === true,
         discountEnabled: applyDiscount,
         discountType: applyDiscount ? resolvedDiscountType : null,
@@ -311,11 +501,30 @@ export async function POST(request: NextRequest) {
       booking.id,
       Array.isArray(idDocumentPaths) ? idDocumentPaths : undefined
     );
+    await replaceBookingCompanions(
+      db,
+      booking.id,
+      (companions as CompanionInput[]) ?? []
+    );
 
     const resolvedPaymentMethod = parseReservationPaymentMethod(paymentMethod);
 
-    // If advance payment with a real method, create payment record
-    if (advance > 0 && !isNonePaymentMethod(resolvedPaymentMethod)) {
+    if (paymentLines.length > 0) {
+      for (const line of paymentLines) {
+        if (line.amount > 0 && !isNonePaymentMethod(line.method)) {
+          await db.payment.create({
+            data: {
+              amount: line.amount,
+              method: line.method,
+              paymentType: 'ADVANCE',
+              bookingId: booking.id,
+              receivedBy: authResult.id,
+              notes: 'Advance payment at booking creation',
+            },
+          });
+        }
+      }
+    } else if (advance > 0 && !isNonePaymentMethod(resolvedPaymentMethod)) {
       await db.payment.create({
         data: {
           amount: advance,
@@ -339,10 +548,16 @@ export async function POST(request: NextRequest) {
         select: { amount: true, paymentType: true },
       });
       const totalPaid = sumBookingNetPaid(paymentRows);
-      const { dueAmount: dueAfterCheckIn } = computeRoomBookingTotals(
-        totalRoomCharge,
-        totalPaid,
-        { vatApplied: applyVat, vatPercent: bookingVatPercent }
+      const { dueAmount: dueAfterCheckIn } = computeBookingRoomDue(
+        {
+          totalRoomCharge,
+          vatApplied: applyVat,
+          vatPercent: bookingVatPercent,
+          discountEnabled: applyDiscount,
+          discountType: resolvedDiscountType,
+          discountValue: resolvedDiscountValue,
+        },
+        paymentRows
       );
 
       await db.booking.update({
@@ -354,10 +569,13 @@ export async function POST(request: NextRequest) {
         },
       });
     } else {
-      await db.room.update({
-        where: { id: roomId },
-        data: { status: 'RESERVED' },
-      });
+      const businessDate = await readCurrentBusinessDateString();
+      if (isArrivalOnOrBeforeBusinessDate(checkInDate, businessDate)) {
+        await db.room.update({
+          where: { id: roomId },
+          data: { status: 'RESERVED' },
+        });
+      }
     }
 
     await logActivity(

@@ -4,6 +4,7 @@ import { requireRole } from '@/lib/auth'
 import { successResponse, errorResponse, notFoundResponse, logActivity } from '@/lib/api-utils'
 import { RoleType } from '@prisma/client'
 import { getEarlyCheckoutSettings } from '@/lib/app-settings'
+import { getRoomNightlyTotal } from '@/lib/room-pricing'
 import { sumBookingNetPaid } from '@/lib/booking-totals'
 import {
   computeStayAdjustmentPreview,
@@ -51,7 +52,7 @@ async function previewForBooking(
     actualCheckIn: booking.actualCheckIn,
     vatApplied: booking.vatApplied,
     vatPercent: booking.vatPercent,
-    nightlyRate: booking.room.type.basePrice,
+    nightlyRate: getRoomNightlyTotal(booking.room),
     payments: booking.payments,
     settings: merged,
   })
@@ -80,7 +81,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const authResult = requireRole(request, 'ADMIN' as RoleType, 'HOTEL_STAFF' as RoleType, 'HOTEL_FD' as RoleType)
+ authResult = await requireRole(request, 'ADMIN' as RoleType, 'HOTEL_STAFF' as RoleType, 'HOTEL_FD' as RoleType)
     if (authResult instanceof Response) return authResult
 
     const { id } = await params
@@ -142,7 +143,7 @@ export async function GET(
         minDepartureDate: '',
         maxDepartureDate: '',
         minExtendDate: '',
-        nightlyRate: booking.room.type.basePrice,
+        nightlyRate: getRoomNightlyTotal(booking.room),
         bookedRoomCharge: booking.totalRoomCharge,
         roomCharge: 0,
         earlyCheckoutFee: 0,
@@ -186,7 +187,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const authResult = requireRole(request, 'ADMIN' as RoleType, 'HOTEL_STAFF' as RoleType, 'HOTEL_FD' as RoleType)
+ authResult = await requireRole(request, 'ADMIN' as RoleType, 'HOTEL_STAFF' as RoleType, 'HOTEL_FD' as RoleType)
     if (authResult instanceof Response) return authResult
 
     const { id } = await params
@@ -219,7 +220,7 @@ export async function POST(
       return errorResponse(result.preview.error)
     }
     const preview = result.preview as StayAdjustmentPreview
-    const nightlyRate = booking.room.type.basePrice
+    const nightlyRate = getRoomNightlyTotal(booking.room)
     const now = new Date()
 
     const roomDateLabel =

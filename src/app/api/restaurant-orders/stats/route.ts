@@ -3,12 +3,13 @@ import { Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
 import { requireAuth, canAccessRestaurant } from '@/lib/auth';
 import { successResponse, errorResponse } from '@/lib/api-utils';
+import { readCurrentBusinessDateString, buildBusinessDateWhere } from '@/lib/business-date';
 
 const STATUS_KEYS = ['PENDING', 'COOKING', 'READY', 'DELIVERED', 'CANCELLED'] as const;
 
 export async function GET(request: NextRequest) {
   try {
-    const authResult = requireAuth(request);
+    const authResult = await requireAuth(request);
     if (authResult instanceof Response) return authResult;
 
     if (!canAccessRestaurant(authResult.role)) {
@@ -28,11 +29,8 @@ export async function GET(request: NextRequest) {
     }
 
     if (todayOnly) {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const tomorrow = new Date(today);
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      where.createdAt = { gte: today, lt: tomorrow };
+      const businessDate = await readCurrentBusinessDateString();
+      Object.assign(where, buildBusinessDateWhere(businessDate));
     } else if (dateFrom || dateTo) {
       const createdAt: Prisma.DateTimeFilter = {};
       if (dateFrom) {

@@ -1,18 +1,21 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
-import { requireRole } from '@/lib/auth';
+import { requireAuth, requireRole } from '@/lib/auth';
 import { successResponse, errorResponse, paginatedResponse, logActivity } from '@/lib/api-utils';
 import { Prisma } from '@prisma/client';
 
 // GET /api/menu-items - List menu items with filters, paginated
 export async function GET(request: NextRequest) {
   try {
+    const authResult = await requireAuth(request);
+    if (authResult instanceof Response) return authResult;
+
     const { searchParams } = new URL(request.url);
     const categoryId = searchParams.get('categoryId');
     const available = searchParams.get('available');
     const search = searchParams.get('search');
     const page = Math.max(1, parseInt(searchParams.get('page') || '1'));
-    const limit = Math.max(1, Math.min(100, parseInt(searchParams.get('limit') || '20')));
+    const limit = Math.max(1, Math.min(5000, parseInt(searchParams.get('limit') || '20')));
 
     const where: Prisma.MenuItemWhereInput = {};
 
@@ -59,7 +62,7 @@ export async function GET(request: NextRequest) {
 // POST /api/menu-items - Create menu item (ADMIN and RESTAURANT_STAFF only)
 export async function POST(request: NextRequest) {
   try {
-    const authResult = requireRole(request, 'ADMIN');
+    const authResult = await requireRole(request, 'ADMIN');
     if (authResult instanceof Response) return authResult;
 
     const body = await request.json();

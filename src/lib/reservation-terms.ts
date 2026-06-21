@@ -72,3 +72,18 @@ export function formatGuestCompany(company?: string | null): string {
   const trimmed = company?.trim()
   return trimmed || DEFAULT_GUEST_COMPANY
 }
+
+/** Document heading based on booking status at print time. */
+export function reservationDocumentTitle(status: string): string {
+  if (status === 'CHECKED_IN') return 'Checked In Confirmation'
+  if (status === 'CHECKED_OUT') return 'Checked Out Confirmation'
+  return 'Reservation Confirmation'
+}
+
+/** Document heading for reservation entry (inventory hold). */
+export function reservationEntryDocumentTitle(entryStatus: string): string {
+  if (entryStatus === 'CANCELLED') return 'Reservation Entry — Cancelled'
+  if (entryStatus === 'FULFILLED') return 'Reservation Entry — Fulfilled'
+  if (entryStatus === 'PARTIALLY_FULFILLED') return 'Reservation Entry — Partially Fulfilled'
+  return 'Reservation Entry Confirmation'
+}

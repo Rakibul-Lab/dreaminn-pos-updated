@@ -6,7 +6,14 @@ import { api } from '@/lib/api-client'
 import { useAuthStore, canAccessAdmin } from '@/lib/auth-store'
 import { format } from 'date-fns'
 import {
-  ScrollText, Filter, RefreshCw, ChevronLeft, ChevronRight
+  buildActivityLogsExportQuery,
+  downloadActivityLogsExcel,
+  downloadActivityLogsPdf,
+  type ActivityLogExportRecord,
+} from '@/lib/activity-logs-export'
+import { toast } from 'sonner'
+import {
+  ScrollText, Filter, RefreshCw, ChevronLeft, ChevronRight, FileDown, Loader2
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -44,6 +51,7 @@ export default function ActivityLogsPage() {
   const [actionFilter, setActionFilter] = useState<string>('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
+  const [exporting, setExporting] = useState<'excel' | 'pdf' | null>(null)
 
   const queryParams = new URLSearchParams()
   queryParams.set('page', String(page))
@@ -77,12 +85,104 @@ export default function ActivityLogsPage() {
   const totalPages = logsData?.meta?.totalPages || 1
   const total = logsData?.meta?.total || 0
 
+  const buildExportMeta = () => ({
+    exportedAt: new Date(),
+    generatedBy: user ? { name: user.name, email: user.email, role: user.role } : undefined,
+    module: moduleFilter,
+    action: actionFilter,
+    dateFrom,
+    dateTo,
+  })
+
+  const fetchExportRows = async (): Promise<ActivityLogExportRecord[]> => {
+    const path = buildActivityLogsExportQuery({
+      module: moduleFilter,
+      action: actionFilter,
+      startDate: dateFrom,
+      endDate: dateTo,
+    })
+    const res = await api.get<{ success: boolean; data: ActivityLogExportRecord[] }>(path)
+    return res.data ?? []
+  }
+
+  const handleExportExcel = async () => {
+    setExporting('excel')
+    const toastId = toast.loading('Preparing Excel export…')
+    try {
+      const rows = await fetchExportRows()
+      if (!rows.length) {
+        toast.error('No logs to export', { id: toastId, description: 'Adjust filters to include activity logs.' })
+        return
+      }
+      await downloadActivityLogsExcel(rows, buildExportMeta())
+      toast.success(`Exported ${rows.length} log(s) to Excel`, { id: toastId })
+    } catch (err) {
+      toast.error('Export failed', {
+        id: toastId,
+        description: err instanceof Error ? err.message : 'Could not export activity logs',
+      })
+    } finally {
+      setExporting(null)
+    }
+  }
+
+  const handleExportPdf = async () => {
+    setExporting('pdf')
+    const toastId = toast.loading('Preparing PDF export…')
+    try {
+      const rows = await fetchExportRows()
+      if (!rows.length) {
+        toast.error('No logs to export', { id: toastId, description: 'Adjust filters to include activity logs.' })
+        return
+      }
+      await downloadActivityLogsPdf(rows, buildExportMeta())
+      toast.success(`Exported ${rows.length} log(s) to PDF`, { id: toastId })
+    } catch (err) {
+      toast.error('Export failed', {
+        id: toastId,
+        description: err instanceof Error ? err.message : 'Could not export activity logs',
+      })
+    } finally {
+      setExporting(null)
+    }
+  }
+
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-2">
-        <ScrollText className="h-6 w-6 text-amber-600" />
-        <h2 className="text-2xl font-bold text-foreground">Activity Logs</h2>
-        <Badge variant="outline" className="ml-2">{total} total</Badge>
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-2">
+          <ScrollText className="h-6 w-6 text-amber-600" />
+          <h2 className="text-2xl font-bold text-foreground">Activity Logs</h2>
+          <Badge variant="outline" className="ml-2">{total} total</Badge>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void handleExportExcel()}
+            disabled={!!exporting || isLoading}
+          >
+            {exporting === 'excel' ? (
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            ) : (
+              <FileDown className="h-4 w-4 mr-2" />
+            )}
+            Export Excel
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void handleExportPdf()}
+            disabled={!!exporting || isLoading}
+          >
+            {exporting === 'pdf' ? (
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            ) : (
+              <FileDown className="h-4 w-4 mr-2" />
+            )}
+            Export PDF
+          </Button>
+        </div>
       </div>
 
       {/* Filters */}

@@ -9,7 +9,7 @@ import {
 } from 'recharts'
 import {
   LayoutDashboard, BedDouble, UtensilsCrossed, Users, Activity,
-  Database, ScrollText, AlertTriangle, TrendingUp, ArrowUpRight
+  Database, ScrollText, AlertTriangle, TrendingUp, ArrowUpRight, CalendarCheck
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -28,7 +28,11 @@ const revenueChartConfig: ChartConfig = {
   amount: { label: 'Revenue', color: '#d97706' },
 }
 
-export default function AdminDashboard() {
+export default function AdminDashboard({
+  onNavigate,
+}: {
+  onNavigate?: (page: 'bookings' | 'hotel-dashboard') => void
+} = {}) {
   const { user } = useAuthStore()
 
   const { data: dashboardData, isLoading } = useQuery({
@@ -78,9 +82,29 @@ export default function AdminDashboard() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-2 mb-2">
-        <LayoutDashboard className="h-6 w-6 text-amber-600" />
-        <h2 className="text-2xl font-bold text-foreground">Admin Dashboard</h2>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-2">
+        <div className="flex items-center gap-2">
+          <LayoutDashboard className="h-6 w-6 text-amber-600" />
+          <h2 className="text-2xl font-bold text-foreground">Admin Dashboard</h2>
+        </div>
+        {onNavigate ? (
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="outline"
+              className="border-sky-600 text-sky-700 hover:bg-sky-50"
+              onClick={() => onNavigate('bookings')}
+            >
+              <CalendarCheck className="h-4 w-4 mr-2" />
+              Bookings
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => onNavigate('hotel-dashboard')}
+            >
+              Hotel Dashboard
+            </Button>
+          </div>
+        ) : null}
       </div>
 
       {isLoading ? (

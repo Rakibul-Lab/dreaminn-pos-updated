@@ -1,3 +1,0 @@
-module.exports=[254847,a=>{"use strict";a.i(106472),a.i(367722),a.i(585637);let b=null;a.s(["getLogoDataUrl",0,function(){return b||(b=(async()=>{let a=await fetch("/brand-logo.png");if(!a.ok)throw Error("Could not load hotel logo");let b=await a.blob();return new Promise((a,c)=>{let d=new FileReader;d.onload=()=>a(d.result),d.onerror=c,d.readAsDataURL(b)})})()),b}])}];
-
-//# sourceMappingURL=src_lib_reservation-document-html_ts_0rsphoa._.js.map

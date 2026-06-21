@@ -16,7 +16,7 @@ export async function POST(
   { params }: { params: Promise<{ billId: string }> }
 ) {
   try {
-    const authResult = requireRole(
+    const authResult = await requireRole(
       request,
       'ADMIN' as RoleType,
       'RESTAURANT_STAFF' as RoleType

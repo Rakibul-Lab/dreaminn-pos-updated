@@ -79,7 +79,6 @@ export function CompanyLedgerPage() {
   const [editingCompany, setEditingCompany] = useState<CompanyLedgerRecord | null>(null);
   const [companyForm, setCompanyForm] = useState(emptyCompanyForm);
   const [companyEmailBlocking, setCompanyEmailBlocking] = useState(false);
-  const [companyEmailVerificationToken, setCompanyEmailVerificationToken] = useState<string | null>(null);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -115,7 +114,6 @@ export function CompanyLedgerPage() {
         contactPerson: companyForm.contactPerson.trim() || null,
         phone: companyForm.phone.trim() || null,
         email: companyForm.email.trim() || null,
-        emailVerificationToken: companyEmailVerificationToken || undefined,
         address: companyForm.address.trim() || null,
         notes: companyForm.notes.trim() || null,
       };
@@ -186,10 +184,20 @@ export function CompanyLedgerPage() {
             Corporate accounts, guests from reservations, and company billing
           </p>
         </div>
-        <Button className="bg-amber-600 hover:bg-amber-700 text-white" onClick={openAddCompany}>
-          <Plus className="w-4 h-4 mr-2" />
-          Add Company
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="outline"
+            className="border-emerald-300 text-emerald-800 hover:bg-emerald-50"
+            onClick={() => openCloudViewRestaurantLedgerTab()}
+          >
+            <Eye className="w-4 h-4 mr-2" />
+            CloudView Restaurant
+          </Button>
+          <Button className="bg-amber-600 hover:bg-amber-700 text-white" onClick={openAddCompany}>
+            <Plus className="w-4 h-4 mr-2" />
+            Add Company
+          </Button>
+        </div>
       </div>
 
       <div className="relative max-w-md">
@@ -388,7 +396,6 @@ export function CompanyLedgerPage() {
                   optional
                   onValidationChange={(result) => {
                     setCompanyEmailBlocking(result.isBlocking);
-                    setCompanyEmailVerificationToken(result.verificationToken ?? null);
                   }}
                 />
               </div>

@@ -22,6 +22,17 @@ export type PostCompanyLedgerBillInput = {
   notes?: string | null
 }
 
+export type PostReservationEntryCompanyLedgerBillInput = {
+  companyLedgerId: string
+  reservationEntryId: string
+  guestName: string
+  roomSummary: string
+  totalAmount: number
+  paidAmount: number
+  dueAmount: number
+  notes?: string | null
+}
+
 export async function postCompanyLedgerBill(
   db: BillingDb,
   input: PostCompanyLedgerBillInput
@@ -89,6 +100,72 @@ export async function postCompanyLedgerBill(
   })
 }
 
+export async function postReservationEntryCompanyLedgerBill(
+  db: BillingDb,
+  input: PostReservationEntryCompanyLedgerBillInput
+): Promise<void> {
+  const dueAmount = Math.max(0, input.dueAmount)
+  const paidAmount = Math.max(0, input.paidAmount)
+  const totalAmount = Math.max(0, input.totalAmount)
+
+  const existing = await db.companyLedgerBill.findUnique({
+    where: { reservationEntryId: input.reservationEntryId },
+  })
+
+  if (existing) {
+    const totalDelta = totalAmount - existing.totalAmount
+    const paidDelta = paidAmount - existing.paidAmount
+    const dueDelta = dueAmount - existing.dueAmount
+
+    await db.companyLedgerBill.update({
+      where: { id: existing.id },
+      data: {
+        guestName: input.guestName,
+        roomNumber: input.roomSummary,
+        totalAmount,
+        paidAmount,
+        dueAmount,
+        notes: input.notes ?? existing.notes,
+      },
+    })
+
+    if (totalDelta !== 0 || paidDelta !== 0 || dueDelta !== 0) {
+      await db.companyLedger.update({
+        where: { id: input.companyLedgerId },
+        data: {
+          totalBilled: { increment: totalDelta },
+          totalPaid: { increment: paidDelta },
+          dueAmount: { increment: dueDelta },
+        },
+      })
+    }
+    return
+  }
+
+  await db.companyLedgerBill.create({
+    data: {
+      companyLedgerId: input.companyLedgerId,
+      reservationEntryId: input.reservationEntryId,
+      billType: 'RESERVATION_ENTRY',
+      guestName: input.guestName,
+      roomNumber: input.roomSummary,
+      totalAmount,
+      paidAmount,
+      dueAmount,
+      notes: input.notes ?? null,
+    },
+  })
+
+  await db.companyLedger.update({
+    where: { id: input.companyLedgerId },
+    data: {
+      totalBilled: { increment: totalAmount },
+      totalPaid: { increment: paidAmount },
+      dueAmount: { increment: dueAmount },
+    },
+  })
+}
+
 export type CompanyLedgerGuestSource = {
   name: string
   phone?: string | null
@@ -113,6 +190,21 @@ function guestDataFromSource(source: CompanyLedgerGuestSource) {
   }
 }
 
+function mergeGuestData(
+  existing: {
+    registrationNumber?: string | null
+  },
+  incoming: ReturnType<typeof guestDataFromSource>
+) {
+  return {
+    ...incoming,
+    registrationNumber:
+      incoming.registrationNumber?.trim() ||
+      existing.registrationNumber?.trim() ||
+      null,
+  }
+}
+
 export async function ensureCompanyLedgerGuestFromCustomer(
   db: BillingDb,
   companyLedgerId: string,
@@ -130,7 +222,7 @@ export async function ensureCompanyLedgerGuestFromCustomer(
     if (byPhone) {
       await db.companyLedgerGuest.update({
         where: { id: byPhone.id },
-        data,
+        data: mergeGuestData(byPhone, data),
       })
       return byPhone.id
     }
@@ -142,7 +234,7 @@ export async function ensureCompanyLedgerGuestFromCustomer(
   if (byName) {
     await db.companyLedgerGuest.update({
       where: { id: byName.id },
-      data,
+      data: mergeGuestData(byName, data),
     })
     return byName.id
   }

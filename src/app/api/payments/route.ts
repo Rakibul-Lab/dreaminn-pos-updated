@@ -2,19 +2,20 @@ import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { requireAuth, canAccessHotel, canAccessRestaurant } from '@/lib/auth';
 import { successResponse, errorResponse, paginatedResponse, logActivity } from '@/lib/api-utils';
-import { bookingVatOptions, computeRoomBookingTotals, sumBookingNetPaid } from '@/lib/booking-totals';
-import { PaymentType, PaymentMethod, Prisma } from '@prisma/client';
+import { computeBookingRoomDue, resolveBookingDisplayDue, sumBookingNetPaid } from '@/lib/booking-totals';
+import { PaymentType, PaymentMethod, Prisma, InvoiceStatus } from '@prisma/client';
 import {
   parsePaymentMethod,
   paymentRequiresLastFour,
   paymentRequiresReference,
   isValidPaymentAccountLastFour,
 } from '@/lib/payment-method';
+import { stampCurrentBusinessDate } from '@/lib/business-date';
 
 // GET /api/payments - List payments with filters
 export async function GET(request: NextRequest) {
   try {
-    const authResult = requireAuth(request);
+    const authResult = await requireAuth(request);
     if (authResult instanceof Response) return authResult;
 
     const user = authResult;
@@ -131,7 +132,7 @@ export async function GET(request: NextRequest) {
 // POST /api/payments - Create payment record
 export async function POST(request: NextRequest) {
   try {
-    const authResult = requireAuth(request);
+    const authResult = await requireAuth(request);
     if (authResult instanceof Response) return authResult;
 
     const user = authResult;
@@ -156,6 +157,12 @@ export async function POST(request: NextRequest) {
     if (!paymentType) {
       return errorResponse('Payment type is required');
     }
+
+    if (!Object.values(PaymentType).includes(paymentType as PaymentType)) {
+      return errorResponse('Invalid payment type');
+    }
+
+    const resolvedPaymentType = paymentType as PaymentType;
 
     if (!method) {
       return errorResponse('Payment method is required');
@@ -207,11 +214,14 @@ export async function POST(request: NextRequest) {
       return errorResponse('Last 4 digits are required for card / bKash / Nagad / Upay payments');
     }
 
+    const businessDate = await stampCurrentBusinessDate();
+
     const payment = await db.payment.create({
       data: {
         amount,
         method: resolvedMethod,
-        paymentType,
+        paymentType: resolvedPaymentType,
+        businessDate,
         bookingId: bookingId || null,
         orderId: null,
         invoiceId: invoiceId || null,
@@ -237,20 +247,61 @@ export async function POST(request: NextRequest) {
 
     // Update booking dueAmount (VAT-inclusive room total minus all payments)
     if (bookingId) {
-      const booking = await db.booking.findUnique({ where: { id: bookingId } });
+      const booking = await db.booking.findUnique({
+        where: { id: bookingId },
+        include: {
+          invoices: {
+            where: { status: { not: 'CANCELLED' } },
+            orderBy: { createdAt: 'desc' },
+            take: 1,
+            select: { dueAmount: true, status: true },
+          },
+        },
+      });
       if (booking) {
         const paymentRows = await db.payment.findMany({
           where: { bookingId },
           select: { amount: true, paymentType: true },
         });
-        const totalPaid = sumBookingNetPaid(paymentRows);
-        const { dueAmount } = computeRoomBookingTotals(
-          booking.totalRoomCharge,
-          totalPaid,
-          bookingVatOptions(booking)
+        const dueAmount = resolveBookingDisplayDue(
+          booking,
+          paymentRows,
+          booking.invoices[0] ?? null
         );
         await db.booking.update({
           where: { id: bookingId },
+          data: { dueAmount },
+        });
+      }
+    }
+
+    // Update invoice paid/due when payment is linked to an invoice
+    if (invoiceId) {
+      const invoice = await db.invoice.findUnique({ where: { id: invoiceId } });
+      if (invoice) {
+        const invoicePayments = await db.payment.findMany({
+          where: { invoiceId },
+          select: { amount: true, paymentType: true },
+        });
+        const paidAmount = sumBookingNetPaid(invoicePayments);
+        const dueAmount = Math.max(0, invoice.totalAmount - paidAmount);
+        let status: InvoiceStatus = invoice.status;
+        if (dueAmount <= 0) {
+          status = 'PAID';
+        } else if (paidAmount > 0 && invoice.status !== 'CANCELLED') {
+          status = 'PARTIALLY_PAID';
+        }
+        await db.invoice.update({
+          where: { id: invoiceId },
+          data: {
+            paidAmount,
+            dueAmount,
+            status,
+            paidAt: dueAmount <= 0 ? new Date() : null,
+          },
+        });
+        await db.booking.update({
+          where: { id: invoice.bookingId },
           data: { dueAmount },
         });
       }
@@ -265,7 +316,7 @@ export async function POST(request: NextRequest) {
         paymentId: payment.id,
         amount,
         method,
-        paymentType,
+        paymentType: resolvedPaymentType,
         bookingId: bookingId || undefined,
         orderId: orderId || undefined,
       })

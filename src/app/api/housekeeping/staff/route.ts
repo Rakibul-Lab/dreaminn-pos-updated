@@ -7,7 +7,7 @@ import { RoleType } from '@prisma/client';
 /** Assignable hotel staff for housekeeping tasks. */
 export async function GET(request: NextRequest) {
   try {
-    const authResult = requireRole(request, 'ADMIN' as RoleType, 'HOTEL_STAFF' as RoleType, 'HOTEL_FD' as RoleType);
+    const authResult = await requireRole(request, 'ADMIN' as RoleType, 'HOTEL_STAFF' as RoleType, 'HOTEL_FD' as RoleType);
     if (authResult instanceof Response) return authResult;
 
     const staff = await db.user.findMany({

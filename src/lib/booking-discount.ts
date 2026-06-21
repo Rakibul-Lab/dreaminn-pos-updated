@@ -30,3 +30,21 @@ export function resolveBookingDiscount(input: BookingDiscountInput) {
   const value = enabled ? Math.max(0, Number(input.discountValue) || 0) : 0
   return { enabled, type, value }
 }
+
+export function formatBookingListDiscount(booking: BookingDiscountInput & {
+  discountAmount?: number | null
+  totalRoomCharge: number
+}): { amount: number; label: string } {
+  const { enabled, type, value } = resolveBookingDiscount(booking)
+  const amount =
+    booking.discountAmount != null && booking.discountAmount > 0
+      ? booking.discountAmount
+      : computeHotelDiscountAmount(booking.totalRoomCharge, enabled, type, value)
+
+  if (!enabled || amount <= 0) {
+    return { amount: 0, label: '' }
+  }
+
+  const label = type === 'PERCENTAGE' && value > 0 ? `${value}%` : 'Fixed'
+  return { amount, label }
+}

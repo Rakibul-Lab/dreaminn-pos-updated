@@ -1,9 +1,8 @@
 'use client'
 
 import * as React from 'react'
-import { AlertCircle, CheckCircle2, Loader2, XCircle } from 'lucide-react'
+import { CheckCircle2, Loader2, XCircle } from 'lucide-react'
 import { Input } from '@/components/ui/input'
-import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import {
   type EmailValidationResult,
@@ -14,52 +13,39 @@ export type EmailInputProps = Omit<React.ComponentProps<typeof Input>, 'type' | 
   value: string
   onChange: (value: string) => void
   optional?: boolean
+  /** @deprecated Kept for compatibility; format-only validation is always used. */
   mode?: 'full' | 'format-only'
+  /** @deprecated No longer used. */
   allowUnverifiedMailbox?: boolean
   showMessage?: boolean
-  onValidationChange?: (
-    result: EmailValidationResult & {
-      isBlocking: boolean
-      verificationToken?: string | null
-    }
-  ) => void
+  onValidationChange?: (result: EmailValidationResult & { isBlocking: boolean }) => void
 }
 
 export function EmailInput({
   value,
   onChange,
   optional = false,
-  mode = 'full',
-  allowUnverifiedMailbox = false,
   showMessage = true,
   onValidationChange,
   className,
   id,
+  mode: _mode,
+  allowUnverifiedMailbox: _allowUnverifiedMailbox,
   ...props
 }: EmailInputProps) {
-  const validation = useEmailValidation({ email: value, optional, mode, allowUnverifiedMailbox })
+  const validation = useEmailValidation({ email: value, optional })
   const onValidationChangeRef = React.useRef(onValidationChange)
-  onValidationChangeRef.current = onValidationChange
+
+  React.useEffect(() => {
+    onValidationChangeRef.current = onValidationChange
+  }, [onValidationChange])
 
   React.useEffect(() => {
     onValidationChangeRef.current?.({
       ...validation,
       isBlocking: validation.isBlocking,
-      verificationToken: validation.verificationToken,
     })
-  }, [
-    validation.valid,
-    validation.status,
-    validation.message,
-    validation.suggestion,
-    validation.isBlocking,
-    validation.formatValid,
-    validation.domainValid,
-    validation.mailboxExists,
-    validation.needsOtp,
-    validation.verificationToken,
-    validation.provider,
-  ])
+  }, [validation.valid, validation.status, validation.message, validation.isBlocking])
 
   const statusIcon = (() => {
     if (optional && !value.trim()) return null
@@ -70,8 +56,6 @@ export function EmailInput({
         return <CheckCircle2 className="h-4 w-4 text-emerald-600" />
       case 'invalid':
         return <XCircle className="h-4 w-4 text-destructive" />
-      case 'warning':
-        return <AlertCircle className="h-4 w-4 text-amber-600" />
       default:
         return null
     }
@@ -82,18 +66,6 @@ export function EmailInput({
     validation.message &&
     !(optional && !value.trim()) &&
     validation.status !== 'idle'
-
-  const showOtp =
-    !allowUnverifiedMailbox &&
-    mode === 'full' &&
-    !(optional && !value.trim()) &&
-    validation.needsOtp &&
-    validation.status !== 'valid' &&
-    validation.mailboxExists !== true
-
-  const applySuggestion = () => {
-    if (validation.suggestion) onChange(validation.suggestion)
-  }
 
   return (
     <div className="space-y-2">
@@ -121,80 +93,11 @@ export function EmailInput({
             'text-xs',
             validation.status === 'valid' && 'text-emerald-600',
             validation.status === 'invalid' && 'text-destructive',
-            validation.status === 'warning' && 'text-amber-700',
             validation.status === 'validating' && 'text-muted-foreground'
           )}
         >
           {validation.message}
-          {validation.suggestion && validation.status !== 'valid' && (
-            <>
-              {' '}
-              <button
-                type="button"
-                className="underline font-medium hover:text-foreground"
-                onClick={applySuggestion}
-              >
-                Use {validation.suggestion}
-              </button>
-            </>
-          )}
         </p>
-      )}
-
-      {showOtp && (
-        <div className="rounded-md border border-amber-200 bg-amber-50/80 p-3 space-y-2">
-          <p className="text-xs text-amber-900">
-            Gmail and similar providers block automatic checks. Send a code to prove this inbox exists.
-          </p>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              className="h-8"
-              disabled={validation.sendingOtp}
-              onClick={() => void validation.sendOtp()}
-            >
-              {validation.sendingOtp ? (
-                <>
-                  <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-                  Sending…
-                </>
-              ) : validation.otpSent ? (
-                'Resend code'
-              ) : (
-                'Send verification code'
-              )}
-            </Button>
-          </div>
-          {validation.otpSent && (
-            <div className="flex flex-wrap items-center gap-2">
-              <Input
-                inputMode="numeric"
-                maxLength={6}
-                placeholder="6-digit code"
-                value={validation.otpCode}
-                onChange={(e) =>
-                  validation.setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))
-                }
-                className="h-8 w-32 font-mono"
-              />
-              <Button
-                type="button"
-                size="sm"
-                className="h-8 bg-amber-600 hover:bg-amber-700 text-white"
-                disabled={validation.confirmingOtp || validation.otpCode.length !== 6}
-                onClick={() => void validation.confirmOtp()}
-              >
-                {validation.confirmingOtp ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  'Verify'
-                )}
-              </Button>
-            </div>
-          )}
-        </div>
       )}
     </div>
   )

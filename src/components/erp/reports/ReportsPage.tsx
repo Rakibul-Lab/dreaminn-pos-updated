@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api-client'
 import { useAuthStore, canAccessHotel, canAccessRestaurant, canAccessAdmin } from '@/lib/auth-store'
-import { format } from 'date-fns'
+import { format, parseISO } from 'date-fns'
 import {
   BarChart, PieChart, Bar, Pie, Cell,
   XAxis, YAxis, CartesianGrid
@@ -29,6 +29,7 @@ import {
   REPORT_DATE_PRESET_OPTIONS,
   type ReportsExportTab,
 } from '@/lib/reports-export'
+import { useBusinessDate } from '@/hooks/use-business-date'
 import { toast } from 'sonner'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow
@@ -68,11 +69,13 @@ const pieChartConfig: ChartConfig = {
 function buildReportQueryParams(
   type: string,
   dateFrom?: string,
-  dateTo?: string
+  dateTo?: string,
+  businessDate?: string
 ): string {
   const params = new URLSearchParams({ type })
   if (dateFrom) params.set('startDate', dateFrom)
   if (dateTo) params.set('endDate', dateTo)
+  if (businessDate) params.set('businessDate', businessDate)
   return `/reports?${params.toString()}`
 }
 
@@ -94,12 +97,26 @@ export default function ReportsPage() {
       : 'restaurant'
   const [activeTab, setActiveTab] = useState<ReportsExportTab>(defaultTab)
 
+  const { data: businessDateRes } = useBusinessDate()
+  const businessNow = useMemo(() => {
+    const bd = businessDateRes?.data?.businessDate
+    if (!bd) return new Date()
+    return parseISO(`${bd}T12:00:00`)
+  }, [businessDateRes?.data?.businessDate])
+
   const dateRange = useMemo(
-    () => resolveBookingDateRange(datePreset, customDateFrom, customDateTo),
-    [datePreset, customDateFrom, customDateTo]
+    () => resolveBookingDateRange(datePreset, customDateFrom, customDateTo, businessNow),
+    [datePreset, customDateFrom, customDateTo, businessNow]
   )
 
-  const reportQueryKey = [datePreset, dateRange.dateFrom, dateRange.dateTo] as const
+  const reportBusinessDate = useMemo(() => {
+    if (dateRange.dateFrom && dateRange.dateTo && dateRange.dateFrom === dateRange.dateTo) {
+      return dateRange.dateFrom
+    }
+    return businessDateRes?.data?.businessDate
+  }, [dateRange.dateFrom, dateRange.dateTo, businessDateRes?.data?.businessDate])
+
+  const reportQueryKey = [datePreset, dateRange.dateFrom, dateRange.dateTo, reportBusinessDate] as const
 
   // Restaurant daily sales
   const { data: restaurantDaily, isLoading: loadingDaily } = useQuery({
@@ -168,6 +185,50 @@ export default function ReportsPage() {
     enabled: isHotel || isAdmin,
   })
 
+  const { data: hotelDailySales, isLoading: loadingDailySales } = useQuery({
+    queryKey: ['report-hotel-daily-sales', ...reportQueryKey],
+    queryFn: async () => {
+      const res = await api.get<{ success: boolean; data: Record<string, unknown> }>(
+        buildReportQueryParams('hotel-daily-sales', undefined, undefined, reportBusinessDate)
+      )
+      return res.data
+    },
+    enabled: (isHotel || isAdmin) && !!reportBusinessDate,
+  })
+
+  const { data: hotelDailyArrivals, isLoading: loadingDailyArrivals } = useQuery({
+    queryKey: ['report-hotel-daily-arrivals', ...reportQueryKey],
+    queryFn: async () => {
+      const res = await api.get<{ success: boolean; data: Record<string, unknown> }>(
+        buildReportQueryParams('hotel-daily-arrivals', undefined, undefined, reportBusinessDate)
+      )
+      return res.data
+    },
+    enabled: (isHotel || isAdmin) && !!reportBusinessDate,
+  })
+
+  const { data: hotelDailyDepartures, isLoading: loadingDailyDepartures } = useQuery({
+    queryKey: ['report-hotel-daily-departures', ...reportQueryKey],
+    queryFn: async () => {
+      const res = await api.get<{ success: boolean; data: Record<string, unknown> }>(
+        buildReportQueryParams('hotel-daily-departures', undefined, undefined, reportBusinessDate)
+      )
+      return res.data
+    },
+    enabled: (isHotel || isAdmin) && !!reportBusinessDate,
+  })
+
+  const { data: hotelDailyCollections, isLoading: loadingDailyCollections } = useQuery({
+    queryKey: ['report-hotel-daily-collections', ...reportQueryKey],
+    queryFn: async () => {
+      const res = await api.get<{ success: boolean; data: Record<string, unknown> }>(
+        buildReportQueryParams('hotel-daily-collections', undefined, undefined, reportBusinessDate)
+      )
+      return res.data
+    },
+    enabled: (isHotel || isAdmin) && !!reportBusinessDate,
+  })
+
   const { data: combinedRevenue, isLoading: loadingCombined } = useQuery({
     queryKey: ['report-combined-revenue', ...reportQueryKey],
     queryFn: async () => {
@@ -230,6 +291,13 @@ export default function ReportsPage() {
   // Food charges by room
   const roomsData = foodCharges?.rooms as Array<{ roomNumber: string; totalOrders: number; totalCharges: number }> | undefined
 
+  const dailySalesHotel = hotelDailySales?.hotel as Record<string, number> | undefined
+  const dailySalesRestaurant = hotelDailySales?.restaurant as Record<string, number> | undefined
+  const dailyArrivalsGuests = hotelDailyArrivals?.guests as Array<Record<string, unknown>> | undefined
+  const dailyDeparturesGuests = hotelDailyDepartures?.guests as Array<Record<string, unknown>> | undefined
+  const dailyCollectionsByMethod = hotelDailyCollections?.byMethod as Array<{ method: string; amount: number }> | undefined
+  const dailyCollectionPayments = hotelDailyCollections?.payments as Array<Record<string, unknown>> | undefined
+
   // Combined revenue data
   const combinedData = combinedRevenue ? [
     { name: 'Hotel', revenue: (combinedRevenue.hotelRevenue as number) || 0 },
@@ -239,6 +307,11 @@ export default function ReportsPage() {
 
   // Top customers
   const topCustomers = adminSummary?.topCustomers as Array<{ name: string; totalSpent: number; bookingCount: number }> | undefined
+
+  const paymentsByMethod = combinedRevenue?.paymentsByMethod as Record<string, number> | undefined
+  const paymentsByMethodData = paymentsByMethod
+    ? Object.entries(paymentsByMethod).map(([method, amount]) => ({ method, amount }))
+    : []
 
   const handleExportPdf = async () => {
     setExportingPdf(true)
@@ -323,7 +396,14 @@ export default function ReportsPage() {
 
   const isReportLoading =
     (activeTab === 'restaurant' && (loadingDaily || loadingMonthly || loadingOrderStatus)) ||
-    (activeTab === 'hotel' && (loadingHotelRevenue || loadingOccupancy || loadingFoodCharges)) ||
+    (activeTab === 'hotel' &&
+      (loadingHotelRevenue ||
+        loadingOccupancy ||
+        loadingFoodCharges ||
+        loadingDailySales ||
+        loadingDailyArrivals ||
+        loadingDailyDepartures ||
+        loadingDailyCollections)) ||
     (activeTab === 'combined' && (loadingCombined || loadingAdminSummary))
 
   return (
@@ -537,6 +617,295 @@ export default function ReportsPage() {
         {/* Hotel Reports */}
         {(isHotel || isAdmin) && (
           <TabsContent value="hotel" className="space-y-4">
+            {reportBusinessDate && (
+              <p className="text-sm text-muted-foreground">
+                Daily operations for business date:{' '}
+                <span className="font-medium text-foreground">
+                  {(hotelDailySales?.businessDateDisplay as string) || reportBusinessDate}
+                </span>
+              </p>
+            )}
+
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+              <Card>
+                <CardContent className="p-4">
+                  <p className="text-sm text-muted-foreground">Daily Sales (Hotel)</p>
+                  <p className="text-2xl font-bold text-amber-700">
+                    ৳{((dailySalesHotel?.hotelSalesTotal ?? dailySalesHotel?.invoiceTotal ?? 0) as number).toLocaleString()}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Restaurant: ৳{((dailySalesRestaurant?.grossSales || 0) as number).toLocaleString()}
+                  </p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="p-4">
+                  <p className="text-sm text-muted-foreground">Arrivals</p>
+                  <p className="text-2xl font-bold text-emerald-700">
+                    {(hotelDailyArrivals?.actualCheckIns as number) ?? 0}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Expected: {(hotelDailyArrivals?.expectedArrivals as number) ?? 0}
+                  </p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="p-4">
+                  <p className="text-sm text-muted-foreground">Departures</p>
+                  <p className="text-2xl font-bold text-sky-700">
+                    {(hotelDailyDepartures?.actualCheckOuts as number) ?? 0}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Listed: {(hotelDailyDepartures?.totalListed as number) ?? 0}
+                  </p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="p-4">
+                  <p className="text-sm text-muted-foreground">Collections</p>
+                  <p className="text-2xl font-bold text-purple-700">
+                    ৳{(((hotelDailyCollections?.summary as Record<string, number>)?.netCollected) || 0).toLocaleString()}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Gross: ৳{(((hotelDailyCollections?.summary as Record<string, number>)?.grossCollected) || 0).toLocaleString()}
+                  </p>
+                </CardContent>
+              </Card>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <Card>
+                <CardHeader className="pb-2">
+                  <div className="flex justify-between items-center">
+                    <CardTitle className="text-base">Daily Sales Breakdown</CardTitle>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() =>
+                        exportCSV(
+                          [
+                            { category: 'Room sales', amount: dailySalesHotel?.roomSales ?? 0 },
+                            { category: 'Food (invoice)', amount: dailySalesHotel?.foodSales ?? 0 },
+                            { category: 'Extras', amount: dailySalesHotel?.extraSales ?? 0 },
+                            {
+                              category: 'Hotel beverage (walk-in)',
+                              amount: dailySalesHotel?.beverageWalkInSales ?? 0,
+                            },
+                            {
+                              category: 'Hotel sales total',
+                              amount:
+                                dailySalesHotel?.hotelSalesTotal ?? dailySalesHotel?.invoiceTotal ?? 0,
+                            },
+                            { category: 'Discount', amount: dailySalesHotel?.discount ?? 0 },
+                            { category: 'VAT', amount: dailySalesHotel?.vat ?? 0 },
+                            { category: 'Restaurant POS', amount: dailySalesRestaurant?.grossSales ?? 0 },
+                            { category: 'Grand total', amount: hotelDailySales?.grandTotal ?? 0 },
+                          ],
+                          `daily-sales-${reportBusinessDate}`
+                        )
+                      }
+                    >
+                      <Download className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  {loadingDailySales ? (
+                    <Skeleton className="h-40 w-full" />
+                  ) : (
+                    <div className="space-y-2 text-sm">
+                      <div className="flex justify-between"><span>Room sales</span><span>৳{((dailySalesHotel?.roomSales || 0) as number).toLocaleString()}</span></div>
+                      <div className="flex justify-between"><span>Food (invoice)</span><span>৳{((dailySalesHotel?.foodSales || 0) as number).toLocaleString()}</span></div>
+                      <div className="flex justify-between"><span>Extras</span><span>৳{((dailySalesHotel?.extraSales || 0) as number).toLocaleString()}</span></div>
+                      <div className="flex justify-between"><span>Hotel beverage (walk-in)</span><span>৳{((dailySalesHotel?.beverageWalkInSales || 0) as number).toLocaleString()}</span></div>
+                      <div className="flex justify-between font-medium"><span>Hotel sales total</span><span>৳{((dailySalesHotel?.hotelSalesTotal ?? dailySalesHotel?.invoiceTotal ?? 0) as number).toLocaleString()}</span></div>
+                      <div className="flex justify-between"><span>Discount</span><span>৳{((dailySalesHotel?.discount || 0) as number).toLocaleString()}</span></div>
+                      <div className="flex justify-between"><span>VAT</span><span>৳{((dailySalesHotel?.vat || 0) as number).toLocaleString()}</span></div>
+                      <div className="flex justify-between"><span>Restaurant POS</span><span>৳{((dailySalesRestaurant?.grossSales || 0) as number).toLocaleString()}</span></div>
+                      <hr />
+                      <div className="flex justify-between font-semibold"><span>Grand total</span><span>৳{((hotelDailySales?.grandTotal || 0) as number).toLocaleString()}</span></div>
+                      <div className="flex justify-between text-muted-foreground"><span>Collections</span><span>৳{((hotelDailySales?.collections || 0) as number).toLocaleString()}</span></div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="pb-2">
+                  <div className="flex justify-between items-center">
+                    <CardTitle className="text-base">Collections by Method</CardTitle>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => exportCSV(dailyCollectionsByMethod || [], `daily-collections-${reportBusinessDate}`)}
+                    >
+                      <Download className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </CardHeader>
+                <CardContent className="p-0">
+                  <div className="max-h-64 overflow-y-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Method</TableHead>
+                          <TableHead className="text-right">Amount</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {dailyCollectionsByMethod?.length ? dailyCollectionsByMethod.map((row, i) => (
+                          <TableRow key={i}>
+                            <TableCell>{row.method}</TableCell>
+                            <TableCell className="text-right text-emerald-600">৳{row.amount.toLocaleString()}</TableCell>
+                          </TableRow>
+                        )) : (
+                          <TableRow><TableCell colSpan={2} className="text-center py-4 text-muted-foreground">No collections</TableCell></TableRow>
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <Card>
+                <CardHeader className="pb-2">
+                  <div className="flex justify-between items-center">
+                    <CardTitle className="text-base">Daily Arrivals / Check-ins</CardTitle>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => exportCSV(dailyArrivalsGuests || [], `daily-arrivals-${reportBusinessDate}`)}
+                    >
+                      <Download className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </CardHeader>
+                <CardContent className="p-0">
+                  <div className="max-h-72 overflow-y-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Guest</TableHead>
+                          <TableHead>Room</TableHead>
+                          <TableHead>Status</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {loadingDailyArrivals ? (
+                          <TableRow><TableCell colSpan={3}><Skeleton className="h-8 w-full" /></TableCell></TableRow>
+                        ) : dailyArrivalsGuests?.length ? dailyArrivalsGuests.map((g, i) => (
+                          <TableRow key={i}>
+                            <TableCell>
+                              <p className="font-medium">{String(g.guestName)}</p>
+                              <p className="text-xs text-muted-foreground">{String(g.phone || '')}</p>
+                            </TableCell>
+                            <TableCell className="font-mono">{String(g.roomNumber)}</TableCell>
+                            <TableCell>{String(g.status)}</TableCell>
+                          </TableRow>
+                        )) : (
+                          <TableRow><TableCell colSpan={3} className="text-center py-4 text-muted-foreground">No arrivals</TableCell></TableRow>
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="pb-2">
+                  <div className="flex justify-between items-center">
+                    <CardTitle className="text-base">Daily Departures / Check-outs</CardTitle>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => exportCSV(dailyDeparturesGuests || [], `daily-departures-${reportBusinessDate}`)}
+                    >
+                      <Download className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </CardHeader>
+                <CardContent className="p-0">
+                  <div className="max-h-72 overflow-y-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Guest</TableHead>
+                          <TableHead>Room</TableHead>
+                          <TableHead className="text-right">Due</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {loadingDailyDepartures ? (
+                          <TableRow><TableCell colSpan={3}><Skeleton className="h-8 w-full" /></TableCell></TableRow>
+                        ) : dailyDeparturesGuests?.length ? dailyDeparturesGuests.map((g, i) => (
+                          <TableRow key={i}>
+                            <TableCell className="font-medium">{String(g.guestName)}</TableCell>
+                            <TableCell className="font-mono">{String(g.roomNumber)}</TableCell>
+                            <TableCell className="text-right">৳{Number(g.dueAmount || 0).toLocaleString()}</TableCell>
+                          </TableRow>
+                        )) : (
+                          <TableRow><TableCell colSpan={3} className="text-center py-4 text-muted-foreground">No departures</TableCell></TableRow>
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
+            {dailyCollectionPayments && dailyCollectionPayments.length > 0 && (
+              <Card>
+                <CardHeader className="pb-2">
+                  <div className="flex justify-between items-center">
+                    <CardTitle className="text-base">Payment Register</CardTitle>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => exportCSV(dailyCollectionPayments, `payment-register-${reportBusinessDate}`)}
+                    >
+                      <Download className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </CardHeader>
+                <CardContent className="p-0">
+                  <div className="max-h-64 overflow-y-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Time</TableHead>
+                          <TableHead>Purpose</TableHead>
+                          <TableHead>Room</TableHead>
+                          <TableHead>Method</TableHead>
+                          <TableHead>Received by</TableHead>
+                          <TableHead className="text-right">Amount</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {dailyCollectionPayments.map((p, i) => (
+                          <TableRow key={i}>
+                            <TableCell className="text-xs">
+                              {p.at ? format(parseISO(String(p.at)), 'h:mm a') : '—'}
+                            </TableCell>
+                            <TableCell className="text-xs text-muted-foreground">
+                              {String(p.purpose || '—')}
+                            </TableCell>
+                            <TableCell className="font-mono text-xs">
+                              {String(p.roomNumber || '—')}
+                            </TableCell>
+                            <TableCell>{String(p.method)}</TableCell>
+                            <TableCell>{String(p.receivedBy)}</TableCell>
+                            <TableCell className="text-right">৳{Number(p.amount || 0).toLocaleString()}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             {/* Summary Cards */}
             <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
               <Card>
@@ -743,6 +1112,41 @@ export default function ReportsPage() {
               </Card>
 
               <Card>
+                <CardHeader className="pb-2">
+                  <div className="flex justify-between items-center">
+                    <CardTitle className="text-base">Collections by Method</CardTitle>
+                    <Button variant="ghost" size="sm" onClick={() => exportCSV(paymentsByMethodData, 'payments-by-method')}>
+                      <Download className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </CardHeader>
+                <CardContent className="p-0">
+                  <div className="max-h-64 overflow-y-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Method</TableHead>
+                          <TableHead className="text-right">Amount</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {paymentsByMethodData.length ? paymentsByMethodData.map((row, i) => (
+                          <TableRow key={i}>
+                            <TableCell>{row.method}</TableCell>
+                            <TableCell className="text-right text-emerald-600">৳{row.amount.toLocaleString()}</TableCell>
+                          </TableRow>
+                        )) : (
+                          <TableRow><TableCell colSpan={2} className="text-center py-4 text-muted-foreground">No payment data</TableCell></TableRow>
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Card className="md:col-span-2">
                 <CardHeader className="pb-2">
                   <div className="flex justify-between items-center">
                     <CardTitle className="text-base">Top Customers</CardTitle>

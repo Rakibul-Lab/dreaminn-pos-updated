@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { requireRole } from '@/lib/auth';
+import { HOUSEKEEPING_TASK_ROLES } from '@/lib/auth';
 import { successResponse, paginatedResponse, errorResponse, notFoundResponse, logActivity } from '@/lib/api-utils';
 import { RoleType } from '@prisma/client';
 
@@ -23,8 +24,18 @@ async function resolveCleaningStaffId(cleaningStaffId: string) {
   return staff.id;
 }
 
+function isHousekeeperRole(role: RoleType) {
+  return role === 'HOUSEKEEPER';
+}
+
 export async function GET(request: NextRequest) {
   try {
+    const authResult = await requireRole(
+      request,
+      ...(HOUSEKEEPING_TASK_ROLES as [RoleType, ...RoleType[]])
+    );
+    if (authResult instanceof Response) return authResult;
+
     const { searchParams } = new URL(request.url);
     const page = parseInt(searchParams.get('page') || '1');
     const limit = parseInt(searchParams.get('limit') || '20');
@@ -61,7 +72,10 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const authResult = requireRole(request, 'ADMIN' as RoleType, 'HOTEL_STAFF' as RoleType, 'HOTEL_FD' as RoleType);
+    const authResult = await requireRole(
+      request,
+      ...(HOUSEKEEPING_TASK_ROLES as [RoleType, ...RoleType[]])
+    );
     if (authResult instanceof Response) return authResult;
 
     const body = await request.json();
@@ -69,6 +83,10 @@ export async function POST(request: NextRequest) {
 
     if (!roomId || !taskType) {
       return errorResponse('Room ID and task type are required');
+    }
+
+    if (isHousekeeperRole(authResult.role) && taskType !== 'cleaning') {
+      return errorResponse('Housekeepers can only create cleaning tasks', 403);
     }
 
     const room = await db.room.findUnique({ where: { id: roomId } });
@@ -110,7 +128,10 @@ export async function POST(request: NextRequest) {
 
 export async function PUT(request: NextRequest) {
   try {
-    const authResult = requireRole(request, 'ADMIN' as RoleType, 'HOTEL_STAFF' as RoleType, 'HOTEL_FD' as RoleType);
+    const authResult = await requireRole(
+      request,
+      ...(HOUSEKEEPING_TASK_ROLES as [RoleType, ...RoleType[]])
+    );
     if (authResult instanceof Response) return authResult;
 
     const body = await request.json();
@@ -127,6 +148,18 @@ export async function PUT(request: NextRequest) {
 
     if (!existing) {
       return notFoundResponse('Housekeeping task');
+    }
+
+    if (isHousekeeperRole(authResult.role)) {
+      if (existing.taskType !== 'cleaning') {
+        return errorResponse('Housekeepers can only update cleaning tasks', 403);
+      }
+      if (status !== undefined && status !== 'IN_PROGRESS' && status !== 'COMPLETED') {
+        return errorResponse('Housekeepers can only start or complete cleaning tasks', 403);
+      }
+      if (existing.status === 'COMPLETED') {
+        return errorResponse('This cleaning task is already completed', 403);
+      }
     }
 
     const updateData: Record<string, unknown> = {};

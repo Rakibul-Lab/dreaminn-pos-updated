@@ -18,6 +18,7 @@ import { formatBdt } from '@/lib/currency'
 import { cn } from '@/lib/utils'
 import {
   PAYMENT_METHOD_OPTIONS_WITH_PAYMENT,
+  formatPaymentMethod,
   paymentRequiresLastFour,
   paymentRequiresReference,
   isValidPaymentAccountLastFour,
@@ -40,12 +41,14 @@ export interface CheckoutPreview {
   nightlyRate: number
   bookedRoomCharge: number
   extraChargesIfIncluded?: number
+  postedExtraCharges?: number
   roomCharges: number
   foodCharges: number
   extraCharges: number
   damageCharge?: number
   subtotal: number
   discount: number
+  reservationDiscountLocked?: boolean
   vatApplied?: boolean
   vatPercent: number
   vatAmount: number
@@ -83,6 +86,15 @@ type CheckedInBookingOption = {
   billTransferredToBookingId?: string | null
 }
 
+type CheckoutPaymentLine = {
+  id: string
+  amount: number
+  method: string
+  reference?: string
+  accountLastFour?: string
+  notes?: string
+}
+
 interface CheckoutPageViewProps {
   bookingId: string
 }
@@ -95,7 +107,13 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
   const [checkOutPaymentReference, setCheckOutPaymentReference] = useState('')
   const [checkOutPaymentLastFour, setCheckOutPaymentLastFour] = useState('')
   const [checkOutPaymentNotes, setCheckOutPaymentNotes] = useState('')
+  const [checkoutPaymentLines, setCheckoutPaymentLines] = useState<CheckoutPaymentLine[]>([])
   const [extraChargesEnabled, setExtraChargesEnabled] = useState(false)
+  const [lateCheckoutAmount, setLateCheckoutAmount] = useState('')
+  const [debouncedLateCheckoutAmount, setDebouncedLateCheckoutAmount] = useState(0)
+  const [roomChargeInput, setRoomChargeInput] = useState('')
+  const [roomChargeTouched, setRoomChargeTouched] = useState(false)
+  const [debouncedRoomCharge, setDebouncedRoomCharge] = useState<number | null>(null)
   const [damageChargesEnabled, setDamageChargesEnabled] = useState(false)
   const [damageChargeAmount, setDamageChargeAmount] = useState('')
   const [debouncedDamageAmount, setDebouncedDamageAmount] = useState(0)
@@ -108,6 +126,14 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
 
   const parsedDamageAmount = Math.max(0, parseFloat(damageChargeAmount) || 0)
   const parsedDiscountValue = Math.max(0, parseFloat(discountValue) || 0)
+  const parsedLateCheckoutAmount = Math.max(0, parseFloat(lateCheckoutAmount) || 0)
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedLateCheckoutAmount(extraChargesEnabled ? parsedLateCheckoutAmount : 0)
+    }, 400)
+    return () => window.clearTimeout(timer)
+  }, [lateCheckoutAmount, extraChargesEnabled, parsedLateCheckoutAmount])
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -122,6 +148,16 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
     }, 400)
     return () => window.clearTimeout(timer)
   }, [discountValue, discountEnabled, parsedDiscountValue])
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const parsed = parseFloat(roomChargeInput)
+      setDebouncedRoomCharge(
+        roomChargeInput.trim() === '' || Number.isNaN(parsed) ? null : Math.max(0, parsed)
+      )
+    }, 400)
+    return () => window.clearTimeout(timer)
+  }, [roomChargeInput])
 
   const { data: checkedInBookingsData } = useQuery({
     queryKey: ['checked-in-bookings-for-transfer'],
@@ -144,6 +180,7 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
         'checkout-preview',
         bookingId,
         extraChargesEnabled,
+        debouncedLateCheckoutAmount,
         damageChargesEnabled,
         debouncedDamageAmount,
         discountEnabled,
@@ -151,10 +188,14 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
         debouncedDiscountValue,
         roomCreditTransferEnabled,
         billTransferTargetId,
+        debouncedRoomCharge,
       ],
       queryFn: () => {
         const params = new URLSearchParams()
         params.set('includeExtraCharges', extraChargesEnabled ? 'true' : 'false')
+        if (extraChargesEnabled) {
+          params.set('lateCheckoutAmount', String(debouncedLateCheckoutAmount))
+        }
         params.set('includeDamageCharge', damageChargesEnabled ? 'true' : 'false')
         params.set('includeDiscount', discountEnabled ? 'true' : 'false')
         params.set('discountType', discountType)
@@ -167,6 +208,9 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
         }
         if (roomCreditTransferEnabled && billTransferTargetId) {
           params.set('creditTransferBookingIds', billTransferTargetId)
+        }
+        if (debouncedRoomCharge != null) {
+          params.set('roomCharge', String(debouncedRoomCharge))
         }
         const qs = params.toString()
         return api.get<{ success: boolean; data: CheckoutPreview; error?: string }>(
@@ -182,19 +226,65 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
     | { success?: boolean; data?: CheckoutPreview; error?: string; message?: string }
     | undefined
   const checkoutPreview = previewRes?.success !== false ? previewRes?.data : undefined
+  const reservationDiscountLocked = checkoutPreview?.reservationDiscountLocked === true
   const previewApiError =
     previewRes?.success === false ? previewRes.error || previewRes.message : undefined
   const isCompanyLedgerCheckout = checkoutPreview?.billToCompanyLedger === true
 
+  useEffect(() => {
+    if (!checkoutPreview?.roomCharges || roomChargeTouched) return
+    setRoomChargeInput(String(checkoutPreview.roomCharges))
+  }, [checkoutPreview?.roomCharges, roomChargeTouched])
+
   const checkOutDue =
     isBillTransferOut ? 0 : (checkoutPreview?.dueBeforeSettlement ?? 0)
   const checkOutCredit = checkoutPreview?.creditAmount ?? 0
+  const totalCheckoutPayments = checkoutPaymentLines.reduce((sum, line) => sum + line.amount, 0)
   const checkOutPaymentAmount = parseFloat(checkOutPayment) || 0
-  const checkOutRemaining = Math.max(checkOutDue - checkOutPaymentAmount, 0)
+  const checkOutRemaining = Math.max(checkOutDue - totalCheckoutPayments, 0)
   const showPaymentReference =
     checkOutPaymentAmount > 0 && paymentRequiresReference(checkOutPaymentMethod)
   const showPaymentLastFour =
     checkOutPaymentAmount > 0 && paymentRequiresLastFour(checkOutPaymentMethod)
+
+  const handleRecordCheckoutPayment = () => {
+    const amount = checkOutPaymentAmount
+    if (amount <= 0) {
+      toast.error('Enter a payment amount greater than zero.')
+      return
+    }
+    if (totalCheckoutPayments + amount > checkOutDue + 0.01) {
+      toast.error(`Payment total cannot exceed due amount (${formatBdt(checkOutDue)}).`)
+      return
+    }
+    if (showPaymentReference && !checkOutPaymentReference.trim()) {
+      toast.error('Payment reference is required for this method.')
+      return
+    }
+    if (
+      showPaymentLastFour &&
+      !isValidPaymentAccountLastFour(checkOutPaymentLastFour.trim())
+    ) {
+      toast.error('Enter the last 4 digits for this payment method.')
+      return
+    }
+    setCheckoutPaymentLines((prev) => [
+      ...prev,
+      {
+        id: `${Date.now()}-${prev.length}`,
+        amount,
+        method: checkOutPaymentMethod,
+        reference: checkOutPaymentReference.trim() || undefined,
+        accountLastFour: checkOutPaymentLastFour.trim() || undefined,
+        notes: checkOutPaymentNotes.trim() || undefined,
+      },
+    ])
+    setCheckOutPayment('0')
+    setCheckOutPaymentReference('')
+    setCheckOutPaymentLastFour('')
+    setCheckOutPaymentNotes('')
+    toast.success('Payment recorded')
+  }
 
   const handlePaymentMethodChange = (method: string) => {
     setCheckOutPaymentMethod(method)
@@ -206,32 +296,23 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
     }
   }
   const companyLedgerDue = isCompanyLedgerCheckout
-    ? Math.max(0, checkOutDue - checkOutPaymentAmount)
+    ? Math.max(0, checkOutDue - totalCheckoutPayments)
     : 0
-
-  useEffect(() => {
-    setCheckOutPayment((prev) => {
-      const next = isCompanyLedgerCheckout ? '0' : String(checkOutDue || 0)
-      return prev === next ? prev : next
-    })
-  }, [checkOutDue, isCompanyLedgerCheckout])
 
   const checkOutMutation = useMutation({
     mutationFn: () =>
       api.post(`/bookings/check-out/${bookingId}`, {
-        finalPayment:
-          isBillTransferOut ? 0 : isCompanyLedgerCheckout ? checkOutPaymentAmount : checkOutDue > 0 ? checkOutPaymentAmount : 0,
-        paymentMethod: checkOutPaymentMethod,
-        paymentReference:
-          checkOutPaymentAmount > 0 && showPaymentReference
-            ? checkOutPaymentReference.trim() || undefined
-            : undefined,
-        paymentAccountLastFour:
-          checkOutPaymentAmount > 0 && showPaymentLastFour
-            ? checkOutPaymentLastFour.trim() || undefined
-            : undefined,
-        paymentNotes: checkOutPaymentNotes || undefined,
+        checkoutPayments: isBillTransferOut
+          ? []
+          : checkoutPaymentLines.map((line) => ({
+              amount: line.amount,
+              method: line.method,
+              reference: line.reference,
+              accountLastFour: line.accountLastFour,
+              notes: line.notes,
+            })),
         includeExtraCharges: extraChargesEnabled,
+        lateCheckoutAmount: extraChargesEnabled ? debouncedLateCheckoutAmount : 0,
         includeDamageCharge: damageChargesEnabled,
         damageChargeAmount: damageChargesEnabled ? parsedDamageAmount : 0,
         includeDiscount: discountEnabled,
@@ -240,6 +321,7 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
         roomCreditTransferEnabled,
         creditTransferBookingIds:
           roomCreditTransferEnabled && billTransferTargetId ? [billTransferTargetId] : [],
+        roomCharge: debouncedRoomCharge ?? undefined,
       }),
     onSuccess: (res: {
       success?: boolean
@@ -363,8 +445,19 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
                 </p>
                 <p className="text-muted-foreground">Rate per night</p>
                 <p className="font-medium text-right">{formatBdt(checkoutPreview?.nightlyRate ?? 0)}</p>
-                <p className="text-muted-foreground">Current room charge</p>
-                <p className="font-medium text-right">{formatBdt(checkoutPreview?.roomCharges ?? 0)}</p>
+                <p className="text-muted-foreground">Room charges (BDT)</p>
+                <div className="text-right">
+                  <Input
+                    type="text"
+                    inputMode="decimal"
+                    className="h-8 text-right font-medium ml-auto max-w-[140px]"
+                    value={roomChargeInput}
+                    onChange={(e) => {
+                      setRoomChargeTouched(true)
+                      setRoomChargeInput(e.target.value)
+                    }}
+                  />
+                </div>
                 {checkoutPreview?.chargeableNights != null &&
                   checkoutPreview.chargeableNights !== checkoutPreview.bookedNights && (
                     <>
@@ -375,20 +468,41 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
                     </>
                   )}
               </div>
-
-              <p className="text-xs text-muted-foreground px-1">
-                To change nights or add an early checkout fee, use <strong>Adjust stay</strong> on the
-                bookings list before checking out.
-              </p>
             </>
           )}
 
-          <div className="flex items-center justify-between rounded-lg border border-border p-3">
-            <div>
-              <p className="text-sm font-medium text-foreground">Include extra charges</p>
-              <p className="text-xs text-muted-foreground">Late checkout and other room extras</p>
+          <div className="rounded-lg border border-border p-3 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium text-foreground">Include late checkout charge</p>
+                <p className="text-xs text-muted-foreground">
+                  Beverage and other posted folio charges are always included on the hotel invoice
+                </p>
+              </div>
+              <Switch
+                checked={extraChargesEnabled}
+                onCheckedChange={(on) => {
+                  setExtraChargesEnabled(on)
+                  if (!on) {
+                    setLateCheckoutAmount('')
+                    setDebouncedLateCheckoutAmount(0)
+                  }
+                }}
+              />
             </div>
-            <Switch checked={extraChargesEnabled} onCheckedChange={setExtraChargesEnabled} />
+            {extraChargesEnabled && (
+              <div className="space-y-2">
+                <Label htmlFor="late-checkout-amount">Late checkout charge (BDT)</Label>
+                <Input
+                  id="late-checkout-amount"
+                  type="text"
+                  inputMode="decimal"
+                  value={lateCheckoutAmount}
+                  onChange={(e) => setLateCheckoutAmount(e.target.value)}
+                  placeholder="Enter late checkout amount"
+                />
+              </div>
+            )}
           </div>
 
           <div className="rounded-lg border border-border p-3 space-y-3">
@@ -423,12 +537,13 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
             )}
           </div>
 
+          {!reservationDiscountLocked && (
           <div className="rounded-lg border border-border p-3 space-y-3">
             <div className="flex items-center justify-between gap-3">
               <div>
                 <p className="text-sm font-medium text-foreground">Discount</p>
                 <p className="text-xs text-muted-foreground">
-                  Applied to room and extras before VAT — included on invoice
+                  Applied to room and service charges before VAT — included on invoice
                 </p>
               </div>
               <Switch
@@ -472,6 +587,7 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
               </div>
             )}
           </div>
+          )}
 
           <div className="rounded-lg border border-indigo-200 bg-indigo-50/50 p-3 space-y-3">
             <div className="flex items-center justify-between gap-3">
@@ -551,16 +667,22 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
               <p className="font-medium text-right">{formatBdt(checkoutPreview?.roomCharges ?? 0)}</p>
               <p className="text-muted-foreground">Restaurant</p>
               <p className="font-medium text-right">{formatBdt(checkoutPreview?.foodCharges ?? 0)}</p>
-              <p className="text-muted-foreground">Extra charges</p>
+              {(checkoutPreview?.postedExtraCharges ?? 0) > 0 && (
+                <>
+                  <p className="text-muted-foreground">Beverage / folio charges</p>
+                  <p className="font-medium text-right">
+                    {formatBdt(checkoutPreview?.postedExtraCharges ?? 0)}
+                  </p>
+                </>
+              )}
+              <p className="text-muted-foreground">Late checkout / other fees</p>
               <p
                 className={cn(
                   'font-medium text-right',
                   !extraChargesEnabled && 'text-muted-foreground line-through'
                 )}
               >
-                {formatBdt(
-                  Math.max(0, (checkoutPreview?.extraCharges ?? 0) - (checkoutPreview?.damageCharge ?? 0))
-                )}
+                {formatBdt(extraChargesEnabled ? checkoutPreview?.lateCheckoutCharge ?? 0 : 0)}
               </p>
               {(checkoutPreview?.damageCharge ?? 0) > 0 && (
                 <>
@@ -585,7 +707,7 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
                   )}
                   {transfer.extraCharges > 0 && (
                     <>
-                      <p className="text-muted-foreground pl-2">Extras</p>
+                      <p className="text-muted-foreground pl-2">Service charges</p>
                       <p className="font-medium text-right">{formatBdt(transfer.extraCharges)}</p>
                     </>
                   )}
@@ -659,41 +781,52 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div className="space-y-2">
-              <Label>Amount (BDT)</Label>
-              <Input
-                type="number"
-                min="0"
-                value={checkOutPayment}
-                onChange={(e) => setCheckOutPayment(e.target.value)}
-              />
-              <p className="text-xs text-muted-foreground">
-                Remaining:{' '}
-                <span
-                  className={
-                    checkOutRemaining > 0 ? 'text-red-600 font-semibold' : 'text-emerald-600 font-semibold'
-                  }
-                >
-                  {formatBdt(checkOutRemaining)}
-                </span>
-              </p>
+          <div className="space-y-2">
+            <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] gap-3 items-end">
+              <div className="space-y-2">
+                <Label htmlFor="checkout-payment-amount">Payment amount (BDT)</Label>
+                <Input
+                  id="checkout-payment-amount"
+                  type="number"
+                  min="0"
+                  className="h-10"
+                  value={checkOutPayment}
+                  onChange={(e) => setCheckOutPayment(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="checkout-payment-method">Payment method</Label>
+                <Select value={checkOutPaymentMethod} onValueChange={handlePaymentMethodChange}>
+                  <SelectTrigger id="checkout-payment-method" className="h-10 w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PAYMENT_METHOD_OPTIONS_WITH_PAYMENT.map((opt) => (
+                      <SelectItem key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button
+                type="button"
+                className="h-10 w-full bg-emerald-600 hover:bg-emerald-700 text-white sm:w-auto sm:min-w-[5.5rem]"
+                onClick={handleRecordCheckoutPayment}
+              >
+                Pay
+              </Button>
             </div>
-            <div className="space-y-2">
-              <Label>Payment method</Label>
-              <Select value={checkOutPaymentMethod} onValueChange={handlePaymentMethodChange}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {PAYMENT_METHOD_OPTIONS_WITH_PAYMENT.map((opt) => (
-                    <SelectItem key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            <p className="text-xs text-muted-foreground">
+              Remaining:{' '}
+              <span
+                className={
+                  checkOutRemaining > 0 ? 'text-red-600 font-semibold' : 'text-emerald-600 font-semibold'
+                }
+              >
+                {formatBdt(checkOutRemaining)}
+              </span>
+            </p>
           </div>
           {(showPaymentReference || showPaymentLastFour) && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -735,6 +868,21 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
               )}
             </div>
           )}
+          {checkoutPaymentLines.length > 0 && (
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50/40 p-3 space-y-2">
+              <p className="text-sm font-semibold text-emerald-900">Payments to apply at checkout</p>
+              {checkoutPaymentLines.map((line) => (
+                <div key={line.id} className="flex justify-between text-sm">
+                  <span>{formatPaymentMethod(line.method)}</span>
+                  <span className="font-medium">{formatBdt(line.amount)}</span>
+                </div>
+              ))}
+              <div className="flex justify-between text-sm font-semibold border-t border-emerald-200 pt-2">
+                <span>Total paying now</span>
+                <span>{formatBdt(totalCheckoutPayments)}</span>
+              </div>
+            </div>
+          )}
           <div className="space-y-2">
             <Label>Notes (optional)</Label>
             <Input value={checkOutPaymentNotes} onChange={(e) => setCheckOutPaymentNotes(e.target.value)} />
@@ -753,20 +901,25 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
             checkOutMutation.isPending ||
             !bookingId ||
             checkoutPreviewFetching ||
+            (debouncedRoomCharge != null && debouncedRoomCharge <= 0) ||
             (damageChargesEnabled && parsedDamageAmount <= 0) ||
-            (discountEnabled && parsedDiscountValue <= 0) ||
+            (!reservationDiscountLocked && discountEnabled && parsedDiscountValue <= 0) ||
             (roomCreditTransferEnabled && !billTransferTargetId) ||
             (!isBillTransferOut &&
               !isCompanyLedgerCheckout &&
               checkOutDue > 0 &&
-              (checkOutPaymentAmount <= 0 || checkOutPaymentAmount < checkOutDue))
+              totalCheckoutPayments + 0.01 < checkOutDue)
           }
           onClick={() => {
+            if (debouncedRoomCharge != null && debouncedRoomCharge <= 0) {
+              toast.error('Room charges must be greater than zero.')
+              return
+            }
             if (damageChargesEnabled && parsedDamageAmount <= 0) {
               toast.error('Enter a damage charge amount greater than zero, or turn damage charges off.')
               return
             }
-            if (discountEnabled && parsedDiscountValue <= 0) {
+            if (!reservationDiscountLocked && discountEnabled && parsedDiscountValue <= 0) {
               toast.error('Enter a discount greater than zero, or turn discount off.')
               return
             }
@@ -774,16 +927,20 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
               toast.error('Select a checked-in room to receive this bill, or turn bill transfer off.')
               return
             }
+            if (checkOutPaymentAmount > 0) {
+              toast.error('Press Pay to record the entered payment before completing checkout.')
+              return
+            }
             if (
               !isBillTransferOut &&
               !isCompanyLedgerCheckout &&
               checkOutDue > 0 &&
-              checkOutPaymentAmount < checkOutDue
+              totalCheckoutPayments + 0.01 < checkOutDue
             ) {
-              toast.error('Please clear full due amount before checkout.')
+              toast.error('Record payments until the full due amount is covered, then complete checkout.')
               return
             }
-            if (isCompanyLedgerCheckout && checkOutPaymentAmount > checkOutDue) {
+            if (isCompanyLedgerCheckout && totalCheckoutPayments > checkOutDue + 0.01) {
               toast.error('Payment cannot exceed the current due amount.')
               return
             }

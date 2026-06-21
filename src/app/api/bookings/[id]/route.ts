@@ -1,23 +1,36 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
-import { requireRole } from '@/lib/auth';
+import { requireHotelAccess, requireRole } from '@/lib/auth';
 import { successResponse, errorResponse, notFoundResponse, logActivity } from '@/lib/api-utils';
-import { ensureConfirmationNumber } from '@/lib/confirmation-number';
-import { bookingVatOptions, computeRoomBookingTotals, sumBookingNetPaid } from '@/lib/booking-totals';
+import { ensureConfirmationNumber } from '@/lib/confirmation-number.server';
+import { computeBookingRoomDue, resolveBookingDisplayDue, sumBookingNetPaid } from '@/lib/booking-totals';
 import { formatFormOfPayment, getAdvancePaymentMethod } from '@/lib/payment-method';
 import { RoleType } from '@prisma/client';
 import { resolveBookingCheckInOut } from '@/lib/app-settings';
 import { countBookedNights } from '@/lib/booking-stay';
 import { replaceIdDocumentsForBooking } from '@/lib/booking-id-documents';
+import {
+  replaceBookingCompanions,
+  validateCompanionInputs,
+  validateCorporateCompanionInputs,
+  type CompanionInput,
+} from '@/lib/booking-companions';
 import { formatGuestCompany } from '@/lib/reservation-terms';
-import { getCompleteReservationMissingFields } from '@/lib/reservation-completion-fields';
-import { getEmailValidationError } from '@/lib/email-verify-server';
+import { getCompleteReservationMissingFields, getCorporateGuestMissingFields } from '@/lib/reservation-completion-fields';
+import { hasBookingCompany } from '@/lib/booking-company';
+import { ensureCustomerRegistrationNumber } from '@/lib/guest-registration-number';
+import { getRoomNightlyTotal } from '@/lib/room-pricing';
+import { getEmailValidationError } from '@/lib/email-validation';
+import { assertRoomAvailableForBooking } from '@/lib/reservation-entry';
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const authResult = await requireHotelAccess(request);
+    if (authResult instanceof Response) return authResult;
+
     const { id } = await params;
 
     const booking = await db.booking.findUnique({
@@ -25,12 +38,15 @@ export async function GET(
       include: {
         customer: true,
         room: { include: { type: true } },
+        sourceReservationEntry: { select: { registrationNumber: true } },
+        companyLedgerGuest: { select: { registrationNumber: true } },
         creator: { select: { id: true, name: true, email: true, phone: true, role: true } },
         charges: true,
         payments: true,
         restaurantOrders: { include: { items: { include: { menuItem: true } } } },
         invoices: true,
         idDocuments: { orderBy: { sortOrder: 'asc' } },
+        companions: { orderBy: { sortOrder: 'asc' } },
       },
     });
 
@@ -38,11 +54,15 @@ export async function GET(
       return notFoundResponse('Booking');
     }
 
-    const totalPaid = sumBookingNetPaid(booking.payments);
-    const totals = computeRoomBookingTotals(
-      booking.totalRoomCharge,
-      totalPaid,
-      bookingVatOptions(booking)
+    const latestInvoice =
+      booking.invoices
+        ?.filter((invoice) => invoice.status !== 'CANCELLED')
+        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0] ?? null;
+    const totals = computeBookingRoomDue(booking, booking.payments);
+    const dueAmount = resolveBookingDisplayDue(
+      booking,
+      booking.payments,
+      latestInvoice
     );
     const advanceMethod = getAdvancePaymentMethod(booking.payments);
     const enriched = {
@@ -50,7 +70,7 @@ export async function GET(
       vatPercent: totals.vatPercent,
       vatAmount: totals.vatAmount,
       totalWithVat: totals.totalWithVat,
-      dueAmount: totals.dueAmount,
+      dueAmount,
       formOfPayment: formatFormOfPayment(booking.advancePayment, advanceMethod),
     };
 
@@ -71,7 +91,7 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const authResult = requireRole(request, 'ADMIN' as RoleType, 'HOTEL_STAFF' as RoleType, 'HOTEL_FD' as RoleType);
+    const authResult = await requireRole(request, 'ADMIN' as RoleType, 'HOTEL_STAFF' as RoleType, 'HOTEL_FD' as RoleType);
     if (authResult instanceof Response) return authResult;
 
     const { id } = await params;
@@ -86,6 +106,42 @@ export async function PUT(
     });
     if (!existing) {
       return notFoundResponse('Booking');
+    }
+
+    const isIdDocumentOnlyUpdate =
+      Array.isArray(body.idDocumentPaths) &&
+      body.customer === undefined &&
+      body.roomId === undefined &&
+      body.checkIn === undefined &&
+      body.checkOut === undefined &&
+      body.isInitialReservation === undefined &&
+      body.companions === undefined &&
+      body.nidPhysicallyReceived === undefined;
+
+    if (
+      isIdDocumentOnlyUpdate &&
+      (existing.status === 'CHECKED_IN' || existing.status === 'RESERVED')
+    ) {
+      await replaceIdDocumentsForBooking(id, body.idDocumentPaths);
+      const firstPath = body.idDocumentPaths.find(
+        (p: unknown) => typeof p === 'string' && p.startsWith('/uploads/id-docs/')
+      );
+      if (firstPath) {
+        await db.customer.update({
+          where: { id: existing.customerId },
+          data: { idDocPath: firstPath },
+        });
+      }
+      const booking = await db.booking.findUnique({
+        where: { id },
+        include: {
+          customer: true,
+          room: { include: { type: true } },
+          idDocuments: { orderBy: { sortOrder: 'asc' } },
+          companions: { orderBy: { sortOrder: 'asc' } },
+        },
+      });
+      return successResponse(booking, 'ID documents updated');
     }
 
     if (existing.status !== 'RESERVED') {
@@ -115,6 +171,13 @@ export async function PUT(
     if (body.vatPercent !== undefined) {
       const parsed = parseFloat(String(body.vatPercent));
       if (!Number.isNaN(parsed) && parsed >= 0) updateData.vatPercent = parsed;
+    }
+    if (body.vatApplied !== undefined) {
+      updateData.vatApplied = body.vatApplied === true;
+    }
+    if (body.serviceChargePercent !== undefined) {
+      const parsed = parseFloat(String(body.serviceChargePercent));
+      if (!Number.isNaN(parsed) && parsed >= 0) updateData.serviceChargePercent = parsed;
     }
 
     if (body.isInitialReservation === false) {
@@ -161,6 +224,24 @@ export async function PUT(
         return errorResponse('Room already has an active booking in this date range');
       }
 
+      const roomForEntryCheck = await db.room.findUnique({
+        where: { id: roomId },
+        select: { id: true, typeId: true },
+      });
+      if (roomForEntryCheck) {
+        const entryBlockError = await assertRoomAvailableForBooking(
+          roomForEntryCheck.id,
+          roomForEntryCheck.typeId,
+          newCheckIn,
+          newCheckOut,
+          undefined,
+          id
+        );
+        if (entryBlockError) {
+          return errorResponse(entryBlockError);
+        }
+      }
+
       const room = await db.room.findUnique({
         where: { id: roomId },
         include: { type: true },
@@ -169,20 +250,20 @@ export async function PUT(
       if (room) {
         const days = countBookedNights(newCheckIn, newCheckOut);
         if (days > 0) {
-          const totalRoomCharge = days * room.type.basePrice;
+          const totalRoomCharge = days * getRoomNightlyTotal(room);
           const paymentRows = await db.payment.findMany({
             where: { bookingId: id },
             select: { amount: true, paymentType: true },
           });
           const totalPaid = sumBookingNetPaid(paymentRows);
-          const { dueAmount } = computeRoomBookingTotals(
-            totalRoomCharge,
-            totalPaid,
-            bookingVatOptions({
+          const { dueAmount } = computeBookingRoomDue(
+            {
               ...existing,
+              totalRoomCharge,
               vatPercent:
                 (updateData.vatPercent as number | undefined) ?? existing.vatPercent,
-            })
+            },
+            paymentRows
           );
           updateData.totalRoomCharge = totalRoomCharge;
           updateData.dueAmount = dueAmount;
@@ -197,12 +278,7 @@ export async function PUT(
       if (customerPatch.phone !== undefined) customerUpdate.phone = String(customerPatch.phone).trim();
       if (customerPatch.email !== undefined) {
         const emailValue = customerPatch.email ? String(customerPatch.email).trim() : null;
-        const emailError = await getEmailValidationError(
-          emailValue,
-          true,
-          customerPatch.emailVerificationToken as string | undefined,
-          { allowUnverifiedMailbox: customerPatch.allowUnverifiedMailbox === true }
-        );
+        const emailError = getEmailValidationError(emailValue, true);
         if (emailError) return errorResponse(emailError);
         customerUpdate.email = emailValue;
       }
@@ -233,6 +309,16 @@ export async function PUT(
           ? String(customerPatch.nationality).trim()
           : null;
       }
+      if (customerPatch.company !== undefined) {
+        customerUpdate.company = customerPatch.company
+          ? String(customerPatch.company).trim()
+          : null;
+      }
+      if (customerPatch.designation !== undefined) {
+        customerUpdate.designation = customerPatch.designation
+          ? String(customerPatch.designation).trim()
+          : null;
+      }
 
       if (Object.keys(customerUpdate).length > 0) {
         await db.customer.update({
@@ -259,7 +345,35 @@ export async function PUT(
       ? body.idDocumentPaths.length
       : existing.idDocuments.length;
 
+    const resolvedNidPhysicallyReceived =
+      body.nidPhysicallyReceived !== undefined
+        ? body.nidPhysicallyReceived !== false
+        : existing.nidPhysicallyReceived;
+
     if (body.isInitialReservation === false) {
+      const isCorporate =
+        body.isCorporateGuest === true || existing.isCorporateGuest === true;
+
+      if (isCorporate) {
+        const refreshedCustomer = await db.customer.findUnique({
+          where: { id: existing.customerId },
+        });
+        if (!refreshedCustomer) {
+          return notFoundResponse('Customer');
+        }
+        const corporateMissing = getCorporateGuestMissingFields({
+          guestName: refreshedCustomer.name,
+          guestCompany: refreshedCustomer.company ?? '',
+          guestPhone: refreshedCustomer.phone,
+          guestDesignation: refreshedCustomer.designation ?? '',
+          guestAddress: refreshedCustomer.address ?? '',
+        });
+        if (corporateMissing.length > 0) {
+          return errorResponse(
+            `Complete the reservation — required: ${corporateMissing.join(', ')}`
+          );
+        }
+      } else {
       const email =
         customerPatch?.email !== undefined
           ? String(customerPatch.email || '').trim()
@@ -272,37 +386,83 @@ export async function PUT(
         customerPatch?.idNumber !== undefined
           ? String(customerPatch.idNumber || '').trim()
           : existing.customer.idNumber?.trim() || '';
-      const registrationNumber =
-        customerPatch?.registrationNumber !== undefined
-          ? String(customerPatch.registrationNumber || '').trim()
-          : existing.customer.registrationNumber?.trim() || '';
       const nationality =
         customerPatch?.nationality !== undefined
           ? String(customerPatch.nationality || '').trim()
           : existing.customer.nationality?.trim() || '';
-      const idType =
-        customerPatch?.idType !== undefined
-          ? String(customerPatch.idType || '').trim()
-          : existing.customer.idType?.trim() || '';
-      const visaExpiryDate =
-        customerPatch?.visaExpiryDate !== undefined
-          ? String(customerPatch.visaExpiryDate || '').trim()
-          : existing.customer.visaExpiryDate?.trim() || '';
 
       const missing = getCompleteReservationMissingFields({
         nationality,
         idNumber,
         email,
         address,
-        registrationNumber,
         idDocumentCount: idDocCount,
-        idType,
-        visaExpiryDate,
+        nidPhysicallyReceived: resolvedNidPhysicallyReceived,
+        hasCompanySelected: hasBookingCompany({
+          company: existing.company,
+          companyLedgerId: existing.companyLedgerId,
+        }),
       });
       if (missing.length > 0) {
         return errorResponse(
           `Complete the reservation — required: ${missing.join(', ')}`
         );
+      }
+
+      await ensureCustomerRegistrationNumber(existing.customerId);
+      }
+    }
+
+    if (body.isCorporateGuest !== undefined) {
+      updateData.isCorporateGuest = body.isCorporateGuest === true;
+    }
+
+    if (body.nidPhysicallyReceived !== undefined) {
+      updateData.nidPhysicallyReceived = body.nidPhysicallyReceived !== false;
+    }
+
+    const resolvedAdults =
+      body.adults !== undefined
+        ? Math.max(1, parseInt(String(body.adults), 10) || 1)
+        : existing.adults;
+    const resolvedChildren =
+      body.children !== undefined
+        ? Math.max(0, parseInt(String(body.children), 10) || 0)
+        : existing.children;
+
+    const corporateBooking =
+      body.isCorporateGuest === true || existing.isCorporateGuest === true;
+
+    if (body.companions !== undefined && corporateBooking) {
+      const companionError = validateCorporateCompanionInputs(
+        resolvedAdults,
+        ((body.companions as CompanionInput[]) ?? []).map((c) => ({
+          name: c.name,
+          company: c.company ?? '',
+          phone: c.phone ?? '',
+          designation: c.designation ?? '',
+          address: c.address ?? '',
+        }))
+      );
+      if (companionError) {
+        return errorResponse(companionError);
+      }
+    }
+
+    if (body.companions !== undefined && !corporateBooking) {
+      const companionError = validateCompanionInputs(
+        resolvedAdults,
+        resolvedChildren,
+        (body.companions as CompanionInput[]) ?? [],
+        {
+          requireIdFields: !hasBookingCompany({
+            company: existing.company,
+            companyLedgerId: existing.companyLedgerId,
+          }),
+        }
+      );
+      if (companionError) {
+        return errorResponse(companionError);
       }
     }
 
@@ -313,8 +473,30 @@ export async function PUT(
         customer: true,
         room: { include: { type: true } },
         idDocuments: { orderBy: { sortOrder: 'asc' } },
+        companions: { orderBy: { sortOrder: 'asc' } },
       },
     });
+
+    if (body.companions !== undefined) {
+      await replaceBookingCompanions(
+        db,
+        id,
+        (body.companions as CompanionInput[]) ?? []
+      );
+    }
+
+    const bookingWithCompanions =
+      body.companions !== undefined
+        ? await db.booking.findUnique({
+            where: { id },
+            include: {
+              customer: true,
+              room: { include: { type: true } },
+              idDocuments: { orderBy: { sortOrder: 'asc' } },
+              companions: { orderBy: { sortOrder: 'asc' } },
+            },
+          })
+        : booking;
 
     await logActivity(
       authResult.id,
@@ -323,7 +505,7 @@ export async function PUT(
       JSON.stringify({ bookingId: id, changes: updateData })
     );
 
-    return successResponse(booking, 'Booking updated successfully');
+    return successResponse(bookingWithCompanions, 'Booking updated successfully');
   } catch (error) {
     console.error('Booking update error:', error);
     return errorResponse('Failed to update booking', 500);

@@ -9,7 +9,7 @@ export interface AuthState {
     name: string;
     avatar?: string | null;
     phone?: string | null;
-    role: 'ADMIN' | 'HOTEL_STAFF' | 'HOTEL_FD' | 'RESTAURANT_STAFF';
+    role: 'ADMIN' | 'HOTEL_STAFF' | 'HOTEL_FD' | 'RESTAURANT_STAFF' | 'HOUSEKEEPER';
   } | null;
   token: string | null;
   lastActivityAt: number | null;
@@ -61,7 +61,11 @@ export {
   canAccessHotel,
   canAccessRestaurant,
   canAccessAdmin,
+  canAccessInventory,
   canManageRoomInventory,
+  canPerformRoomCleaning,
   isHotelFrontDesk,
+  isRoomsViewOnly,
+  isHousekeeper,
   formatRoleLabel,
 } from '@/lib/roles';

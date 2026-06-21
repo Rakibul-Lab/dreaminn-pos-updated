@@ -3,14 +3,14 @@ import { db } from '@/lib/db';
 import { requireRole } from '@/lib/auth';
 import { successResponse, errorResponse, notFoundResponse, logActivity } from '@/lib/api-utils';
 import { RoleType } from '@prisma/client';
-import { getEmailValidationError } from '@/lib/email-verify-server';
+import { getEmailValidationError } from '@/lib/email-validation';
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const authResult = requireRole(request, 'ADMIN' as RoleType, 'HOTEL_STAFF' as RoleType, 'HOTEL_FD' as RoleType);
+    const authResult = await requireRole(request, 'ADMIN' as RoleType, 'HOTEL_STAFF' as RoleType, 'HOTEL_FD' as RoleType);
     if (authResult instanceof Response) return authResult;
 
     const { id } = await params;
@@ -66,8 +66,8 @@ export async function PUT(
     if (!existing) return notFoundResponse('Company ledger');
 
     const authResult = existing.isSystem
-      ? requireRole(request, 'ADMIN' as RoleType)
-      : requireRole(request, 'ADMIN' as RoleType, 'HOTEL_STAFF' as RoleType, 'HOTEL_FD' as RoleType);
+      ? await requireRole(request, 'ADMIN' as RoleType)
+      : await requireRole(request, 'ADMIN' as RoleType, 'HOTEL_STAFF' as RoleType, 'HOTEL_FD' as RoleType);
     if (authResult instanceof Response) return authResult;
 
     const body = await request.json();
@@ -75,11 +75,7 @@ export async function PUT(
     if (!name) return errorResponse('Company name is required');
 
     if (body?.email !== undefined) {
-      const emailError = await getEmailValidationError(
-        body.email,
-        true,
-        body.emailVerificationToken
-      );
+      const emailError = getEmailValidationError(body.email, true);
       if (emailError) return errorResponse(emailError);
     }
 
@@ -123,7 +119,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const authResult = requireRole(request, 'ADMIN' as RoleType, 'HOTEL_STAFF' as RoleType, 'HOTEL_FD' as RoleType);
+    const authResult = await requireRole(request, 'ADMIN' as RoleType, 'HOTEL_STAFF' as RoleType, 'HOTEL_FD' as RoleType);
     if (authResult instanceof Response) return authResult;
 
     const { id } = await params;
@@ -131,6 +127,23 @@ export async function DELETE(
     if (!existing) return notFoundResponse('Company ledger');
     if (existing.isSystem) {
       return errorResponse('System ledgers cannot be deleted', 403);
+    }
+
+    if ((existing.dueAmount ?? 0) > 0.009) {
+      return errorResponse(
+        `Cannot delete company with outstanding balance (৳${existing.dueAmount.toFixed(2)} due). Settle all bills first.`,
+        400
+      );
+    }
+
+    const openBills = await db.companyLedgerBill.count({
+      where: { companyLedgerId: id, dueAmount: { gt: 0.009 } },
+    });
+    if (openBills > 0) {
+      return errorResponse(
+        'Cannot delete company while open bills exist. Settle or clear all dues first.',
+        400
+      );
     }
 
     await db.companyLedger.delete({ where: { id } });

@@ -90,26 +90,48 @@ function addJpegToPdfPage(
   img: HTMLImageElement,
   isFirstPage: boolean
 ) {
-  if (!isFirstPage) pdf.addPage()
-
   const pageWidth = pdf.internal.pageSize.getWidth()
   const pageHeight = pdf.internal.pageSize.getHeight()
-  const margin = 8
-  const maxW = pageWidth - margin * 2
-  const maxH = pageHeight - margin * 2
+  const maxW = pageWidth
+  const maxH = pageHeight
 
-  let imgW = maxW
-  let imgH = (img.height * imgW) / img.width
+  const scaledHeight = (img.height * maxW) / img.width
 
-  if (imgH > maxH) {
-    imgH = maxH
-    imgW = (img.width * imgH) / img.height
+  if (scaledHeight <= maxH + 0.5) {
+    if (!isFirstPage) pdf.addPage()
+    pdf.addImage(jpegDataUrl, 'JPEG', 0, 0, maxW, scaledHeight, undefined, 'FAST')
+    return
   }
 
-  const x = (pageWidth - imgW) / 2
-  const y = margin
+  const pageCount = Math.ceil(scaledHeight / maxH)
+  const sourceSliceHeight = img.height / pageCount
 
-  pdf.addImage(jpegDataUrl, 'JPEG', x, y, imgW, imgH, undefined, 'FAST')
+  for (let pageIndex = 0; pageIndex < pageCount; pageIndex++) {
+    if (!isFirstPage || pageIndex > 0) pdf.addPage()
+
+    const sourceY = Math.round(pageIndex * sourceSliceHeight)
+    const sourceH =
+      pageIndex === pageCount - 1
+        ? img.height - sourceY
+        : Math.round(sourceSliceHeight)
+
+    const canvas = document.createElement('canvas')
+    canvas.width = img.width
+    canvas.height = sourceH
+    const ctx = canvas.getContext('2d')
+    if (!ctx) {
+      pdf.addImage(jpegDataUrl, 'JPEG', 0, 0, maxW, maxH, undefined, 'FAST')
+      continue
+    }
+
+    ctx.fillStyle = '#ffffff'
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+    ctx.drawImage(img, 0, sourceY, img.width, sourceH, 0, 0, img.width, sourceH)
+
+    const sliceJpeg = canvas.toDataURL('image/jpeg', JPEG_QUALITY_TEXT_PAGE)
+    const sliceHeightMm = (sourceH * maxW) / img.width
+    pdf.addImage(sliceJpeg, 'JPEG', 0, 0, maxW, sliceHeightMm, undefined, 'FAST')
+  }
 }
 
 async function embedImagesAsDataUrls(root: HTMLElement): Promise<() => void> {
@@ -170,17 +192,37 @@ function isAttachmentSheet(element: HTMLElement): boolean {
   return element.classList.contains('reservation-a4-sheet--attachments')
 }
 
+function isEntryFillSheet(element: HTMLElement): boolean {
+  return element.classList.contains('reservation-a4-sheet--entry')
+}
+
 async function captureElementJpeg(
   element: HTMLElement
 ): Promise<{ dataUrl: string; img: HTMLImageElement }> {
   const prevWidth = element.style.width
   const prevMaxWidth = element.style.maxWidth
+  const prevMinHeight = element.style.minHeight
+  const prevHeight = element.style.height
   const prevBoxSizing = element.style.boxSizing
   const isAttachment = isAttachmentSheet(element)
 
   element.style.boxSizing = 'border-box'
   element.style.width = `${A4_WIDTH_PX}px`
   element.style.maxWidth = `${A4_WIDTH_PX}px`
+
+  const contentHeight = element.scrollHeight
+  const entryFill = isEntryFillSheet(element)
+  const captureHeight = isAttachment
+    ? contentHeight
+    : entryFill
+      ? A4_HEIGHT_PX
+      : Math.max(A4_HEIGHT_PX, contentHeight)
+
+  if (!isAttachment) {
+    element.style.minHeight = `${captureHeight}px`
+    element.style.height = `${captureHeight}px`
+  }
+
   element.classList.add('reservation-pdf-capture')
 
   const captureScale = isAttachment ? CAPTURE_SCALE_ATTACHMENT_PAGE : CAPTURE_SCALE_TEXT_PAGE
@@ -195,7 +237,7 @@ async function captureElementJpeg(
       scale: captureScale,
       backgroundColor: '#ffffff',
       width: A4_WIDTH_PX,
-      height: Math.min(element.scrollHeight, A4_HEIGHT_PX * 1.2),
+      height: captureHeight,
       timeout: 60_000,
     })
 
@@ -206,6 +248,8 @@ async function captureElementJpeg(
     element.classList.remove('reservation-pdf-capture')
     element.style.width = prevWidth
     element.style.maxWidth = prevMaxWidth
+    element.style.minHeight = prevMinHeight
+    element.style.height = prevHeight
     element.style.boxSizing = prevBoxSizing
   }
 }

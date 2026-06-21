@@ -1,29 +1,11 @@
 import { z } from 'zod'
 
-export type EmailValidationStatus = 'idle' | 'validating' | 'valid' | 'invalid' | 'warning'
+export type EmailValidationStatus = 'idle' | 'validating' | 'valid' | 'invalid'
 
 export type EmailValidationResult = {
   valid: boolean
   status: EmailValidationStatus
   message?: string
-  suggestion?: string
-  formatValid?: boolean
-  domainValid?: boolean
-  mailboxExists?: boolean | null
-  needsOtp?: boolean
-  verificationToken?: string | null
-  provider?: string | null
-}
-
-export type ServerEmailVerifyResult = {
-  valid: boolean
-  formatValid: boolean
-  domainValid: boolean
-  mailboxExists: boolean | null
-  needsOtp?: boolean
-  message: string
-  suggestion?: string
-  provider?: string | null
 }
 
 const emailSchema = z.string().email()
@@ -52,13 +34,6 @@ export function getEmailDomain(email: string): string | null {
   return trimmed.slice(at + 1)
 }
 
-export const GMAIL_DOMAINS = new Set(['gmail.com', 'googlemail.com'])
-
-export function isGmailAddress(email: string): boolean {
-  const domain = getEmailDomain(email)
-  return domain ? GMAIL_DOMAINS.has(domain) : false
-}
-
 export function resolveOptionalEmailValidation(
   email: string,
   result: EmailValidationResult,
@@ -68,4 +43,17 @@ export function resolveOptionalEmailValidation(
     return { valid: true, status: 'idle' }
   }
   return result
+}
+
+/** Returns an error message when invalid, or null when OK. */
+export function getEmailValidationError(
+  email: string | null | undefined,
+  optional = false
+): string | null {
+  const trimmed = email?.trim() ?? ''
+  if (!trimmed) {
+    return optional ? null : 'Email is required'
+  }
+  const result = validateEmailFormat(trimmed)
+  return result.valid ? null : result.message || 'Enter a valid email address'
 }

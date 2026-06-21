@@ -95,6 +95,11 @@ export async function getHotelVatPercent(): Promise<number> {
   return parsePercent(raw, parsePercent(def?.value ?? '15', 15))
 }
 
+export async function getHotelServiceChargePercent(): Promise<number> {
+  const raw = await readSettingValue('hotel_service_charge_percent')
+  return parsePercent(raw, 10)
+}
+
 export async function getRestaurantVatPercent(): Promise<number> {
   const raw =
     (await readSettingValue('restaurant_vat_percent')) ??

@@ -45,6 +45,7 @@ import { toast } from 'sonner';
 
 type CompanyBill = {
   id: string;
+  billType?: string;
   guestName: string;
   roomNumber?: string | null;
   totalAmount: number;
@@ -263,7 +264,12 @@ export function CompanyLedgerCompanyView({
     return <div className="p-8 text-red-600">Failed to load company ledger.</div>;
   }
 
-  const outstandingBills = company.bills.filter((b) => b.dueAmount > 0);
+  const outstandingBills = company.bills.filter(
+    (b) => b.dueAmount > 0 && (b.billType === 'BOOKING' || !b.billType)
+  );
+  const pendingEntryBills = company.bills.filter(
+    (b) => b.dueAmount > 0 && b.billType === 'RESERVATION_ENTRY'
+  );
 
   return (
     <div className="space-y-6">
@@ -321,7 +327,7 @@ export function CompanyLedgerCompanyView({
             <div className="relative flex-1 min-w-[200px] max-w-sm">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
-                placeholder="Search guest name, phone, nationality..."
+                placeholder="Search guest name, phone, reg. no., nationality..."
                 value={guestSearchInput}
                 onChange={(e) => setGuestSearchInput(e.target.value)}
                 className="pl-9"
@@ -470,8 +476,20 @@ export function CompanyLedgerCompanyView({
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
+          {pendingEntryBills.length > 0 ? (
+            <p className="mx-6 mt-4 mb-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              {pendingEntryBills.length} reservation entr
+              {pendingEntryBills.length === 1 ? 'y' : 'ies'} with advance due (
+              {formatBdt(pendingEntryBills.reduce((s, b) => s + b.dueAmount, 0))}). Convert to
+              booking or cancel the entry to adjust — payment is recorded after checkout.
+            </p>
+          ) : null}
           {outstandingBills.length === 0 ? (
-            <p className="p-6 text-sm text-muted-foreground">No outstanding balance on this company.</p>
+            <p className="p-6 text-sm text-muted-foreground">
+              {pendingEntryBills.length > 0
+                ? 'No checkout bills awaiting payment.'
+                : 'No outstanding balance on this company.'}
+            </p>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">

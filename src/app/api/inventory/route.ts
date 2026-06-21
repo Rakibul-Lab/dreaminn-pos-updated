@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
-import { requireRole } from '@/lib/auth';
+import { requireInventoryAccess } from '@/lib/auth';
 import {
   successResponse,
   errorResponse,
@@ -13,12 +13,15 @@ import { Prisma } from '@prisma/client';
 // GET /api/inventory - List inventory items with low-stock filter, paginated
 export async function GET(request: NextRequest) {
   try {
+    const authResult = await requireInventoryAccess(request);
+    if (authResult instanceof Response) return authResult;
+
     const { searchParams } = new URL(request.url);
     const lowStock = searchParams.get('lowStock');
     const category = searchParams.get('category');
     const search = searchParams.get('search');
     const page = Math.max(1, parseInt(searchParams.get('page') || '1'));
-    const limit = Math.max(1, Math.min(100, parseInt(searchParams.get('limit') || '20')));
+    const limit = Math.max(1, Math.min(5000, parseInt(searchParams.get('limit') || '20')));
 
     const where: Prisma.InventoryItemWhereInput = {};
 
@@ -106,7 +109,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Otherwise, create a new inventory item
-    const authResult = requireRole(request, 'ADMIN');
+    const authResult = await requireInventoryAccess(request);
     if (authResult instanceof Response) return authResult;
 
     const { name, category, unit, quantity, minQuantity, costPerUnit, supplier } = body;
@@ -151,7 +154,7 @@ async function handleTransaction(
   }
 ) {
   try {
-    const authResult = requireRole(request, 'ADMIN');
+    const authResult = await requireInventoryAccess(request);
     if (authResult instanceof Response) return authResult;
 
     const { itemId, type, quantity, notes } = body;
@@ -235,10 +238,10 @@ async function handleTransaction(
   }
 }
 
-// PUT /api/inventory - Update inventory item (ADMIN only)
+// PUT /api/inventory - Update inventory item
 export async function PUT(request: NextRequest) {
   try {
-    const authResult = requireRole(request, 'ADMIN');
+    const authResult = await requireInventoryAccess(request);
     if (authResult instanceof Response) return authResult;
 
     const body = await request.json();

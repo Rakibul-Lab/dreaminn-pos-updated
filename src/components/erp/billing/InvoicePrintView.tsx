@@ -14,11 +14,40 @@ import {
 } from '@/lib/invoice-pdf'
 import { toast } from 'sonner'
 import { useHotelTimes } from '@/hooks/use-hotel-times'
+import {
+  formatListBookingCheckIn,
+  formatListBookingCheckOut,
+  type BookingListDatetimeFields,
+} from '@/lib/hotel-times'
 import { AppDevelopedByFooter } from '@/components/AppDevelopedByFooter'
 import { useAuthStore } from '@/lib/auth-store'
 import { countBookedNights } from '@/lib/booking-stay'
 import { formatAmountInWords } from '@/lib/amount-in-words'
 import { formatBdt } from '@/lib/currency'
+import {
+  INVOICE_BIN,
+  INVOICE_HOTEL_ADDRESS,
+  INVOICE_HOTEL_MOBILE,
+  INVOICE_MUSHAK,
+  INVOICE_SD_PERCENT,
+  INVOICE_SERVICE_CHARGE_PERCENT,
+  INVOICE_VAT_PERCENT,
+  INVOICE_ZERO_DISCOUNT_DISPLAY,
+  buildInvoicePaymentSummary,
+  sumPaymentsByMethod,
+  formatDiscountLabel,
+  formatDiscountColumnHeading,
+  resolveInvoiceDiscountMeta,
+  resolveInvoiceHotelServicePercent,
+  resolveInvoiceRoomVatAmount,
+  sumChargeRowAmounts,
+  type InvoiceChargeDisplayRow,
+} from '@/lib/invoice-display'
+import {
+  buildHotelInvoiceChargeRows,
+  buildRestaurantInvoiceChargeRows,
+} from '@/lib/invoice-charge-rows'
+import { formatInvoiceNumberDisplay } from '@/lib/invoice-number'
 import { INVOICE_GUEST_AGREEMENT } from '@/lib/reservation-terms'
 import { formatBookingStatusFilterLabel } from '@/lib/booking-date-filter'
 
@@ -35,15 +64,32 @@ export interface InvoicePrintData {
   paidAmount: number
   dueAmount: number
   declaredVatPercent?: number
+  declaredServiceChargePercent?: number
+  invoiceNotes?: string[]
   createdAt: string
+  payments?: Array<{
+    id: string
+    amount: number
+    method: string
+    paymentType: string
+    createdAt: string
+  }>
   booking: {
     id: string
     checkIn: string
     checkOut: string
+    actualCheckIn?: string | null
+    actualCheckOut?: string | null
     adults?: number
     children?: number
     status?: string
     company?: string | null
+    notes?: string | null
+    isCorporateGuest?: boolean
+    discountEnabled?: boolean
+    discountType?: string | null
+    discountValue?: number
+    serviceChargePercent?: number | null
     customer: {
       name: string
       phone: string
@@ -54,6 +100,7 @@ export interface InvoicePrintData {
       idNumber?: string | null
       registrationNumber?: string | null
       company?: string | null
+      designation?: string | null
     }
     companyLedger?: {
       name: string
@@ -73,7 +120,18 @@ export interface InvoicePrintData {
       idNumber?: string | null
     } | null
     creator?: { name: string } | null
-    room: { roomNumber: string; type: { name: string; basePrice?: number } }
+    companions?: Array<{
+      name: string
+      companionType: string
+      company?: string | null
+      designation?: string | null
+      phone?: string | null
+      address?: string | null
+      nationality?: string | null
+      idType?: string | null
+      idNumber?: string | null
+    }>
+    room: { roomNumber: string; totalPrice?: number; type: { name: string } }
     restaurantOrders?: Array<{
       id: string
       orderNumber: string
@@ -96,17 +154,7 @@ export interface InvoicePrintData {
   }>
 }
 
-type InvoiceChargeRow = {
-  id: string
-  date: string
-  time: string
-  category: string
-  description: string
-  rate: number
-  vatPercent: number | null
-  vatAmount: number
-  amount: number
-}
+type InvoiceChargeRow = InvoiceChargeDisplayRow
 
 function splitDisplayDateTime(value: string): { date: string; time: string } {
   const separator = ' · '
@@ -120,50 +168,6 @@ function chargeDateTime(value: string | Date): { date: string; time: string } {
   return splitDisplayDateTime(format(d, 'MMM dd, yyyy · h:mm a'))
 }
 
-function calcVatAmount(base: number, percent: number | null): number {
-  if (!percent || percent <= 0 || base <= 0) return 0
-  return Math.round((base * percent) / 100)
-}
-
-function buildChargeRow(
-  row: Omit<InvoiceChargeRow, 'vatPercent' | 'vatAmount' | 'amount'> & {
-    vatPercent?: number | null
-    vatAmount?: number
-  }
-): InvoiceChargeRow {
-  const base = row.rate
-  const vatPercent = row.vatPercent ?? null
-  const vatAmount = row.vatAmount ?? calcVatAmount(base, vatPercent)
-  return {
-    ...row,
-    vatPercent,
-    vatAmount,
-    amount: base + vatAmount,
-  }
-}
-
-const HOTEL_CHARGE_TYPES = new Set(['room_charge', 'extra_service', 'discount'])
-const RESTAURANT_CHARGE_TYPES = new Set(['food_order'])
-
-function lineItemCategory(type: string) {
-  switch (type) {
-    case 'room_charge':
-      return ''
-    case 'extra_service':
-      return 'Extra'
-    case 'food_order':
-      return 'F&B'
-    case 'discount':
-      return 'Discount'
-    case 'vat_hotel':
-      return 'Hotel VAT'
-    case 'vat_restaurant':
-      return 'Restaurant VAT'
-    default:
-      return type
-  }
-}
-
 interface InvoicePrintViewProps {
   invoiceId: string
   showToolbar?: boolean
@@ -175,16 +179,16 @@ interface InvoicePrintViewProps {
 export function InvoicePrintView({
   invoiceId,
   showToolbar = true,
-  title = 'Guest Invoice',
+  title = 'Invoice',
   successBanner,
   onClose,
 }: InvoicePrintViewProps) {
   const documentRef = useRef<HTMLElement>(null)
   const [pdfBusy, setPdfBusy] = useState(false)
-  const { formatCheckIn, formatCheckOut } = useHotelTimes()
+  const { times } = useHotelTimes()
   const user = useAuthStore((s) => s.user)
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error } = useQuery({
     queryKey: ['print-invoice', invoiceId],
     queryFn: () => api.get<{ success: boolean; data: InvoicePrintData }>(`/invoices/${invoiceId}`),
     enabled: !!invoiceId,
@@ -198,13 +202,22 @@ export function InvoicePrintView({
   const restaurantBill = Math.max(0, restaurantSubtotal - restaurantDiscount)
   const extraBill = invoice?.extraCharges || 0
   const restaurantVat = restaurantOrders.reduce((sum, o) => sum + o.vatAmount, 0)
-  const roomVat = Math.max(0, (invoice?.vatAmount || 0) - restaurantVat)
-  const hotelVatPercent = invoice?.declaredVatPercent ?? 15
+  const roomVat = invoice
+    ? resolveInvoiceRoomVatAmount({
+        invoiceVatAmount: invoice.vatAmount || 0,
+        restaurantVat,
+        roomCharges: roomBill,
+        discount: invoice.discount || 0,
+        booking: invoice.booking,
+      })
+    : 0
+  const hotelVatPercent = invoice?.declaredVatPercent ?? INVOICE_VAT_PERCENT
+  const hotelServiceChargePercent =
+    invoice?.declaredServiceChargePercent ??
+    resolveInvoiceHotelServicePercent(invoice?.booking)
   const vatRates = Array.from(new Set(restaurantOrders.map((o) => Number(o.vatPercent || 0))))
     .filter((v) => Number.isFinite(v))
     .sort((a, b) => a - b)
-  const hotelPartTotal = roomBill + roomVat + extraBill
-  const restaurantPartTotal = restaurantBill + restaurantVat
 
   const handleDownloadPdf = async () => {
     if (!invoice || !documentRef.current) return
@@ -213,7 +226,7 @@ export function InvoicePrintView({
     try {
       await downloadInvoicePdfFromElement(
         documentRef.current,
-        invoicePdfFileName(invoice.invoiceNumber)
+        invoicePdfFileName(formatInvoiceNumberDisplay(invoice.invoiceNumber))
       )
       toast.success('PDF downloaded', { id: toastId })
     } catch (err) {
@@ -230,7 +243,7 @@ export function InvoicePrintView({
     setPdfBusy(true)
     const toastId = toast.loading('Opening invoice for print…')
     try {
-      const fileName = invoicePdfFileName(invoice.invoiceNumber)
+      const fileName = invoicePdfFileName(formatInvoiceNumberDisplay(invoice.invoiceNumber))
       const opened = await openInvoicePdfInNewTab(documentRef.current, fileName)
       if (!opened) {
         toast.error('Pop-up blocked. Allow pop-ups for this site, or use Download PDF.', {
@@ -254,37 +267,70 @@ export function InvoicePrintView({
     return <div className="p-8 text-sm text-muted-foreground">Loading invoice...</div>
   }
 
+  if (isError) {
+    const message = error instanceof Error ? error.message : 'Failed to load invoice'
+    return <div className="p-8 text-sm text-red-600">{message}</div>
+  }
+
   if (!invoice) {
     return <div className="p-8 text-sm text-red-600">Invoice not found.</div>
   }
 
-  const guestName = invoice.booking.customer.name
-  const guestPhone =
-    invoice.booking.customer.phone ||
-    invoice.booking.companyLedgerGuest?.phone ||
-    '—'
-  const registrationNumber =
-    invoice.booking.companyLedgerGuest?.registrationNumber ||
-    invoice.booking.customer.registrationNumber ||
-    '—'
+  const displayInvoiceNumber = formatInvoiceNumberDisplay(invoice.invoiceNumber)
+  const companyName =
+    invoice.booking.companyLedger?.name ||
+    invoice.booking.company ||
+    invoice.booking.customer.company ||
+    null
+  const isCorporateGuest = invoice.booking.isCorporateGuest === true
+  const adultCompanions =
+    invoice.booking.companions?.filter((c) => c.companionType !== 'CHILD') ?? []
+  const invoiceGuestRows = isCorporateGuest
+    ? [
+        {
+          label: 'Person 1',
+          name: invoice.booking.customer.name,
+          phone: invoice.booking.customer.phone,
+        },
+        ...adultCompanions.map((companion, index) => ({
+          label: `Person ${index + 2}`,
+          name: companion.name,
+          phone: companion.phone,
+        })),
+      ]
+    : [
+        {
+          label: 'Guest 1',
+          name: invoice.booking.customer.name,
+          phone: invoice.booking.customer.phone,
+        },
+        ...adultCompanions.map((companion, index) => ({
+          label: `Guest ${index + 2}`,
+          name: companion.name,
+          phone: companion.phone,
+        })),
+      ]
   const guestCount = (invoice.booking.adults ?? 1) + (invoice.booking.children ?? 0)
   const bookedNights = countBookedNights(
     new Date(invoice.booking.checkIn),
     new Date(invoice.booking.checkOut)
   )
   const roomRate =
-    invoice.booking.room.type.basePrice ??
+    invoice.booking.room.totalPrice ??
     (bookedNights > 0 ? Math.round(roomBill / bookedNights) : roomBill)
-  const companyName =
-    invoice.booking.companyLedger?.name ||
-    invoice.booking.company ||
-    invoice.booking.customer.company ||
-    null
-  const companyAddress = invoice.booking.companyLedger?.address || null
   const bookingStatus = invoice.booking.status
     ? formatBookingStatusFilterLabel(invoice.booking.status)
     : '—'
-  const totalInWords = formatAmountInWords(invoice.totalAmount)
+
+  const bookingDatetimeFields: BookingListDatetimeFields = {
+    checkIn: invoice.booking.checkIn,
+    checkOut: invoice.booking.checkOut,
+    actualCheckIn: invoice.booking.actualCheckIn,
+    actualCheckOut: invoice.booking.actualCheckOut,
+    status: invoice.booking.status ?? '',
+  }
+  const displayCheckIn = formatListBookingCheckIn(bookingDatetimeFields, times)
+  const displayCheckOut = formatListBookingCheckOut(bookingDatetimeFields, times)
 
   const orderDateTimeByRef = new Map(
     restaurantOrders.map((o) => [o.id, chargeDateTime(o.createdAt)])
@@ -296,10 +342,11 @@ export function InvoicePrintView({
     })
   )
   const defaultRestaurantVatPercent =
-    vatRates.length === 1 ? vatRates[0] : vatRates.length > 0 ? vatRates[0] : null
+    vatRates.length === 1 ? vatRates[0] : vatRates.length > 0 ? vatRates[0] : INVOICE_VAT_PERCENT
   const invoiceDateTime = chargeDateTime(invoice.createdAt)
-  const stayChargeDateTime = splitDisplayDateTime(formatCheckIn(invoice.booking.checkIn))
+  const stayChargeDateTime = splitDisplayDateTime(displayCheckIn)
   const lineItems = invoice.items ?? []
+  const discountMeta = resolveInvoiceDiscountMeta(invoice.booking)
 
   const resolveItemDateTime = (type: string, referenceId?: string | null) => {
     if (type === 'room_charge' || type === 'extra_service') return stayChargeDateTime
@@ -320,170 +367,156 @@ export function InvoicePrintView({
     return defaultRestaurantVatPercent
   }
 
-  const mapChargeItemToRow = (item: InvoicePrintData['items'][number]): InvoiceChargeRow => {
-    const type = item.itemType || 'room_charge'
-    const base = item.total
-    const { date, time } = resolveItemDateTime(type, item.referenceId)
-    return buildChargeRow({
-      id: item.id,
-      date,
-      time,
-      category: lineItemCategory(type),
-      description: item.description,
-      rate: base,
-      vatPercent: null,
-      vatAmount: 0,
-    })
+  const rowContext = {
+    lineItems,
+    roomBill,
+    extraBill,
+    roomVat,
+    hotelVatPercent,
+    hotelServiceChargePercent,
+    restaurantBill,
+    restaurantVat,
+    restaurantOrders,
+    bookedNights,
+    nightlyRate: roomRate,
+    hotelDiscountAmount: invoice.discount,
+    hotelDiscountLabel: formatDiscountLabel(
+      discountMeta.type,
+      discountMeta.value,
+      invoice.discount
+    ),
+    hotelDiscountEnabled: discountMeta.enabled,
+    hotelDiscountType: discountMeta.type,
+    hotelDiscountValue: discountMeta.value,
+    roomNumber: invoice.booking.room.roomNumber,
+    roomTypeName: invoice.booking.room.type.name,
+    stayDateTime: stayChargeDateTime,
+    invoiceDateTime,
+    resolveItemDateTime,
+    resolveOrderVatPercent,
+    defaultRestaurantVatPercent,
   }
 
-  let hotelRows = lineItems
-    .filter((item) => HOTEL_CHARGE_TYPES.has(item.itemType || ''))
-    .map(mapChargeItemToRow)
-
-  if (hotelRows.length === 0 && (roomBill > 0 || extraBill > 0)) {
-    hotelRows = [
-      ...(roomBill > 0
-        ? [
-            buildChargeRow({
-              id: 'fb-room',
-              date: stayChargeDateTime.date,
-              time: stayChargeDateTime.time,
-              category: '',
-              description: `Room ${invoice.booking.room.roomNumber} (${invoice.booking.room.type.name}) – ${bookedNights} night${bookedNights !== 1 ? 's' : ''}`,
-              rate: roomBill,
-              vatPercent: roomVat > 0 ? hotelVatPercent : null,
-              vatAmount: roomVat,
-            }),
-          ]
-        : []),
-      ...(extraBill > 0
-        ? [
-            buildChargeRow({
-              id: 'fb-extra',
-              date: stayChargeDateTime.date,
-              time: stayChargeDateTime.time,
-              category: 'Extra',
-              description: 'Extra charges',
-              rate: extraBill,
-              vatPercent: null,
-              vatAmount: 0,
-            }),
-          ]
-        : []),
-    ]
-  } else {
-    hotelRows = hotelRows.map((row, index) => {
-      const isRoomLine =
-        lineItems.find((item) => item.id === row.id)?.itemType === 'room_charge' ||
-        (row.id === 'fb-room' && index === 0)
-      if (!isRoomLine || roomVat <= 0) return row
-      return buildChargeRow({
-        ...row,
-        vatPercent: hotelVatPercent,
-        vatAmount: roomVat,
-      })
-    })
-  }
-
-  let restaurantRows = lineItems
-    .filter((item) => RESTAURANT_CHARGE_TYPES.has(item.itemType || ''))
-    .map((item) => {
-      const row = mapChargeItemToRow(item)
-      if (item.total <= 0 || item.description.toLowerCase().includes('discount')) {
-        return buildChargeRow({ ...row, vatPercent: null, vatAmount: 0 })
-      }
-      const vatPercent = resolveOrderVatPercent(item.description)
-      return buildChargeRow({
-        ...row,
-        vatPercent,
-      })
-    })
-
-  if (restaurantRows.length === 0 && restaurantBill > 0) {
-    restaurantRows = [
-      buildChargeRow({
-        id: 'fb-food',
-        ...(restaurantOrders[0]
-          ? chargeDateTime(restaurantOrders[0].createdAt)
-          : invoiceDateTime),
-        category: 'F&B',
-        description: 'Restaurant charges',
-        rate: restaurantBill,
-        vatPercent: restaurantVat > 0 ? defaultRestaurantVatPercent : null,
-        vatAmount: restaurantVat,
-      }),
-    ]
-  }
+  const hotelRows = buildHotelInvoiceChargeRows(rowContext)
+  const restaurantRows = buildRestaurantInvoiceChargeRows(rowContext)
+  const hotelPartTotal = sumChargeRowAmounts(hotelRows)
+  const restaurantPartTotal = sumChargeRowAmounts(restaurantRows)
+  const combinedTotal = hotelPartTotal + restaurantPartTotal
+  const tableDiscountTotal = [...hotelRows, ...restaurantRows].reduce(
+    (sum, row) => sum + Math.max(0, row.discountAmount),
+    0
+  )
+  const invoiceDiscount = tableDiscountTotal > 0 ? tableDiscountTotal : invoice.discount
+  const paymentSummary = buildInvoicePaymentSummary({
+    payments: invoice.payments ?? [],
+    paidAmount: invoice.paidAmount,
+    totalAmount: invoice.totalAmount,
+    dueAmount: invoice.dueAmount,
+  })
+  const cardPaymentAmount = sumPaymentsByMethod(invoice.payments ?? [], 'CARD')
+  const totalInWords = formatAmountInWords(invoice.totalAmount)
+  const invoiceNotes = invoice.invoiceNotes ?? []
+  const hotelDiscountColumnHeading = formatDiscountColumnHeading(
+    discountMeta.type,
+    discountMeta.value,
+    invoice.discount > 0 || hotelRows.some((row) => row.discountAmount > 0)
+  )
 
   const renderChargeTable = (
     title: string,
     rows: InvoiceChargeRow[],
-    sectionTotal: number
+    sectionTotal: number,
+    vatPercentLabel: number,
+    servicePercentLabel: number,
+    discountColumnHeading = 'Discount'
   ) => (
-    <div className="rounded-lg border border-border p-4">
+    <div className="invoice-charge-section rounded-lg border border-border p-4">
       <p className="text-[8pt] font-semibold uppercase tracking-wide mb-2">
         {title}
       </p>
-      <table className="invoice-charge-table w-full text-[8.5pt]">
+      <table className="invoice-charge-table w-full text-[8pt]">
+        <colgroup>
+          <col className="invoice-charge-date" />
+          <col className="invoice-charge-category" />
+          <col className="invoice-charge-num" />
+          <col className="invoice-charge-discount" />
+          <col className="invoice-charge-sd" />
+          <col className="invoice-charge-num" />
+          <col className="invoice-charge-num" />
+          <col className="invoice-charge-amount" />
+        </colgroup>
         <thead>
           <tr className="border-b text-left">
-            <th className="invoice-charge-date py-2 pr-2 font-semibold">Date</th>
-            <th className="invoice-charge-category py-2 pr-2 font-semibold">Category</th>
-            <th className="invoice-charge-num py-2 pr-2 font-semibold text-right">Rate</th>
-            <th className="invoice-charge-num py-2 pr-2 font-semibold text-right">VAT %</th>
-            <th className="invoice-charge-num py-2 pr-2 font-semibold text-right">VAT Amount</th>
-            <th className="invoice-charge-num py-2 font-semibold text-right">Amount</th>
+            <th className="invoice-charge-date py-2 pr-1 font-semibold">Date</th>
+            <th className="invoice-charge-category py-2 pr-1 font-semibold">Category</th>
+            <th className="invoice-charge-num py-2 pr-1 font-semibold text-right">
+              Room Rent
+            </th>
+            <th className="invoice-charge-discount py-2 px-1 font-semibold text-right">
+              {discountColumnHeading}
+            </th>
+            <th className="invoice-charge-sd py-2 px-1 font-semibold text-right">
+              SD{INVOICE_SD_PERCENT > 0 ? ` (${INVOICE_SD_PERCENT}%)` : ''}
+            </th>
+            <th className="invoice-charge-num py-2 pr-1 font-semibold text-right">
+              VAT ({vatPercentLabel}%)
+            </th>
+            <th className="invoice-charge-num py-2 pr-1 font-semibold text-right">
+              Service ({servicePercentLabel}%)
+            </th>
+            <th className="invoice-charge-amount py-2 px-1 font-semibold text-right">Amount</th>
           </tr>
         </thead>
         <tbody>
           {rows.length === 0 ? (
             <tr className="border-b border-border">
-              <td colSpan={6} className="py-2 text-center">
+              <td colSpan={8} className="py-2 text-center">
                 No charges
               </td>
             </tr>
           ) : (
             rows.map((row) => (
-              <tr key={row.id} className="border-b border-border">
-                <td className="invoice-charge-date py-2 pr-2 align-top">
+              <tr key={row.id} className="invoice-charge-row border-b border-border">
+                <td className="invoice-charge-date py-2 pr-1 align-top">
                   <span className="block whitespace-nowrap">{row.date}</span>
                   {row.time ? (
-                    <span className="block text-[7.5pt] whitespace-nowrap">{row.time}</span>
+                    <span className="block text-[7pt] whitespace-nowrap">{row.time}</span>
                   ) : null}
                 </td>
-                <td className="invoice-charge-category py-2 pr-2 align-top break-words">
-                  {row.category ? (
-                    <>
-                      <span className="font-medium">{row.category}</span>
-                      <span className="block text-[7.5pt]">{row.description}</span>
-                    </>
-                  ) : (
-                    <span className="font-medium">{row.description}</span>
-                  )}
+                <td className="invoice-charge-category py-2 pr-1 align-top break-words">
+                  <span className="font-medium">{row.category}</span>
+                  {row.description && row.description !== row.category ? (
+                    <span className="block text-[7pt]">{row.description}</span>
+                  ) : null}
                 </td>
-                <td className="invoice-charge-num py-2 pr-2 text-right whitespace-nowrap">
-                  {row.rate < 0 ? '-' : ''}
-                  {formatBdt(Math.abs(row.rate))}
+                <td className="invoice-charge-num py-2 pr-1 text-right whitespace-nowrap">
+                  {row.roomRent > 0 ? formatBdt(row.roomRent) : '—'}
                 </td>
-                <td className="invoice-charge-num py-2 pr-2 text-right whitespace-nowrap">
-                  {row.vatPercent != null ? `${row.vatPercent}%` : '—'}
+                <td className="invoice-charge-discount py-2 px-1 text-right whitespace-nowrap">
+                  {row.discountAmount > 0 ? formatBdt(row.discountAmount) : INVOICE_ZERO_DISCOUNT_DISPLAY}
                 </td>
-                <td className="invoice-charge-num py-2 pr-2 text-right whitespace-nowrap">
+                <td className="invoice-charge-sd py-2 px-1 text-right whitespace-nowrap">
+                  {row.sdAmount > 0 ? formatBdt(row.sdAmount) : INVOICE_ZERO_DISCOUNT_DISPLAY}
+                </td>
+                <td className="invoice-charge-num py-2 pr-1 text-right whitespace-nowrap">
                   {row.vatAmount > 0 ? formatBdt(row.vatAmount) : '—'}
                 </td>
-                <td className="invoice-charge-num py-2 text-right font-medium whitespace-nowrap">
+                <td className="invoice-charge-num py-2 pr-1 text-right whitespace-nowrap">
+                  {row.serviceChargeAmount > 0 ? formatBdt(row.serviceChargeAmount) : '—'}
+                </td>
+                <td className="invoice-charge-amount py-2 px-1 text-right font-medium whitespace-nowrap">
                   {row.amount < 0 ? '-' : ''}
                   {formatBdt(Math.abs(row.amount))}
                 </td>
               </tr>
             ))
           )}
-          <tr className="border-t border-border">
-            <td colSpan={4} className="py-2" />
-            <td className="invoice-charge-num py-2 pr-2 text-right font-semibold whitespace-nowrap">
+          <tr className="invoice-total-row border-t border-border">
+            <td colSpan={6} className="py-2" />
+            <td className="invoice-charge-num py-2 px-1 text-right font-semibold whitespace-nowrap">
               Total
             </td>
-            <td className="invoice-charge-num py-2 text-right font-semibold whitespace-nowrap">
+            <td className="invoice-charge-amount py-2 px-1 text-right font-semibold whitespace-nowrap">
               {formatBdt(sectionTotal)}
             </td>
           </tr>
@@ -559,46 +592,73 @@ export function InvoicePrintView({
               </div>
               <div>
                 <p className="text-sm font-bold">RRP Dream Inn</p>
-                <p className="text-[8pt]">Guest Invoice</p>
+                <p className="invoice-hotel-address text-black text-[7pt] whitespace-nowrap leading-snug">
+                  {INVOICE_HOTEL_ADDRESS}
+                </p>
+                <p className="invoice-hotel-mobile text-black text-[7.5pt]">
+                  Mobile: {INVOICE_HOTEL_MOBILE}
+                </p>
               </div>
             </div>
-            <div className="text-right">
-              <p className="text-[8pt]">Invoice No</p>
-              <p className="font-mono text-[9pt] font-semibold">{invoice.invoiceNumber}</p>
-              <p className="text-[8pt]">
-                {format(new Date(invoice.createdAt), 'MMM dd, yyyy')}
-              </p>
+            <div className="flex items-start gap-6 sm:gap-10 text-right">
+              <div className="space-y-0.5">
+                <p className="text-[9pt] font-semibold whitespace-nowrap">
+                  Invoice: <span className="font-mono">{displayInvoiceNumber}</span>
+                </p>
+                <p className="text-[8pt] whitespace-nowrap">
+                  Date: {format(new Date(invoice.createdAt), 'dd/MM/yyyy')}
+                </p>
+              </div>
+              <div className="space-y-0.5 border-l border-border pl-6 sm:pl-10">
+                <p className="text-[8pt]">{INVOICE_MUSHAK}</p>
+                <p className="text-[8pt]">BIN: {INVOICE_BIN}</p>
+              </div>
             </div>
           </div>
 
-          <div className="invoice-pdf-body">
-          <div className="mb-4 grid grid-cols-1 gap-3 text-[8.5pt] md:grid-cols-2 md:items-start">
-            <div className="space-y-4">
-              <div className="rounded-lg border border-border p-3 space-y-1.5">
-                <p>
-                  <span>Guest name:</span>{' '}
-                  <span className="font-semibold">{guestName}</span>
-                </p>
-                <p>
-                  <span>Phone:</span> {guestPhone}
-                </p>
-                <p>
-                  <span>Registration no.:</span>{' '}
-                  {registrationNumber}
-                </p>
-              </div>
+          <div
+            className="invoice-pdf-continuation-header hidden mb-3 flex items-center justify-between border-b border-border pb-2 text-[8pt]"
+            aria-hidden
+          >
+            <p className="font-bold">RRP Dream Inn (continued)</p>
+            <p className="font-mono">Invoice: {displayInvoiceNumber}</p>
+          </div>
 
-              <div className="rounded-lg border border-border p-3 space-y-1.5">
-                <p>
-                  <span>Company name:</span>{' '}
-                  <span className="font-semibold">{companyName || 'Walk-in'}</span>
-                </p>
-                {companyName && companyAddress ? (
-                  <p>
-                    <span>Address:</span> {companyAddress}
+          <div className="invoice-pdf-body">
+          <div className="invoice-guest-block mb-4 grid grid-cols-1 gap-3 text-[8.5pt] md:grid-cols-2 md:items-start">
+            <div className="space-y-4">
+              <div className="rounded-lg border border-border p-3 space-y-2">
+                {invoiceGuestRows.map((guest, index) => (
+                  <div
+                    key={`${guest.label}-${index}`}
+                    className={index > 0 ? 'border-t border-border pt-2' : ''}
+                  >
+                    <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-1 items-start">
+                      <p className="min-w-0">
+                        <span>{guest.label}:</span>{' '}
+                        <span className="font-semibold">{guest.name || '—'}</span>
+                      </p>
+                      <p className="shrink-0 whitespace-nowrap text-right">
+                        <span>Phone:</span> {guest.phone || '—'}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+                {(invoice.booking.children ?? 0) > 0 ? (
+                  <p className="border-t border-border pt-2 text-[8pt]">
+                    Children on record: {invoice.booking.children} (count only)
                   </p>
                 ) : null}
               </div>
+
+              {companyName ? (
+                <div className="rounded-lg border border-border p-3">
+                  <p>
+                    <span>Company:</span>{' '}
+                    <span className="font-semibold">{companyName}</span>
+                  </p>
+                </div>
+              ) : null}
 
               <div className="rounded-lg border border-border p-3">
                 <p>
@@ -606,6 +666,19 @@ export function InvoicePrintView({
                   <span className="font-semibold">{bookingStatus}</span>
                 </p>
               </div>
+
+              {invoiceNotes.length > 0 ? (
+                <div className="rounded-lg border border-border p-3">
+                  <p className="font-semibold mb-1.5">Notes</p>
+                  <ul className="space-y-1 list-disc pl-4">
+                    {invoiceNotes.map((note, index) => (
+                      <li key={`${index}-${note.slice(0, 24)}`} className="whitespace-pre-wrap">
+                        {note}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
             </div>
 
             <div className="rounded-lg border border-border p-3">
@@ -633,11 +706,11 @@ export function InvoicePrintView({
                   </tr>
                   <tr className="border-b border-border">
                     <td className="py-2 pr-3">Check-in</td>
-                    <td className="py-2 font-medium">{formatCheckIn(invoice.booking.checkIn)}</td>
+                    <td className="py-2 font-medium">{displayCheckIn}</td>
                   </tr>
                   <tr>
                     <td className="py-2 pr-3">Check-out</td>
-                    <td className="py-2 font-medium">{formatCheckOut(invoice.booking.checkOut)}</td>
+                    <td className="py-2 font-medium">{displayCheckOut}</td>
                   </tr>
                 </tbody>
               </table>
@@ -645,56 +718,77 @@ export function InvoicePrintView({
           </div>
 
           <div className="mb-4 space-y-3 text-[8.5pt]">
-            {renderChargeTable('Hotel', hotelRows, hotelPartTotal)}
-            {renderChargeTable('Restaurant', restaurantRows, restaurantPartTotal)}
+            {renderChargeTable(
+              'Hotel',
+              hotelRows,
+              hotelPartTotal,
+              hotelVatPercent,
+              hotelServiceChargePercent,
+              hotelDiscountColumnHeading
+            )}
+            {renderChargeTable(
+              'Restaurant',
+              restaurantRows,
+              restaurantPartTotal,
+              defaultRestaurantVatPercent ?? INVOICE_VAT_PERCENT,
+              INVOICE_SERVICE_CHARGE_PERCENT
+            )}
           </div>
 
-          <div className="w-full text-[8.5pt]">
+          <div className="invoice-pdf-summary w-full text-[8.5pt]">
             <div className="rounded border border-border p-2.5">
               <table className="w-full">
                 <tbody>
                   <tr>
                     <td className="py-1 pr-2 whitespace-nowrap">Combined Total</td>
                     <td className="py-1 text-right whitespace-nowrap">
-                      ৳{(hotelPartTotal + restaurantPartTotal).toLocaleString()}
+                      {formatBdt(combinedTotal)}
+                    </td>
+                  </tr>
+                  {invoiceDiscount > 0 ? (
+                    <tr>
+                      <td className="py-1 pr-2 whitespace-nowrap">
+                        {formatDiscountColumnHeading(discountMeta.type, discountMeta.value, true)}
+                      </td>
+                      <td className="py-1 text-right whitespace-nowrap">
+                        -{formatBdt(invoiceDiscount)}
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+
+              <table className="w-full border-t border-border mt-2">
+                <tbody>
+                  <tr>
+                    <td className="py-1 pr-2 whitespace-nowrap">Guest Paid</td>
+                    <td className="py-1 text-right whitespace-nowrap">
+                      {formatBdt(paymentSummary.totalPaid)}
                     </td>
                   </tr>
                   <tr>
-                    <td className="py-1 pr-2 whitespace-nowrap">Discount</td>
+                    <td className="py-1 pr-2 whitespace-nowrap">Card Payment</td>
                     <td className="py-1 text-right whitespace-nowrap">
-                      ৳{invoice.discount.toLocaleString()}
+                      {cardPaymentAmount > 0
+                        ? formatBdt(cardPaymentAmount)
+                        : INVOICE_ZERO_DISCOUNT_DISPLAY}
                     </td>
                   </tr>
-                  <tr className="border-t border-border">
-                    <td className="py-1.5 pr-2 font-semibold text-[9pt] whitespace-nowrap">
-                      Total
+                  <tr>
+                    <td className="py-1 pr-2 font-bold text-[9pt] whitespace-nowrap">
+                      Balance Due
                     </td>
-                    <td className="py-1.5 text-right font-semibold text-[9pt] whitespace-nowrap">
-                      ৳{invoice.totalAmount.toLocaleString()}
+                    <td className="py-1 text-right font-bold text-[9pt] whitespace-nowrap">
+                      {formatBdt(paymentSummary.due)}
                     </td>
                   </tr>
                 </tbody>
               </table>
-              <p className="text-[8pt] border-t border-border pt-2 mt-1 italic">
+
+              <p className="text-[8pt] border-t border-border pt-2 mt-2 italic">
                 <span className="font-medium not-italic">In words: </span>
                 {totalInWords}
               </p>
-              <table className="w-full border-t border-border mt-1">
-                <tbody>
-                  <tr>
-                    <td className="py-1 pr-2 whitespace-nowrap">Paid</td>
-                    <td className="py-1 text-right whitespace-nowrap">
-                      ৳{invoice.paidAmount.toLocaleString()}
-                    </td>
-                  </tr>
-                  <tr>
-                    <td className="py-1 pr-2 font-bold text-[9pt] whitespace-nowrap">Due</td>
-                    <td className="py-1 text-right font-bold text-[9pt] whitespace-nowrap">
-                      ৳{invoice.dueAmount.toLocaleString()}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
             </div>
           </div>
 

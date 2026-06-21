@@ -15,7 +15,6 @@ export function reservationIdLabel(
   idNumber: string | null | undefined,
   options?: {
     requiredWhenMissing?: boolean
-    visaExpiryDate?: string | null
   }
 ): string {
   const typeLabel =
@@ -36,34 +35,15 @@ export function reservationIdLabel(
   } else if (options?.requiredWhenMissing) base = RESERVATION_REQUIRED_PLACEHOLDER
   else base = '—'
 
-  if (idType === 'passport') {
-    const visaFormatted = formatVisaExpiryForDocument(options?.visaExpiryDate)
-    if (visaFormatted) {
-      base = base === '—' ? `Visa expires: ${visaFormatted}` : `${base}; Visa expires: ${visaFormatted}`
-    } else if (options?.requiredWhenMissing) {
-      const visaMissing = `Visa expires: ${RESERVATION_REQUIRED_PLACEHOLDER}`
-      base = base === '—' ? visaMissing : `${base}; ${visaMissing}`
-    }
-  }
-
   return base
 }
 
-export function reservationVisaExpiryLabel(
-  idType: string | null | undefined,
-  visaExpiryDate: string | null | undefined,
-  requiredWhenMissing = false
-): string | null {
-  if (idType !== 'passport') return null
-  const formatted = formatVisaExpiryForDocument(visaExpiryDate)
-  if (formatted) return formatted
-  return requiredWhenMissing ? RESERVATION_REQUIRED_PLACEHOLDER : '—'
+/** @deprecated Passport expiry is no longer collected or shown. */
+export function reservationVisaExpiryLabel(): null {
+  return null
 }
 
-export function formatVisaExpiryForDocument(value: string | null | undefined): string {
-  const trimmed = value?.trim()
-  if (!trimmed) return ''
-  const parsed = new Date(`${trimmed}T12:00:00`)
-  if (Number.isNaN(parsed.getTime())) return trimmed
-  return parsed.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+/** @deprecated Passport expiry is no longer collected or shown. */
+export function formatVisaExpiryForDocument(): string {
+  return ''
 }

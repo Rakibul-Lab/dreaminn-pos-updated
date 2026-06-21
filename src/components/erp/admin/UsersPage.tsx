@@ -8,7 +8,7 @@ import { useAuthStore, canAccessAdmin } from '@/lib/auth-store'
 import { useToast } from '@/hooks/use-toast'
 import { format } from 'date-fns'
 import {
-  Users, Plus, Edit2, Power, RefreshCw, Shield, ShieldCheck, ShieldAlert
+  Users, Plus, Edit2, Power, RefreshCw, Shield, ShieldCheck, ShieldAlert, SprayCan
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -43,6 +43,7 @@ const roleIcons: Record<string, React.ReactNode> = {
   ADMIN: <ShieldAlert className="h-4 w-4 text-red-500" />,
   HOTEL_STAFF: <ShieldCheck className="h-4 w-4 text-emerald-500" />,
   HOTEL_FD: <ShieldCheck className="h-4 w-4 text-teal-500" />,
+  HOUSEKEEPER: <SprayCan className="h-4 w-4 text-violet-500" />,
   RESTAURANT_STAFF: <Shield className="h-4 w-4 text-amber-500" />,
 }
 
@@ -50,6 +51,7 @@ const roleColors: Record<string, string> = {
   ADMIN: 'bg-red-50 text-red-700 border-red-200',
   HOTEL_STAFF: 'bg-emerald-50 text-emerald-700 border-emerald-200',
   HOTEL_FD: 'bg-teal-50 text-teal-700 border-teal-200',
+  HOUSEKEEPER: 'bg-violet-50 text-violet-700 border-violet-200',
   RESTAURANT_STAFF: 'bg-amber-50 text-amber-700 border-amber-200',
 }
 
@@ -70,7 +72,6 @@ export default function UsersPage() {
   const avatarInputRef = useRef<HTMLInputElement | null>(null)
   const [avatarInputKey, setAvatarInputKey] = useState(0)
   const [emailBlocking, setEmailBlocking] = useState(false)
-  const [emailVerificationToken, setEmailVerificationToken] = useState<string | null>(null)
 
   const { data: usersData, isLoading } = useQuery({
     queryKey: ['users'],
@@ -83,10 +84,7 @@ export default function UsersPage() {
 
   const createMutation = useMutation({
     mutationFn: async () => {
-      return api.post('/users', {
-        ...form,
-        emailVerificationToken: emailVerificationToken || undefined,
-      })
+      return api.post('/users', form)
     },
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ['users'] })
@@ -199,7 +197,6 @@ export default function UsersPage() {
         avatar: form.avatar,
       }
       if (form.password) data.password = form.password
-      if (emailVerificationToken) data.emailVerificationToken = emailVerificationToken
       updateMutation.mutate(data)
     } else {
       createMutation.mutate()
@@ -387,7 +384,6 @@ export default function UsersPage() {
                 onChange={(email) => setForm((f) => ({ ...f, email }))}
                 onValidationChange={(result) => {
                   setEmailBlocking(result.isBlocking)
-                  setEmailVerificationToken(result.verificationToken ?? null)
                 }}
               />
             </div>
@@ -408,6 +404,7 @@ export default function UsersPage() {
                   <SelectItem value="ADMIN">Admin</SelectItem>
                   <SelectItem value="HOTEL_STAFF">Hotel Manager</SelectItem>
                   <SelectItem value="HOTEL_FD">Hotel F.D.</SelectItem>
+                  <SelectItem value="HOUSEKEEPER">Housekeeper</SelectItem>
                   <SelectItem value="RESTAURANT_STAFF">Restaurant Staff</SelectItem>
                 </SelectContent>
               </Select>

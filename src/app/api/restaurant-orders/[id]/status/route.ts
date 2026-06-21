@@ -32,7 +32,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const authResult = requireRole(request, 'ADMIN', 'RESTAURANT_STAFF');
+    const authResult = await requireRole(request, 'ADMIN', 'RESTAURANT_STAFF');
     if (authResult instanceof Response) return authResult;
 
     const { id } = await params;

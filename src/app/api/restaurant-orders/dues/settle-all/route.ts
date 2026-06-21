@@ -13,7 +13,7 @@ import { Prisma } from '@prisma/client';
 
 export async function POST(request: NextRequest) {
   try {
-    const authResult = requireAuth(request);
+    const authResult = await requireAuth(request);
     if (authResult instanceof Response) return authResult;
 
     if (authResult.role !== 'ADMIN' && authResult.role !== 'HOTEL_STAFF' && authResult.role !== 'HOTEL_FD') {
@@ -75,11 +75,13 @@ export async function POST(request: NextRequest) {
       where,
       include: {
         payments: { select: { amount: true, paymentType: true } },
+        companyLedgerBill: { select: { id: true } },
       },
       orderBy: { createdAt: 'asc' },
     });
 
     const openOrders = orders.filter((order) => {
+      if (order.billingDisposition === 'HOTEL_BILL' || order.companyLedgerBill) return false;
       const { dueAmount } = computeOrderDue(order.totalAmount, order.payments);
       return dueAmount > 0.009;
     });

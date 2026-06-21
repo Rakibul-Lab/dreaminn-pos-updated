@@ -128,6 +128,16 @@ export default function PaymentsPage() {
   const showFormReference = paymentRequiresReference(paymentForm.method)
   const showFormLastFour = paymentRequiresLastFour(paymentForm.method)
 
+  const resetPaymentEntryFields = () => {
+    setPaymentForm((f) => ({
+      ...f,
+      amount: '',
+      reference: '',
+      accountLastFour: '',
+      notes: '',
+    }))
+  }
+
   const resetPaymentForm = () => {
     setPaymentForm({
       paymentType: 'PARTIAL',
@@ -283,12 +293,17 @@ export default function PaymentsPage() {
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ['payments'] })
       queryClient.invalidateQueries({ queryKey: ['payments-summary'] })
-      toast({ title: 'Payment Recorded', description: res.message || 'Payment recorded successfully' })
-      setShowNewPaymentDialog(false)
-      resetPaymentForm()
+      if (paymentForm.bookingId) {
+        queryClient.invalidateQueries({ queryKey: ['bookings'] })
+      }
+      toast({
+        title: 'Payment Recorded',
+        description: res.message || 'Payment recorded — enter another or close when done',
+      })
+      resetPaymentEntryFields()
     },
-    onError: () => {
-      toast({ title: 'Error', description: 'Failed to record payment', variant: 'destructive' })
+    onError: (err: Error) => {
+      toast({ title: 'Error', description: err.message || 'Failed to record payment', variant: 'destructive' })
     },
   })
 
@@ -755,7 +770,13 @@ export default function PaymentsPage() {
       </div>
 
       {/* New Payment Dialog */}
-      <Dialog open={showNewPaymentDialog} onOpenChange={setShowNewPaymentDialog}>
+      <Dialog
+        open={showNewPaymentDialog}
+        onOpenChange={(open) => {
+          setShowNewPaymentDialog(open)
+          if (!open) resetPaymentForm()
+        }}
+      >
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>Record New Payment</DialogTitle>
@@ -866,7 +887,7 @@ export default function PaymentsPage() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowNewPaymentDialog(false)}>Cancel</Button>
+            <Button variant="outline" onClick={() => setShowNewPaymentDialog(false)}>Done</Button>
             <Button
               className="bg-emerald-600 hover:bg-emerald-700 text-white"
               disabled={

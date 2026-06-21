@@ -308,15 +308,51 @@
   white-space: nowrap;
 }
 
-.bookings-list-table .col-guest { width: 13%; }
+.bookings-list-table .col-guest { width: 12%; }
 .bookings-list-table .col-room { width: 7%; }
-.bookings-list-table .col-checkin { width: 10%; }
-.bookings-list-table .col-checkout { width: 10%; }
-.bookings-list-table .col-booking { width: 9%; }
-.bookings-list-table .col-company {
+.bookings-list-table .col-checkin { width: 9%; }
+.bookings-list-table .col-checkout { width: 9%; }
+.bookings-list-table .col-booking {
   width: 11%;
   max-width: 0;
+  overflow: hidden;
+  vertical-align: top;
 }
+
+.bookings-list-table .bl-booking-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.bookings-list-table .bl-booking-stack .bl-truncate {
+  width: 100%;
+  max-width: 100%;
+  line-height: 1.25;
+}
+
+.bookings-list-table .bl-booking-stack [data-slot='badge'] {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bookings-list-table .col-company {
+  width: 9%;
+  max-width: 0;
+}
+.bookings-list-table .col-regno {
+  width: 11%;
+  max-width: 0;
+  overflow: hidden;
+}
+
+.bookings-list-table .col-regno .bl-truncate {
+  font-variant-numeric: tabular-nums;
+}
+.bookings-list-table .col-discount { width: 8%; }
 .bookings-list-table .col-company .bl-source-badge {
   display: inline-flex;
   max-width: 100%;
@@ -324,21 +360,23 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.bookings-list-table .col-reserved { width: 11%; }
-.bookings-list-table .col-vat { width: 9%; }
-.bookings-list-table .col-total { width: 9%; }
-.bookings-list-table .col-due { width: 8%; }
+.bookings-list-table .col-vat { width: 8%; }
+.bookings-list-table .col-total { width: 8%; }
+.bookings-list-table .col-due { width: 7%; }
 .bookings-list-table .col-actions {
-  width: 148px;
-  max-width: 148px;
-  padding-left: 4px;
+  width: 240px;
+  min-width: 240px;
+  max-width: 240px;
+  padding-left: 6px;
   padding-right: 8px;
+  overflow: visible;
 }
 
 .bookings-list-table .col-checkin,
 .bookings-list-table .col-checkout {
   font-size: 12px;
   line-height: 1.35;
+  overflow: hidden;
 }
 
 .bookings-list-table .bl-secondary {
@@ -346,12 +384,34 @@
 }
 
 .bookings-list-table .col-actions .bl-actions {
-  display: inline-flex;
-  flex-wrap: nowrap;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
-  gap: 3px;
+  gap: 6px;
   width: 100%;
+  max-width: 100%;
+  margin-left: auto;
+}
+
+.bookings-list-table .col-actions .bl-actions > * {
+  flex: 0 0 auto;
+}
+
+/* Icon-only row actions — do not force width on labeled buttons (Convert, Cancel). */
+.bookings-list-table .col-actions .bl-actions button.h-7.w-7 {
+  height: 1.75rem;
+  width: 1.75rem;
+  padding: 0;
+}
+
+.bookings-list-table .col-actions .bl-actions button:not(.h-7.w-7) {
+  height: auto;
+  min-height: 1.75rem;
+  width: auto;
+  white-space: nowrap;
+  padding-left: 0.625rem;
+  padding-right: 0.625rem;
 }
 
 .bookings-list-table thead th.col-actions,
@@ -361,14 +421,16 @@
 
 .bookings-list-table .col-vat,
 .bookings-list-table .col-total,
-.bookings-list-table .col-due {
+.bookings-list-table .col-due,
+.bookings-list-table .col-discount {
   white-space: nowrap;
   text-align: right;
 }
 
 .bookings-list-table thead th.col-vat,
 .bookings-list-table thead th.col-total,
-.bookings-list-table thead th.col-due {
+.bookings-list-table thead th.col-due,
+.bookings-list-table thead th.col-discount {
   text-align: right;
 }
 
@@ -416,18 +478,99 @@
 
 /* Invoice document — pure black bold text (screen preview + PDF capture + print) */
 .invoice-a4-sheet {
+  box-sizing: border-box !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  padding: 10mm 10mm 12mm;
   font-size: 9pt !important;
   line-height: 1.35 !important;
+}
+
+.invoice-a4-sheet .invoice-pdf-header,
+.invoice-a4-sheet .invoice-pdf-body,
+.invoice-a4-sheet .invoice-pdf-summary,
+.invoice-a4-sheet .invoice-charges-block {
+  width: 100% !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+.invoice-a4-sheet .invoice-guest-block {
+  display: grid !important;
+  grid-template-columns: 1fr 1fr !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+.invoice-a4-sheet .invoice-guest-block > div {
+  width: 100% !important;
+  min-width: 0 !important;
+  box-sizing: border-box !important;
+}
+
+.invoice-a4-sheet .invoice-guest-block .rounded-lg.border {
+  width: 100% !important;
+  box-sizing: border-box !important;
 }
 
 .invoice-a4-sheet,
 .invoice-a4-sheet * {
   color: #000 !important;
   font-weight: 700 !important;
+  border-color: #000 !important;
+}
+
+.invoice-a4-sheet .invoice-charge-section {
+  border: 1px solid #000 !important;
+}
+
+.invoice-a4-sheet .invoice-charge-table :is(th, td) {
+  border-bottom: 1px solid #000 !important;
+}
+
+.invoice-a4-sheet .invoice-charge-table thead tr {
+  border-bottom: 1px solid #000 !important;
+}
+
+.invoice-a4-sheet .invoice-total-row td {
+  border-top: 2px solid #000 !important;
+}
+
+.invoice-a4-sheet :is(.border, .border-b, .border-t, .border-l, .border-r, .rounded, .rounded-lg) {
+  border-style: solid !important;
+}
+
+.invoice-a4-sheet .invoice-pdf-header,
+.invoice-a4-sheet .invoice-pdf-continuation-header {
+  border-bottom: 1px solid #000 !important;
+}
+
+.invoice-a4-sheet .invoice-pdf-summary :is(table, .rounded) {
+  border-color: #000 !important;
+}
+
+.invoice-a4-sheet .invoice-pdf-summary table tr {
+  border-bottom: 1px solid #000 !important;
+}
+
+.invoice-a4-sheet .invoice-pdf-summary table tr:last-child {
+  border-bottom: none !important;
+}
+
+.invoice-a4-sheet .invoice-pdf-summary .border-t {
+  border-top: 1px solid #000 !important;
 }
 
 .invoice-a4-sheet .invoice-generated-by {
   font-weight: 400 !important;
+}
+
+.invoice-a4-sheet .invoice-hotel-address,
+.invoice-a4-sheet .invoice-hotel-mobile {
+  color: #000 !important;
+  font-weight: 700 !important;
+  -webkit-print-color-adjust: exact !important;
+  print-color-adjust: exact !important;
 }
 
 .invoice-a4-sheet .invoice-signatures {
@@ -460,26 +603,96 @@
 }
 
 .invoice-a4-sheet .invoice-charge-table {
-  table-layout: auto;
+  table-layout: fixed;
+  width: 100%;
   border-collapse: collapse;
 }
 
+.invoice-a4-sheet .invoice-charge-table col.invoice-charge-date {
+  width: 14%;
+}
+
+.invoice-a4-sheet .invoice-charge-table col.invoice-charge-category {
+  width: 9%;
+}
+
+.invoice-a4-sheet .invoice-charge-table col.invoice-charge-num {
+  width: 14%;
+}
+
+.invoice-a4-sheet .invoice-charge-table col.invoice-charge-discount {
+  width: 11%;
+}
+
+.invoice-a4-sheet .invoice-charge-table col.invoice-charge-sd {
+  width: 9%;
+}
+
+.invoice-a4-sheet .invoice-charge-table col.invoice-charge-amount {
+  width: 15%;
+}
+
 .invoice-a4-sheet .invoice-charge-date {
-  width: 18%;
-  min-width: 6.5rem;
+  width: 14%;
   white-space: normal;
   vertical-align: top;
 }
 
 .invoice-a4-sheet .invoice-charge-category {
-  width: auto;
-  min-width: 0;
+  width: 9%;
   word-break: break-word;
+  vertical-align: top;
 }
 
 .invoice-a4-sheet .invoice-charge-num {
-  width: 1%;
+  width: 14%;
   white-space: nowrap;
+  font-size: 7.5pt;
+  vertical-align: top;
+}
+
+.invoice-a4-sheet .invoice-charge-discount {
+  width: 11%;
+  white-space: nowrap;
+  font-size: 7.5pt;
+  vertical-align: top;
+}
+
+.invoice-a4-sheet .invoice-charge-sd {
+  width: 9%;
+  white-space: nowrap;
+  font-size: 7.5pt;
+  vertical-align: top;
+}
+
+.invoice-a4-sheet .invoice-charge-amount {
+  width: 15%;
+  white-space: nowrap;
+  font-size: 7.5pt;
+  vertical-align: top;
+}
+
+.invoice-a4-sheet .invoice-continuation-thead-wrap {
+  margin: 0 0 2px;
+}
+
+.invoice-a4-sheet .invoice-continuation-thead-wrap .invoice-charge-table {
+  margin: 0;
+}
+
+.invoice-a4-sheet .invoice-charge-row,
+.invoice-a4-sheet .invoice-charge-table thead {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+@media print {
+  .invoice-a4-sheet .invoice-charge-row,
+  .invoice-a4-sheet .invoice-charge-table thead,
+  .invoice-a4-sheet .invoice-charge-section {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+  }
 }
 
 /* Print — show only .print-container content */
@@ -528,6 +741,12 @@
   }
 
   .print-container:has(.reservation-a4-sheet) {
+    width: 210mm !important;
+    max-width: 210mm !important;
+    min-height: auto !important;
+  }
+
+  .print-container:has(.reservation-a4-sheet--entry) {
     width: 210mm !important;
     max-width: 210mm !important;
     min-height: 297mm !important;
@@ -654,7 +873,7 @@
     width: 100% !important;
     max-width: 100% !important;
     margin: 0 auto !important;
-    padding: 10mm 12mm 12mm !important;
+    padding: 10mm 10mm 12mm !important;
     background: white !important;
     color: #000 !important;
     font-size: 9pt !important;
@@ -701,13 +920,13 @@
     color: #000 !important;
     font-weight: 700 !important;
     padding: 5px 6px !important;
-    border-bottom: 1px solid #d1d5db !important;
+    border-bottom: 1px solid #000 !important;
   }
 
   .invoice-print-page td {
     color: #000 !important;
     padding: 5px 6px !important;
-    border-bottom: 1px solid #e5e7eb !important;
+    border-bottom: 1px solid #000 !important;
   }
 
   .invoice-a4-sheet .text-lg {
@@ -802,7 +1021,7 @@
 
   .invoice-a4-sheet .rounded-lg,
   .invoice-a4-sheet .rounded {
-    border-color: #d1d5db !important;
+    border-color: #000 !important;
   }
 
   .shadow-xl,
@@ -819,10 +1038,18 @@
     padding: 0 !important;
   }
 
-  body:has(.pos-thermal-receipt-root) .pos-thermal-receipt-root {
+  body:has(.pos-thermal-receipt-root) .print-container.pos-thermal-receipt-root {
+    visibility: visible !important;
     display: block !important;
     padding: 0 !important;
     margin: 0 auto !important;
+    width: auto !important;
+    max-width: none !important;
+    min-height: auto !important;
+  }
+
+  body:has(.pos-thermal-receipt-root) .print-container.pos-thermal-receipt-root * {
+    visibility: visible !important;
   }
 
   body:has(.pos-thermal-receipt-root) .pos-thermal-receipt {
@@ -835,4 +1062,39 @@
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
   }
+}
+
+/* Date/time inputs: prevent cramped webkit fields from overlapping each other */
+input.erp-date-input,
+input.erp-time-input {
+  display: block;
+  width: 100%;
+  min-width: 11rem;
+  box-sizing: border-box;
+}
+
+input.erp-date-input {
+  min-width: 12.5rem;
+}
+
+input.erp-time-input {
+  min-width: 9.5rem;
+}
+
+input.erp-date-input::-webkit-datetime-edit,
+input.erp-time-input::-webkit-datetime-edit {
+  display: flex;
+  min-width: 0;
+  padding: 0;
+}
+
+input.erp-date-input::-webkit-datetime-edit-fields-wrapper,
+input.erp-time-input::-webkit-datetime-edit-fields-wrapper {
+  padding: 0;
+}
+
+input.erp-date-input::-webkit-calendar-picker-indicator,
+input.erp-time-input::-webkit-calendar-picker-indicator {
+  margin-left: 0.25rem;
+  flex-shrink: 0;
 }

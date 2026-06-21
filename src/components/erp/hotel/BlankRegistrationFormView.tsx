@@ -233,7 +233,10 @@ export function BlankRegistrationFormView({ showToolbar = true }: BlankRegistrat
             </div>
             <div className="rf-guest-inner">
               <div className="rf-guest-left">
-                <RegFieldRow label="Name :" />
+                <div className="rf-name-row">
+                  <RegFieldRow label="Name :" />
+                  <RegFieldRow label="Name :" />
+                </div>
                 <RegFieldRow label="Passport No. / NID :" />
                 <div className="rf-addr-row">
                   <RegFieldRow label="Address :" />
@@ -248,7 +251,7 @@ export function BlankRegistrationFormView({ showToolbar = true }: BlankRegistrat
               </div>
               <div className="rf-right-panel">
                 <RegFieldRow label="Mobile No :" />
-                <RegFieldRow label="Passport Expiry :" />
+                <RegFieldRow label="Mobile No :" />
                 <div className="rf-panel-label">Payment Mode :</div>
                 <div className="rf-payment-group">
                   <RegCheckbox label="Cash" />

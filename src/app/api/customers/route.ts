@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
-import { requireRole } from '@/lib/auth';
+import { requireHotelAccess, requireRole } from '@/lib/auth';
 import { successResponse, paginatedResponse, errorResponse, logActivity } from '@/lib/api-utils';
 import { findCustomerByPhone } from '@/lib/customer-phone';
 import { normalizePhone, isValidPhone } from '@/lib/phone';
@@ -10,10 +10,17 @@ import {
   pickGuestStayBooking,
 } from '@/lib/guest-stay-date-filter';
 import { Prisma, RoleType } from '@prisma/client';
-import { getEmailValidationError } from '@/lib/email-verify-server';
+import { getEmailValidationError } from '@/lib/email-validation';
+import {
+  ensureCustomerRegistrationNumber,
+  generateGuestRegistrationNumber,
+} from '@/lib/guest-registration-number';
 
 export async function GET(request: NextRequest) {
   try {
+    const authResult = await requireHotelAccess(request);
+    if (authResult instanceof Response) return authResult;
+
     const { searchParams } = new URL(request.url);
     const page = parseInt(searchParams.get('page') || '1');
     const limit = parseInt(searchParams.get('limit') || '20');
@@ -35,7 +42,19 @@ export async function GET(request: NextRequest) {
         { email: { contains: search } },
         { address: { contains: search } },
         { idNumber: { contains: search } },
-        { nationality: { contains: search } }
+        { nationality: { contains: search } },
+        { registrationNumber: { contains: search } },
+        {
+          bookings: {
+            some: {
+              OR: [
+                { registrationNumber: { contains: search } },
+                { sourceReservationEntry: { registrationNumber: { contains: search } } },
+                { companyLedgerGuest: { registrationNumber: { contains: search } } },
+              ],
+            },
+          },
+        }
       );
       const searchDigits = search.replace(/\D/g, '');
       if (searchDigits.length >= 6) {
@@ -58,7 +77,7 @@ export async function GET(request: NextRequest) {
     }
 
     const stayOverlapFilter = buildGuestStayOverlapWhere(dateFrom, dateTo);
-    if (stayOverlapFilter) {
+    if (stayOverlapFilter && !search) {
       where.bookings = { some: stayOverlapFilter };
     }
 
@@ -126,7 +145,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const authResult = requireRole(request, 'ADMIN' as RoleType, 'HOTEL_STAFF' as RoleType, 'HOTEL_FD' as RoleType);
+    const authResult = await requireRole(request, 'ADMIN' as RoleType, 'HOTEL_STAFF' as RoleType, 'HOTEL_FD' as RoleType);
     if (authResult instanceof Response) return authResult;
 
     const body = await request.json();
@@ -144,6 +163,7 @@ export async function POST(request: NextRequest) {
       dateOfBirth,
       idDocPath,
       notes,
+      designation,
     } = body;
 
     if (!name?.trim() || !phone?.trim()) {
@@ -154,18 +174,18 @@ export async function POST(request: NextRequest) {
       return errorResponse('Please enter a valid phone number (at least 10 digits)');
     }
 
-    const emailError = await getEmailValidationError(
-      email,
-      true,
-      body?.emailVerificationToken,
-      { allowUnverifiedMailbox: body?.allowUnverifiedMailbox === true }
-    );
+    const emailError = getEmailValidationError(email, true);
     if (emailError) return errorResponse(emailError);
 
     const normalizedPhone = normalizePhone(phone);
 
     const existing = await findCustomerByPhone(phone);
     if (existing) {
+      const registrationNumberValue =
+        registrationNumber?.trim() ||
+        existing.registrationNumber ||
+        (await generateGuestRegistrationNumber());
+
       const customer = await db.customer.update({
         where: { id: existing.id },
         data: {
@@ -179,8 +199,9 @@ export async function POST(request: NextRequest) {
             visaExpiryDate !== undefined
               ? visaExpiryDate?.trim() || null
               : existing.visaExpiryDate,
-          registrationNumber: registrationNumber?.trim() || existing.registrationNumber,
+          registrationNumber: registrationNumberValue,
           nationality: nationality?.trim() || existing.nationality,
+          designation: designation?.trim() || existing.designation,
           idDocPath: idDocPath ?? existing.idDocPath,
         },
       });
@@ -202,8 +223,10 @@ export async function POST(request: NextRequest) {
         idType,
         idNumber,
         visaExpiryDate: visaExpiryDate?.trim() || null,
-        registrationNumber: registrationNumber?.trim() || null,
+        registrationNumber:
+          registrationNumber?.trim() || (await generateGuestRegistrationNumber()),
         nationality: nationality?.trim() || null,
+        designation: designation?.trim() || null,
         dateOfBirth,
         idDocPath,
         notes,

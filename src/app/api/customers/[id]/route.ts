@@ -1,17 +1,21 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
-import { requireRole } from '@/lib/auth';
+import { requireHotelAccess, requireRole } from '@/lib/auth';
 import { successResponse, errorResponse, notFoundResponse, logActivity } from '@/lib/api-utils';
 import { findCustomerByPhone } from '@/lib/customer-phone';
 import { isValidPhone, normalizePhone, phonesMatch } from '@/lib/phone';
 import { RoleType } from '@prisma/client';
-import { getEmailValidationError } from '@/lib/email-verify-server';
+import { getEmailValidationError } from '@/lib/email-validation';
+import { ensureCustomerRegistrationNumber } from '@/lib/guest-registration-number';
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const authResult = await requireHotelAccess(request);
+    if (authResult instanceof Response) return authResult;
+
     const { id } = await params;
 
     const customer = await db.customer.findUnique({
@@ -42,7 +46,7 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const authResult = requireRole(request, 'ADMIN' as RoleType, 'HOTEL_STAFF' as RoleType, 'HOTEL_FD' as RoleType);
+    const authResult = await requireRole(request, 'ADMIN' as RoleType, 'HOTEL_STAFF' as RoleType, 'HOTEL_FD' as RoleType);
     if (authResult instanceof Response) return authResult;
 
     const { id } = await params;
@@ -54,12 +58,7 @@ export async function PUT(
     }
 
     if (body.email !== undefined) {
-      const emailError = await getEmailValidationError(
-        body.email,
-        true,
-        body.emailVerificationToken,
-        { allowUnverifiedMailbox: body.allowUnverifiedMailbox === true }
-      );
+      const emailError = getEmailValidationError(body.email, true);
       if (emailError) return errorResponse(emailError);
     }
 
@@ -90,6 +89,9 @@ export async function PUT(
       updateData.registrationNumber = body.registrationNumber?.trim() || null;
     }
     if (body.nationality !== undefined) updateData.nationality = body.nationality?.trim() || null;
+    if (body.designation !== undefined) {
+      updateData.designation = body.designation?.trim() || null;
+    }
     if (body.dateOfBirth !== undefined) updateData.dateOfBirth = body.dateOfBirth;
     if (body.idDocPath !== undefined) updateData.idDocPath = body.idDocPath;
     if (body.notes !== undefined) updateData.notes = body.notes;
@@ -99,6 +101,10 @@ export async function PUT(
       data: updateData,
     });
 
+    if (!customer.registrationNumber?.trim()) {
+      await ensureCustomerRegistrationNumber(id);
+    }
+
     await logActivity(
       authResult.id,
       'UPDATE_CUSTOMER',
@@ -106,7 +112,8 @@ export async function PUT(
       JSON.stringify({ customerId: id, changes: updateData })
     );
 
-    return successResponse(customer, 'Customer updated successfully');
+    const refreshed = await db.customer.findUnique({ where: { id } });
+    return successResponse(refreshed ?? customer, 'Customer updated successfully');
   } catch (error) {
     console.error('Customer update error:', error);
     return errorResponse('Failed to update customer', 500);

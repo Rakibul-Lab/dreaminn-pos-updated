@@ -1,13 +1,24 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
-import { requireHotelAccess, requireHotelManager } from '@/lib/auth';
+import { requireAuth, requireHotelAccess, requireHotelManager } from '@/lib/auth';
 import { successResponse, errorResponse, notFoundResponse, logActivity } from '@/lib/api-utils';
+
+function parseTotalPrice(body: Record<string, unknown>) {
+  if (body.totalPrice === undefined && body.basePrice === undefined) {
+    return {};
+  }
+  const raw = body.totalPrice ?? body.basePrice;
+  return { totalPrice: Math.max(0, parseFloat(String(raw)) || 0) };
+}
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const authResult = await requireAuth(request);
+    if (authResult instanceof Response) return authResult;
+
     const { id } = await params;
 
     const room = await db.room.findUnique({
@@ -31,7 +42,7 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const authResult = requireHotelAccess(request);
+    const authResult = await requireHotelAccess(request);
     if (authResult instanceof Response) return authResult;
     const authUser = await db.user.findUnique({
       where: { id: authResult.id },
@@ -54,7 +65,9 @@ export async function PUT(
       const hasRestrictedField =
         body.floor !== undefined ||
         body.typeId !== undefined ||
-        body.roomNumber !== undefined;
+        body.roomNumber !== undefined ||
+        body.totalPrice !== undefined ||
+        body.basePrice !== undefined;
       if (hasRestrictedField || body.status === undefined) {
         return errorResponse('Front desk can only update room status', 403);
       }
@@ -66,11 +79,30 @@ export async function PUT(
     }
 
     const updateData: Record<string, unknown> = {};
-    if (body.status !== undefined) updateData.status = body.status;
+    if (body.status !== undefined) {
+      const nextStatus = String(body.status);
+      if (nextStatus !== 'AVAILABLE' && nextStatus !== 'MAINTENANCE') {
+        return errorResponse('Room status can only be set to Available or Maintenance');
+      }
+      if (!['AVAILABLE', 'MAINTENANCE'].includes(existing.status)) {
+        return errorResponse(
+          'Room status cannot be changed while it is reserved, occupied, or dirty'
+        );
+      }
+      const isValidTransition =
+        nextStatus === existing.status ||
+        (existing.status === 'AVAILABLE' && nextStatus === 'MAINTENANCE') ||
+        (existing.status === 'MAINTENANCE' && nextStatus === 'AVAILABLE');
+      if (!isValidTransition) {
+        return errorResponse('Invalid room status transition');
+      }
+      updateData.status = nextStatus;
+    }
     if (!isFrontDeskOnly) {
       if (body.floor !== undefined) updateData.floor = body.floor;
       if (body.typeId !== undefined) updateData.typeId = body.typeId;
       if (body.roomNumber !== undefined) updateData.roomNumber = body.roomNumber;
+      Object.assign(updateData, parseTotalPrice(body));
     }
 
     const room = await db.room.update({
@@ -79,7 +111,6 @@ export async function PUT(
       include: { type: true },
     });
 
-    // If room status is set to CLEANING manually, ensure housekeeping gets a task.
     const statusChangedToCleaning =
       body.status !== undefined &&
       body.status === 'CLEANING' &&
@@ -129,7 +160,8 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const authResult = requireHotelManager(request);
+    const authResult = await requireHotelManager(request);
+    if (authResult instanceof Response) return authResult;
     if (authResult instanceof Response) return authResult;
 
     const { id } = await params;
@@ -139,7 +171,6 @@ export async function DELETE(
       return notFoundResponse('Room');
     }
 
-    // Soft delete: set status to MAINTENANCE
     const room = await db.room.update({
       where: { id },
       data: { status: 'MAINTENANCE' },

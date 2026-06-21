@@ -3,9 +3,8 @@ import { db } from '@/lib/db';
 import { requireRole } from '@/lib/auth';
 import { successResponse, errorResponse, notFoundResponse, logActivity } from '@/lib/api-utils';
 import {
-  bookingVatOptions,
+  computeBookingRoomDue,
   computeRefundFromInput,
-  computeRoomBookingTotals,
   sumBookingNetPaid,
 } from '@/lib/booking-totals';
 import { parsePaymentMethod } from '@/lib/payment-method';
@@ -29,7 +28,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const authResult = requireRole(_request, 'ADMIN' as RoleType, 'HOTEL_STAFF' as RoleType, 'HOTEL_FD' as RoleType);
+    const authResult = await requireRole(_request, 'ADMIN' as RoleType, 'HOTEL_STAFF' as RoleType, 'HOTEL_FD' as RoleType);
     if (authResult instanceof Response) return authResult;
 
     const { id } = await params;
@@ -44,11 +43,7 @@ export async function GET(
     }
 
     const maxRefundable = sumBookingNetPaid(booking.payments);
-    const totals = computeRoomBookingTotals(
-      booking.totalRoomCharge,
-      maxRefundable,
-      bookingVatOptions(booking)
-    );
+    const totals = computeBookingRoomDue(booking, booking.payments);
 
     const bookedNights = countBookedNights(booking.checkIn, booking.checkOut);
 
@@ -75,7 +70,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const authResult = requireRole(request, 'ADMIN' as RoleType, 'HOTEL_STAFF' as RoleType, 'HOTEL_FD' as RoleType);
+    const authResult = await requireRole(request, 'ADMIN' as RoleType, 'HOTEL_STAFF' as RoleType, 'HOTEL_FD' as RoleType);
     if (authResult instanceof Response) return authResult;
 
     const authUser = await db.user.findUnique({

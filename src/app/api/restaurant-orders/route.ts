@@ -10,6 +10,7 @@ import {
 } from '@/lib/api-utils';
 import { generateRestaurantOrderNumber } from '@/lib/restaurant-order-number';
 import { getRestaurantVatPercent } from '@/lib/app-settings';
+import { readCurrentBusinessDateString, buildBusinessDateWhere, stampCurrentBusinessDate } from '@/lib/business-date';
 import { Prisma, RoleType } from '@prisma/client';
 
 // Helper to filter order data based on user role
@@ -34,7 +35,7 @@ function filterOrderByRole(order: Record<string, unknown>, role: RoleType) {
 // GET /api/restaurant-orders - List orders with filters, paginated
 export async function GET(request: NextRequest) {
   try {
-    const authResult = requireAuth(request);
+    const authResult = await requireAuth(request);
     if (authResult instanceof Response) return authResult;
 
     const { searchParams } = new URL(request.url);
@@ -63,11 +64,8 @@ export async function GET(request: NextRequest) {
     }
 
     if (todayOnly) {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const tomorrow = new Date(today);
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      where.createdAt = { gte: today, lt: tomorrow };
+      const businessDate = await readCurrentBusinessDateString();
+      Object.assign(where, buildBusinessDateWhere(businessDate));
     } else if (dateFrom || dateTo) {
       const createdAt: Prisma.DateTimeFilter = {};
       if (dateFrom) {
@@ -131,10 +129,10 @@ export async function GET(request: NextRequest) {
         },
       },
       payments: {
-        select: { amount: true, paymentType: true, settlementSource: true },
+        select: { amount: true, paymentType: true, settlementSource: true, method: true },
       },
       companyLedgerBill: {
-        select: { id: true },
+        select: { id: true, settlementStage: true, dueAmount: true },
       },
     };
 
@@ -187,7 +185,7 @@ export async function GET(request: NextRequest) {
 // POST /api/restaurant-orders - Create order (ADMIN and RESTAURANT_STAFF only)
 export async function POST(request: NextRequest) {
   try {
-    const authResult = requireRole(request, 'ADMIN', 'RESTAURANT_STAFF');
+    const authResult = await requireRole(request, 'ADMIN', 'RESTAURANT_STAFF');
     if (authResult instanceof Response) return authResult;
 
     const body = await request.json();
@@ -337,6 +335,8 @@ export async function POST(request: NextRequest) {
     const vatAmount = ((subtotal - discountAmount) * vatRate) / 100;
     const totalAmount = subtotal - discountAmount + vatAmount;
 
+    const businessDate = await stampCurrentBusinessDate();
+
     // Create order with items in a transaction
     const order = await db.$transaction(async (tx) => {
       const orderNumber = await generateRestaurantOrderNumber(tx);
@@ -346,6 +346,7 @@ export async function POST(request: NextRequest) {
           orderNumber,
           orderType,
           status: 'PENDING',
+          businessDate,
           roomId: orderType === 'ROOM_SERVICE' ? roomId : null,
           tableId:
             orderType === 'DINE_IN' || orderType === 'ROOM_SERVICE' ? tableId : null,

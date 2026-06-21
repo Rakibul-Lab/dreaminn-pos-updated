@@ -27,16 +27,14 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from 'sonner';
-import { Plus, Pencil, Trash2, BedDouble, Users, Wifi } from 'lucide-react';
+import { Plus, Pencil, Trash2, Users, Wifi } from 'lucide-react';
 import { useAuthStore, canManageRoomInventory } from '@/lib/auth-store';
 
 interface RoomType {
   id: string;
   name: string;
   description?: string;
-  basePrice: number;
   capacity: number;
-  hourlyRate?: number | null;
   amenities?: string | null;
   _count?: { rooms: number };
 }
@@ -49,12 +47,9 @@ export function RoomTypesPage() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [selectedType, setSelectedType] = useState<RoomType | null>(null);
 
-  // Form state
   const [formName, setFormName] = useState('');
   const [formDescription, setFormDescription] = useState('');
-  const [formBasePrice, setFormBasePrice] = useState('');
   const [formCapacity, setFormCapacity] = useState('2');
-  const [formHourlyRate, setFormHourlyRate] = useState('');
   const [formAmenities, setFormAmenities] = useState('');
 
   const { data, isLoading } = useQuery({
@@ -100,9 +95,7 @@ export function RoomTypesPage() {
     setSelectedType(null);
     setFormName('');
     setFormDescription('');
-    setFormBasePrice('');
     setFormCapacity('2');
-    setFormHourlyRate('');
     setFormAmenities('');
   };
 
@@ -110,9 +103,7 @@ export function RoomTypesPage() {
     setSelectedType(rt);
     setFormName(rt.name);
     setFormDescription(rt.description || '');
-    setFormBasePrice(String(rt.basePrice));
     setFormCapacity(String(rt.capacity));
-    setFormHourlyRate(rt.hourlyRate ? String(rt.hourlyRate) : '');
     try {
       const amenities = rt.amenities ? JSON.parse(rt.amenities) : [];
       setFormAmenities(Array.isArray(amenities) ? amenities.join(', ') : rt.amenities || '');
@@ -123,8 +114,8 @@ export function RoomTypesPage() {
   };
 
   const handleSubmit = () => {
-    if (!formName || !formBasePrice) {
-      toast.error('Name and base price are required');
+    if (!formName) {
+      toast.error('Name is required');
       return;
     }
 
@@ -136,9 +127,7 @@ export function RoomTypesPage() {
     const payload = {
       name: formName,
       description: formDescription,
-      basePrice: parseFloat(formBasePrice),
       capacity: parseInt(formCapacity),
-      hourlyRate: formHourlyRate ? parseFloat(formHourlyRate) : null,
       amenities: amenitiesArr.length > 0 ? JSON.stringify(amenitiesArr) : null,
     };
 
@@ -182,11 +171,12 @@ export function RoomTypesPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-semibold">Room Types</h2>
-          <p className="text-sm text-muted-foreground">{roomTypes.length} room types configured</p>
+          <p className="text-sm text-muted-foreground">
+            {roomTypes.length} categories — set rates per room on the Rooms page
+          </p>
         </div>
         <Button className="bg-amber-600 hover:bg-amber-700 text-white" onClick={() => setDialogOpen(true)}>
           <Plus className="w-4 h-4 mr-2" />
@@ -194,7 +184,6 @@ export function RoomTypesPage() {
         </Button>
       </div>
 
-      {/* Room Type Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {roomTypes.map((rt) => (
           <Card key={rt.id} className="hover:shadow-md transition-shadow">
@@ -229,21 +218,10 @@ export function RoomTypesPage() {
               )}
               <div className="grid grid-cols-2 gap-3">
                 <div className="flex items-center gap-2 text-sm">
-                  <BedDouble className="w-4 h-4 text-amber-600" />
-                  <span className="text-muted-foreground">Base Price:</span>
-                  <span className="font-semibold text-amber-700">৳{rt.basePrice.toLocaleString()}</span>
-                </div>
-                <div className="flex items-center gap-2 text-sm">
                   <Users className="w-4 h-4 text-emerald-600" />
                   <span className="text-muted-foreground">Capacity:</span>
                   <span className="font-semibold">{rt.capacity} guests</span>
                 </div>
-                {rt.hourlyRate && (
-                  <div className="flex items-center gap-2 text-sm">
-                    <span className="text-muted-foreground">Hourly:</span>
-                    <span className="font-semibold">৳{rt.hourlyRate}</span>
-                  </div>
-                )}
                 <div className="flex items-center gap-2 text-sm">
                   <span className="text-muted-foreground">Rooms:</span>
                   <span className="font-semibold">{rt._count?.rooms || 0}</span>
@@ -267,7 +245,6 @@ export function RoomTypesPage() {
         ))}
       </div>
 
-      {/* Add/Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={(open) => { if (!open) closeDialog(); }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
@@ -282,19 +259,9 @@ export function RoomTypesPage() {
               <Label>Description</Label>
               <Textarea value={formDescription} onChange={(e) => setFormDescription(e.target.value)} placeholder="Room type description" rows={2} />
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Base Price (BDT)</Label>
-                <Input type="number" value={formBasePrice} onChange={(e) => setFormBasePrice(e.target.value)} placeholder="2500" />
-              </div>
-              <div className="space-y-2">
-                <Label>Capacity</Label>
-                <Input type="number" value={formCapacity} onChange={(e) => setFormCapacity(e.target.value)} placeholder="2" />
-              </div>
-            </div>
             <div className="space-y-2">
-              <Label>Hourly Rate (BDT)</Label>
-              <Input type="number" value={formHourlyRate} onChange={(e) => setFormHourlyRate(e.target.value)} placeholder="Optional" />
+              <Label>Capacity</Label>
+              <Input type="number" value={formCapacity} onChange={(e) => setFormCapacity(e.target.value)} placeholder="2" />
             </div>
             <div className="space-y-2">
               <Label>Amenities (comma separated)</Label>
@@ -314,7 +281,6 @@ export function RoomTypesPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Delete Confirmation */}
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>

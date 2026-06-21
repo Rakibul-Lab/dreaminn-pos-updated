@@ -35,7 +35,7 @@ export function LoginPage() {
 
     setLoading(true);
     try {
-      const res = await api.post<{ success: boolean; data?: { user: { id: string; email: string; name: string; avatar?: string | null; role: 'ADMIN' | 'HOTEL_STAFF' | 'HOTEL_FD' | 'RESTAURANT_STAFF' }; token: string }; error?: string }>('/auth/login', { email, password });
+      const res = await api.post<{ success: boolean; data?: { user: { id: string; email: string; name: string; avatar?: string | null; role: 'ADMIN' | 'HOTEL_STAFF' | 'HOTEL_FD' | 'RESTAURANT_STAFF' | 'HOUSEKEEPER' }; token: string }; error?: string }>('/auth/login', { email, password });
       if (res.success && res.data) {
         login(res.data.user, res.data.token);
         toast.success(`Welcome back, ${res.data.user.name}!`);

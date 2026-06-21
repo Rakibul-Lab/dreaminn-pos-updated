@@ -3,6 +3,10 @@ import {
   parseBookingDiscountType,
   type BookingDiscountInput,
 } from '@/lib/booking-discount'
+import {
+  decomposeGrossAfterDiscount,
+  INVOICE_SERVICE_CHARGE_PERCENT,
+} from '@/lib/invoice-display'
 
 export const DEFAULT_VAT_PERCENT = 15
 
@@ -69,12 +73,159 @@ export function bookingVatOptions(booking: {
   }
 }
 
+export type BookingVatListDisplay = {
+  mode: 'itemized' | 'included'
+  percent: number
+  amount: number
+}
+
+type BookingVatDisplayFields = {
+  vatApplied?: boolean | null
+  vatPercent?: number | null
+  serviceChargePercent?: number | null
+  totalRoomCharge: number
+  discountEnabled?: boolean | null
+  discountType?: string | null
+  discountValue?: number | null
+}
+
+/**
+ * VAT amount for display (list, reservation doc). Room rate is often VAT-inclusive;
+ * totals/due stay unchanged — this only back-calculates the VAT portion for UI.
+ */
+export function computeBookingDisplayVat(booking: BookingVatDisplayFields): BookingVatListDisplay {
+  const percent =
+    booking.vatPercent != null && booking.vatPercent > 0
+      ? booking.vatPercent
+      : DEFAULT_VAT_PERCENT
+  const discount = bookingDiscountInput(booking)
+  const discountAmount = computeHotelDiscountAmount(
+    booking.totalRoomCharge,
+    discount.discountEnabled === true,
+    discount.discountType,
+    discount.discountValue
+  )
+  const includedInRate = booking.vatApplied === false
+
+  if (includedInRate) {
+    const servicePercent = booking.serviceChargePercent ?? INVOICE_SERVICE_CHARGE_PERCENT
+    const { vatAmount } = decomposeGrossAfterDiscount(
+      booking.totalRoomCharge,
+      discountAmount,
+      percent,
+      servicePercent
+    )
+    return { mode: 'included', percent, amount: vatAmount }
+  }
+
+  const taxableRoom = Math.max(0, booking.totalRoomCharge - discountAmount)
+  const amount = (taxableRoom * percent) / 100
+  return { mode: 'itemized', percent, amount }
+}
+
+/** VAT column for bookings list — always shows amount and rate. */
+export function resolveBookingVatListDisplay(
+  booking: BookingVatDisplayFields & { vatAmount?: number | null }
+): BookingVatListDisplay {
+  const computed = computeBookingDisplayVat(booking)
+  if (computed.amount > 0) return computed
+
+  const stored = Math.max(0, Number(booking.vatAmount) || 0)
+  if (stored > 0) {
+    return { mode: 'itemized', percent: computed.percent, amount: stored }
+  }
+
+  return computed
+}
+
+export function bookingDiscountInput(booking: {
+  discountEnabled?: boolean | null
+  discountType?: string | null
+  discountValue?: number | null
+}): BookingDiscountInput {
+  return {
+    discountEnabled: booking.discountEnabled === true,
+    discountType: parseBookingDiscountType(booking.discountType),
+    discountValue: Math.max(0, Number(booking.discountValue) || 0),
+  }
+}
+
+type BookingDueFields = {
+  status?: string | null
+  totalRoomCharge: number
+  dueAmount?: number
+  vatApplied?: boolean | null
+  vatPercent?: number | null
+  discountEnabled?: boolean | null
+  discountType?: string | null
+  discountValue?: number | null
+}
+
+type InvoiceDueSnapshot = {
+  dueAmount: number
+  status?: string | null
+}
+
+/** Room-only due (reservation / in-house) with discount applied. */
+export function computeBookingRoomDue(
+  booking: BookingDueFields,
+  payments: BookingPaymentRow[]
+) {
+  const totalPaid = sumBookingNetPaid(payments)
+  return computeRoomBookingTotals(
+    booking.totalRoomCharge,
+    totalPaid,
+    bookingVatOptions(booking),
+    bookingDiscountInput(booking)
+  )
+}
+
+/**
+ * Due shown in bookings list and detail:
+ * - After checkout, invoice due is authoritative (room + F&B + extras − payments).
+ * - Before checkout, room charge due with reservation discount.
+ */
+export function resolveBookingDisplayDue(
+  booking: BookingDueFields,
+  payments: BookingPaymentRow[],
+  latestInvoice?: InvoiceDueSnapshot | null
+): number {
+  if (
+    booking.status === 'CHECKED_OUT' &&
+    latestInvoice &&
+    latestInvoice.status !== 'CANCELLED'
+  ) {
+    return Math.max(0, latestInvoice.dueAmount)
+  }
+
+  // Folio due includes room charges plus unpaid room-service balance (adjusted at POS).
+  if (booking.status === 'CHECKED_IN' && booking.dueAmount != null) {
+    return Math.max(0, booking.dueAmount)
+  }
+
+  return computeRoomBookingTotals(
+    booking.totalRoomCharge,
+    sumCheckoutBookingPaid(payments),
+    bookingVatOptions(booking),
+    bookingDiscountInput(booking)
+  ).dueAmount
+}
+
 export type BookingPaymentRow = { amount: number; paymentType: string }
 
 /** Net amount collected on a booking (payments minus refunds). */
 export function sumBookingNetPaid(payments: BookingPaymentRow[]): number {
   return payments.reduce((sum, p) => {
     if (p.paymentType === 'REFUND') return sum - Math.abs(p.amount)
+    return sum + p.amount
+  }, 0)
+}
+
+/** Guest checkout total paid — excludes restaurant counter payments (already settled at POS). */
+export function sumCheckoutBookingPaid(payments: BookingPaymentRow[]): number {
+  return payments.reduce((sum, p) => {
+    if (p.paymentType === 'REFUND') return sum - Math.abs(p.amount)
+    if (p.paymentType === 'RESTAURANT') return sum
     return sum + p.amount
   }, 0)
 }

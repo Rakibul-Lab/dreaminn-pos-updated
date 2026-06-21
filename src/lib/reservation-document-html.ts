@@ -6,11 +6,7 @@ import {
   formatReservationMealPlan,
 } from './reservation-terms'
 import type { ReservationPdfData } from './reservation-pdf-data'
-import { bookingVatOptions, computeRoomBookingTotals } from './booking-totals'
-import {
-  formatVisaExpiryForDocument,
-  reservationVisaExpiryLabel,
-} from './reservation-field-placeholders'
+import { bookingVatOptions, computeBookingDisplayVat, computeRoomBookingTotals } from './booking-totals'
 
 function idTypeLabel(type?: string | null) {
   if (type === 'passport') return 'Passport'
@@ -56,14 +52,13 @@ export async function buildReservationDocumentHtml(data: ReservationPdfData): Pr
     data.advancePayment,
     bookingVatOptions(data)
   )
-  const vatApplied = data.vatApplied !== false
-  const vatPercent = data.vatPercent ?? vatTotals.vatPercent
-  const vatAmount = data.vatAmount ?? vatTotals.vatAmount
+  const vatDisplay = computeBookingDisplayVat(data)
+  const vatPercent = data.vatPercent ?? vatDisplay.percent
+  const vatAmount = vatDisplay.amount
   const totalWithVat = data.totalWithVat ?? vatTotals.totalWithVat
-  const vatRow = vatApplied
-    ? `<div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>VAT (${vatPercent}%)</span><span>৳${vatAmount.toLocaleString()}</span></div>
+  const vatInclNote = vatDisplay.mode === 'included' ? ' (incl. in rate)' : ''
+  const vatRow = `<div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>VAT (${vatPercent}%${vatInclNote})</span><span>৳${vatAmount.toLocaleString()}</span></div>
       <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>Total (incl. VAT)</span><span>৳${totalWithVat.toLocaleString()}</span></div>`
-    : `<div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>VAT</span><span>Off</span></div>`
 
   const termsHtml = RESERVATION_TERMS_AND_CONDITIONS.map(
     (term) => `<li style="margin-bottom:4px">${esc(term.replace(/^\d+\.\s*/, ''))}</li>`
@@ -74,14 +69,6 @@ export async function buildReservationDocumentHtml(data: ReservationPdfData): Pr
         <h3 style="font-size:14px;font-weight:600;color:#334155;margin:0 0 6px">Notes</h3>
         <p style="margin:0">${esc(data.notes)}</p>
       </section>`
-    : ''
-
-  const visaLabel =
-    data.idType === 'passport'
-      ? reservationVisaExpiryLabel(data.idType, data.visaExpiryDate)
-      : null
-  const visaExpiryHtml = visaLabel
-    ? `<p style="margin:0"><span style="color:#64748b">Visa expiry date:</span> ${esc(visaLabel)}</p>`
     : ''
 
   return `<!DOCTYPE html>
@@ -130,7 +117,6 @@ export async function buildReservationDocumentHtml(data: ReservationPdfData): Pr
         ${data.guestRegistrationNumber ? `<p style="margin:0 0 4px"><span style="color:#64748b">Registration no.:</span> ${esc(data.guestRegistrationNumber)}</p>` : ''}
         <p style="margin:0 0 4px"><span style="color:#64748b">ID:</span> ${esc(idTypeLabel(data.idType))}</p>
         ${data.idNumber ? `<p style="margin:0 0 4px"><span style="color:#64748b">ID no.:</span> ${esc(data.idNumber)}</p>` : ''}
-        ${visaExpiryHtml}
       </div>
       <div>
         <h3 style="font-size:14px;font-weight:600;color:#334155;margin:0 0 8px">Stay details</h3>

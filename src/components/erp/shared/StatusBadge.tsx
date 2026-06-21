@@ -12,6 +12,10 @@ const statusConfig: Record<string, { label: string; variant: 'default' | 'second
   // Booking statuses
   RESERVED: { label: 'Reserved', variant: 'outline', className: 'bg-sky-50 text-sky-700 border-sky-200 hover:bg-sky-50' },
   RESERVED_ND: { label: 'Reserved (N.D)', variant: 'outline', className: 'bg-sky-50 text-sky-700 border-sky-200 hover:bg-sky-50' },
+  RESERVED_ENTRY: { label: 'Reserved entry', variant: 'outline', className: 'bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-50' },
+  RESERVED_ENTRY_PARTIAL: { label: 'Entry (partial)', variant: 'outline', className: 'bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-50' },
+  RESERVED_ENTRY_FULFILLED: { label: 'Entry fulfilled', variant: 'outline', className: 'bg-muted text-muted-foreground border-border hover:bg-muted' },
+  ENTRY_HELD: { label: 'Entry hold', variant: 'outline', className: 'bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-50' },
   CHECKED_IN: { label: 'Checked In', variant: 'outline', className: 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-50' },
   CHECKED_OUT: { label: 'Checked Out', variant: 'outline', className: 'bg-muted text-muted-foreground border-border hover:bg-muted' },
   CANCELLED: { label: 'Cancelled', variant: 'destructive', className: 'bg-red-50 text-red-700 border-red-200 hover:bg-red-50' },

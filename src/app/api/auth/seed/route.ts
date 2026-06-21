@@ -1,11 +1,32 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { hashPassword } from '@/lib/password';
 import { ensureCloudViewRestaurantLedger } from '@/lib/cloudview-ledger';
 import { ensureDefaultUsers } from '@/lib/ensure-default-users';
+import { requireRole } from '@/lib/auth';
 
-export async function POST() {
+async function assertSeedAccess(request: NextRequest): Promise<NextResponse | null> {
+  const userCount = await db.user.count();
+  if (userCount === 0) {
+    if (process.env.NODE_ENV === 'production') {
+      const secret = request.headers.get('x-seed-secret');
+      if (!process.env.SEED_SECRET || secret !== process.env.SEED_SECRET) {
+        return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
+      }
+    }
+    return null;
+  }
+
+  const authResult = await requireRole(request, 'ADMIN');
+  if (authResult instanceof NextResponse) return authResult;
+  return null;
+}
+
+export async function POST(request: NextRequest) {
   try {
+    const seedError = await assertSeedAccess(request);
+    if (seedError) return seedError;
+
     // Check if already seeded
     const userCount = await db.user.count();
     if (userCount > 0) {
@@ -88,9 +109,7 @@ export async function POST() {
       data: {
         name: 'Standard',
         description: 'Comfortable room with basic amenities',
-        basePrice: 2500,
         capacity: 2,
-        hourlyRate: 200,
         amenities: JSON.stringify(['WiFi', 'AC', 'TV', 'Hot Water']),
       },
     });
@@ -99,9 +118,7 @@ export async function POST() {
       data: {
         name: 'Deluxe',
         description: 'Spacious room with premium amenities',
-        basePrice: 4500,
         capacity: 3,
-        hourlyRate: 350,
         amenities: JSON.stringify(['WiFi', 'AC', 'TV', 'Mini Bar', 'Hot Water', 'Room Service']),
       },
     });
@@ -110,9 +127,7 @@ export async function POST() {
       data: {
         name: 'Suite',
         description: 'Luxury suite with separate living area',
-        basePrice: 8000,
         capacity: 4,
-        hourlyRate: 600,
         amenities: JSON.stringify(['WiFi', 'AC', 'TV', 'Mini Bar', 'Hot Water', 'Room Service', 'Jacuzzi', 'Balcony']),
       },
     });
@@ -121,12 +136,17 @@ export async function POST() {
       data: {
         name: 'Family Room',
         description: 'Perfect for families with extra beds',
-        basePrice: 5500,
         capacity: 5,
-        hourlyRate: 400,
         amenities: JSON.stringify(['WiFi', 'AC', 'TV', 'Hot Water', 'Extra Beds', 'Play Area']),
       },
     });
+
+    const typePricing: Record<string, number> = {
+      [standard.id]: 3163,
+      [deluxe.id]: 5693,
+      [suite.id]: 10120,
+      [familyRoom.id]: 6958,
+    };
 
     // Create Rooms (Floors 8-10): 801-815, 901-915, 1001-1015
     const roomData = [];
@@ -144,6 +164,7 @@ export async function POST() {
           floor,
           typeId,
           status: 'AVAILABLE' as const,
+          totalPrice: typePricing[typeId],
         });
       }
     }
@@ -306,8 +327,11 @@ export async function POST() {
 }
 
 // Reset endpoint
-export async function DELETE() {
+export async function DELETE(request: NextRequest) {
   try {
+    const seedError = await assertSeedAccess(request);
+    if (seedError) return seedError;
+
     // Delete all data in reverse dependency order
     await db.invoiceItem.deleteMany();
     await db.payment.deleteMany();

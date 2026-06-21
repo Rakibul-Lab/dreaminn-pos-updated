@@ -7,7 +7,7 @@ type RouteContext = { params: Promise<{ id: string }> };
 
 export async function GET(request: NextRequest, context: RouteContext) {
   try {
-    const authResult = requireAuth(request);
+    const authResult = await requireAuth(request);
     if (authResult instanceof Response) return authResult;
 
     if (!canAccessRestaurant(authResult.role)) {
@@ -60,7 +60,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
 
 export async function PUT(request: NextRequest, context: RouteContext) {
   try {
-    const authResult = requireRole(request, 'ADMIN', 'RESTAURANT_STAFF');
+    const authResult = await requireRole(request, 'ADMIN', 'RESTAURANT_STAFF');
     if (authResult instanceof Response) return authResult;
 
     const { id } = await context.params;

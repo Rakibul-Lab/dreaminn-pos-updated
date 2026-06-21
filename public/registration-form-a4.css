@@ -243,6 +243,18 @@
   min-width: 0;
 }
 
+.registration-form-page .rf-name-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  column-gap: 20px;
+  margin-bottom: 9px;
+}
+
+.registration-form-page .rf-name-row .rf-field-row {
+  margin-bottom: 0;
+  min-width: 0;
+}
+
 .registration-form-page .rf-addr-row {
   display: grid;
   grid-template-columns: 1fr 1fr;

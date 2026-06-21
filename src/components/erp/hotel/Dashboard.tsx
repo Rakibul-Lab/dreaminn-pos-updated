@@ -55,9 +55,9 @@ interface DashboardData {
     occupancyRate: number;
     byStatus?: Record<string, number>;
   };
-  checkIns?: { count: number; items: any[] };
+  checkIns?: { count: number; items: any[]; expectedArrivals?: number };
   checkOuts?: { count: number; items: any[] };
-  arrivals?: { count: number; items: any[] };
+  arrivals?: { count: number; items: any[]; expectedArrivals?: number };
   departures?: { count: number; items: any[] };
   activeBookings?: { count: number; items: any[] } | number;
   roomServiceOrders?: any[];
@@ -146,6 +146,10 @@ function HotelAdminDashboard({
   data: DashboardData;
   onNavigate?: (page: DashboardPageKey) => void;
 }) {
+  const handleNewReservation = () => {
+    openNewReservationTab();
+  };
+
   const rooms = data.rooms;
   const checkIns = data.checkIns || data.arrivals;
   const checkOuts = data.checkOuts || data.departures;
@@ -170,10 +174,18 @@ function HotelAdminDashboard({
       <div className="flex flex-wrap gap-3">
         <Button
           className="bg-amber-600 hover:bg-amber-700 text-white"
-          onClick={openNewReservationTab}
+          onClick={handleNewReservation}
         >
           <CalendarCheck2 className="w-4 h-4 mr-2" />
           New Reservation
+        </Button>
+        <Button
+          variant="outline"
+          className="border-sky-600 text-sky-700 hover:bg-sky-50"
+          onClick={() => onNavigate?.('bookings')}
+        >
+          <CalendarCheck2 className="w-4 h-4 mr-2" />
+          Bookings
         </Button>
         <Button
           variant="outline"
@@ -220,7 +232,7 @@ function HotelAdminDashboard({
           color="amber"
         />
         <StatCard
-          title="Today's Check-ins"
+          title="Today's Arrivals"
           value={checkIns?.count || 0}
           icon={<LogIn className="w-5 h-5" />}
           color="emerald"
@@ -361,7 +373,7 @@ function HotelAdminDashboard({
         {/* Recent Bookings */}
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">Recent Reservations</CardTitle>
+            <CardTitle className="text-base">Today&apos;s Arrivals</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="max-h-64 overflow-y-auto custom-scrollbar">
@@ -380,7 +392,7 @@ function HotelAdminDashboard({
                   ))}
                 </div>
               ) : (
-                <p className="text-sm text-muted-foreground text-center py-4">No recent bookings</p>
+                <p className="text-sm text-muted-foreground text-center py-4">No arrivals for this business day</p>
               )}
             </div>
           </CardContent>

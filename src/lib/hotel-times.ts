@@ -198,6 +198,19 @@ function displayDatetime(value: string | Date, timeHHmm: string): Date {
   return date
 }
 
+/** Date-only label for reservation confirm step and similar (no check-in/out time). */
+export function formatBookingDateOnly(value: string | Date): string {
+  let date: Date
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    date = trimmed.includes('T') ? new Date(trimmed) : new Date(`${trimmed}T12:00:00`)
+  } else {
+    date = value
+  }
+  if (Number.isNaN(date.getTime())) return '—'
+  return format(date, 'MMM dd, yyyy')
+}
+
 /** Format stored datetime; applies hotel policy time only for legacy date-only (midnight) values. */
 export function formatBookingDatetime(
   value: string | Date,
@@ -333,6 +346,41 @@ export function formatBookingCheckOutShort(
 ): string {
   const d = displayDatetime(value, times.checkOutTime)
   return format(d, 'dd-MMM-yyyy · h:mm a')
+}
+
+export function combineDateAndTime(dateYYYYMMDD: string, timeHHmm: string): Date {
+  if (!isDateOnlyInput(dateYYYYMMDD)) {
+    throw new Error('Invalid date')
+  }
+  const parsed = parseTimeHHmm(timeHHmm) ?? parseTimeHHmm(DEFAULT_CHECK_IN_TIME)!
+  const base = new Date(`${dateYYYYMMDD.trim()}T12:00:00`)
+  if (Number.isNaN(base.getTime())) {
+    throw new Error('Invalid date')
+  }
+  const normalizedTime = `${String(parsed.hours).padStart(2, '0')}:${String(parsed.minutes).padStart(2, '0')}`
+  return applyHotelTimeToDate(startOfDay(base), normalizedTime)
+}
+
+export function splitDateAndTime(
+  value: string | Date,
+  fallbackTimeHHmm: string
+): { date: string; time: string } {
+  const date = typeof value === 'string' ? new Date(value) : value
+  if (Number.isNaN(date.getTime())) {
+    return { date: '', time: normalizeTimeHHmm(fallbackTimeHHmm) }
+  }
+  const resolved =
+    isDateOnlyBookingDatetime(date)
+      ? applyHotelTimeToDate(startOfDay(date), fallbackTimeHHmm)
+      : date
+  return {
+    date: format(startOfDay(resolved), 'yyyy-MM-dd'),
+    time: `${String(resolved.getHours()).padStart(2, '0')}:${String(resolved.getMinutes()).padStart(2, '0')}`,
+  }
+}
+
+export function isStayDatetimeRangeValid(checkIn: Date, checkOut: Date): boolean {
+  return checkOut > checkIn
 }
 
 export function checkoutHourFromTime(timeHHmm: string): number {

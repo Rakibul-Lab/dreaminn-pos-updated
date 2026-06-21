@@ -36,7 +36,6 @@ import { CheckCircle2, FilePenLine, LogIn, Plus } from 'lucide-react'
 import {
   computeRoomBookingTotals,
   DEFAULT_VAT_PERCENT,
-  VAT_PERCENT_INPUT_STEP,
 } from '@/lib/booking-totals'
 import { formatPaymentMethod, PAYMENT_METHOD_OPTIONS } from '@/lib/payment-method'
 import {
@@ -47,23 +46,53 @@ import {
 import { useHotelTimes } from '@/hooks/use-hotel-times'
 import {
   getCompleteReservationMissingFields,
+  getCorporateGuestMissingFields,
   getInitialReservationMissingFields,
+  getPhysicalIdMissingFields,
 } from '@/lib/reservation-completion-fields'
 import {
   applyHotelTimeToBookingInput,
   countHotelStayNights,
   describeStayPeriod,
+  formatBookingDateOnly,
   formatTime12h,
   isStayDatePickerRangeValid,
   minCheckoutDatePickerValue,
 } from '@/lib/hotel-times'
 import type { BookingDiscountType } from '@/lib/booking-discount'
+import { getRoomNightlyTotal } from '@/lib/room-pricing'
+import {
+  buildAdultCompanionSlots,
+  expectedCompanionCount,
+  validateCompanionInputs,
+  validateCorporateCompanionInputs,
+  type CompanionInput,
+} from '@/lib/booking-companions'
+import {
+  CompanionGuestFields,
+  emptyCompanionDraft,
+  type CompanionGuestDraft,
+} from './CompanionGuestFields'
+import {
+  CorporateCompanionGuestFields,
+  emptyCorporateCompanionDraft,
+  type CorporateCompanionDraft,
+} from './CorporateCompanionGuestFields'
+import { INVOICE_SERVICE_CHARGE_PERCENT } from '@/lib/invoice-display'
+import { hasBookingCompany } from '@/lib/booking-company'
+import { getPhoneValidationMessage } from '@/lib/phone'
+import {
+  buildRoomsAvailabilityQueryUrl,
+  type RoomsAvailabilityResponse,
+} from '@/lib/rooms-availability-query'
+import { ReservationEntryWizard } from './ReservationEntryWizard'
 
 interface Room {
   id: string
   roomNumber: string
   status: string
-  type: { name: string; basePrice: number }
+  totalPrice: number
+  type: { name: string }
 }
 
 const STEP_LABELS = ['Guest', 'Stay', 'Payment', 'Confirm', 'Document']
@@ -112,13 +141,17 @@ type GuestDraft = {
   guestPhone: string
   guestEmail: string
   guestAddress: string
+  guestDesignation: string
   guestNationality: string
+  isCorporateGuest: boolean
   idType: IdDocumentType
   idNumber: string
   visaExpiryDate: string
-  registrationNumber: string
   idDocuments: IdDocumentItem[]
   existingDocsStatus: 'idle' | 'loading' | 'none' | 'found'
+  nidPhysicallyReceived: boolean
+  companions: CompanionGuestDraft[]
+  corporateCompanions: CorporateCompanionDraft[]
 }
 
 type StayDraft = {
@@ -134,11 +167,18 @@ type PaymentDraft = {
   advancePayment: string
   advancePaymentMethod: string
   reservationNotes: string
-  vatEditEnabled: boolean
+  chargesEditEnabled: boolean
   vatPercent: string
+  serviceChargePercent: string
   discountEnabled: boolean
   discountType: BookingDiscountType
   discountValue: string
+}
+
+type ReservationPaymentLine = {
+  id: string
+  amount: number
+  method: string
 }
 
 type ReservationWizardDraft = {
@@ -148,7 +188,7 @@ type ReservationWizardDraft = {
   payment: PaymentDraft
 }
 
-function emptyGuestDraft(): GuestDraft {
+function emptyGuestDraft(options?: { forExistingGuest?: boolean }): GuestDraft {
   return {
     selectedCustomerId: '',
     guestName: '',
@@ -157,21 +197,28 @@ function emptyGuestDraft(): GuestDraft {
     guestPhone: '',
     guestEmail: '',
     guestAddress: '',
+    guestDesignation: '',
     guestNationality: DEFAULT_NATIONALITY,
+    isCorporateGuest: false,
     idType: 'national_id',
     idNumber: '',
     visaExpiryDate: '',
-    registrationNumber: '',
     idDocuments: [],
     existingDocsStatus: 'idle',
+    nidPhysicallyReceived: options?.forExistingGuest ? false : true,
+    companions: [],
+    corporateCompanions: [],
   }
 }
 
-function emptyReservationDraft(vatPercent = String(DEFAULT_VAT_PERCENT)): ReservationWizardDraft {
+function emptyReservationDraft(
+  vatPercent = String(DEFAULT_VAT_PERCENT),
+  forExistingGuest = false
+): ReservationWizardDraft {
   const dates = defaultStayDates()
   return {
     step: 1,
-    guest: emptyGuestDraft(),
+    guest: emptyGuestDraft({ forExistingGuest }),
     stay: {
       selectedRoomId: '',
       checkInDate: dates.checkIn,
@@ -184,8 +231,9 @@ function emptyReservationDraft(vatPercent = String(DEFAULT_VAT_PERCENT)): Reserv
       advancePayment: '0',
       advancePaymentMethod: 'NONE',
       reservationNotes: '',
-      vatEditEnabled: false,
+      chargesEditEnabled: false,
       vatPercent,
+      serviceChargePercent: String(INVOICE_SERVICE_CHARGE_PERCENT),
       discountEnabled: false,
       discountType: 'PERCENTAGE',
       discountValue: '',
@@ -195,6 +243,9 @@ function emptyReservationDraft(vatPercent = String(DEFAULT_VAT_PERCENT)): Reserv
 
 interface NewReservationWizardProps {
   editBookingId?: string
+  initialRoomId?: string
+  initialCheckInDate?: string
+  initialCheckOutDate?: string
 }
 
 function toDatePickerValue(iso: string) {
@@ -205,7 +256,12 @@ function toDatePickerValue(iso: string) {
   }
 }
 
-export function NewReservationWizard({ editBookingId }: NewReservationWizardProps = {}) {
+export function NewReservationWizard({
+  editBookingId,
+  initialRoomId,
+  initialCheckInDate,
+  initialCheckOutDate,
+}: NewReservationWizardProps = {}) {
   const queryClient = useQueryClient()
   const isEditMode = !!editBookingId
   const [completedReservationId, setCompletedReservationId] = useState<string | null>(null)
@@ -214,16 +270,31 @@ export function NewReservationWizard({ editBookingId }: NewReservationWizardProp
   const [isInitialFlow, setIsInitialFlow] = useState(isEditMode)
   const [initialFlowFieldError, setInitialFlowFieldError] = useState<string[] | null>(null)
   const [guestMode, setGuestMode] = useState<GuestMode>(isEditMode ? 'existing' : 'new')
+  const [flowMode, setFlowMode] = useState<'standard' | 'reservation_entry'>('standard')
   const [editDraftLoaded, setEditDraftLoaded] = useState(false)
+  const [editFromReservationEntry, setEditFromReservationEntry] = useState(false)
   const [idEntryStarted, setIdEntryStarted] = useState(isEditMode)
   const [defaultVatPercent, setDefaultVatPercent] = useState(DEFAULT_VAT_PERCENT)
-  const [guestEmailVerificationToken, setGuestEmailVerificationToken] = useState<string | null>(null)
-  const [drafts, setDrafts] = useState<Record<GuestMode, ReservationWizardDraft>>({
-    new: emptyReservationDraft(),
-    existing: emptyReservationDraft(),
+  const [defaultServicePercent, setDefaultServicePercent] = useState(INVOICE_SERVICE_CHARGE_PERCENT)
+  const [paymentLines, setPaymentLines] = useState<ReservationPaymentLine[]>([])
+  const [drafts, setDrafts] = useState<Record<GuestMode, ReservationWizardDraft>>(() => {
+    const seedStayDates = (draft: ReservationWizardDraft): ReservationWizardDraft => {
+      if (!initialCheckInDate || !initialCheckOutDate) return draft
+      return {
+        ...draft,
+        stay: {
+          ...draft.stay,
+          checkInDate: initialCheckInDate,
+          checkOutDate: initialCheckOutDate,
+        },
+      }
+    }
+    return {
+      new: seedStayDates(emptyReservationDraft()),
+      existing: seedStayDates(emptyReservationDraft(String(DEFAULT_VAT_PERCENT), true)),
+    }
   })
   const { times, formatCheckIn, formatCheckOut } = useHotelTimes()
-
   const activeDraft = drafts[guestMode]
   const step = activeDraft.step
   const { guest, stay, payment } = activeDraft
@@ -235,21 +306,30 @@ export function NewReservationWizard({ editBookingId }: NewReservationWizardProp
     guestPhone,
     guestEmail,
     guestAddress,
+    guestDesignation,
     guestNationality,
+    isCorporateGuest,
     idType,
     idNumber,
     visaExpiryDate,
-    registrationNumber,
     idDocuments,
     existingDocsStatus,
+    nidPhysicallyReceived,
+    companions,
+    corporateCompanions,
   } = guest
+  const hasCompanySelected = hasBookingCompany({
+    companyLedgerId,
+    company: guestCompany,
+  })
   const { selectedRoomId, checkInDate, checkOutDate, adults, children, withMeal } = stay
   const {
     advancePayment,
     advancePaymentMethod,
     reservationNotes,
-    vatEditEnabled,
+    chargesEditEnabled,
     vatPercent,
+    serviceChargePercent,
     discountEnabled,
     discountType,
     discountValue,
@@ -296,6 +376,30 @@ export function NewReservationWizard({ editBookingId }: NewReservationWizardProp
 
   const patchGuest = (patch: Partial<GuestDraft>) => patchDraft({ guest: patch })
 
+  const patchGuestStayCounts = (adultsValue: string, childrenValue: string) => {
+    const nextAdults = Math.max(1, parseInt(adultsValue, 10) || 1)
+    const nextChildren = Math.max(0, parseInt(childrenValue, 10) || 0)
+    const guestPatch: Partial<GuestDraft> = isCorporateGuest
+      ? {
+          corporateCompanions: buildAdultCompanionSlots(nextAdults).map((_, index) => ({
+            ...emptyCorporateCompanionDraft(),
+            ...(corporateCompanions[index] ?? {}),
+          })),
+          companions: [],
+        }
+      : {
+          companions: buildAdultCompanionSlots(nextAdults).map((_, index) => ({
+            ...emptyCompanionDraft(),
+            ...(companions[index] ?? {}),
+          })),
+          corporateCompanions: [],
+        }
+    patchDraft({
+      stay: { adults: String(nextAdults), children: String(nextChildren) },
+      guest: guestPatch,
+    })
+  }
+
   const handleNationalityChange = (value: string) => {
     const trimmed = value.trim()
     const isKnownCountry = NATIONALITY_OPTIONS.some(
@@ -322,20 +426,109 @@ export function NewReservationWizard({ editBookingId }: NewReservationWizardProp
       revertToInitialStage(trimmed)
     }
   }
-  const patchStay = (patch: Partial<StayDraft>) => patchDraft({ stay: patch })
+  const patchStay = (patch: Partial<StayDraft>) => {
+    if (patch.adults !== undefined || patch.children !== undefined) {
+      patchGuestStayCounts(
+        patch.adults ?? adults,
+        patch.children ?? children
+      )
+      return
+    }
+    patchDraft({ stay: patch })
+  }
+
+  const buildCompanionsPayload = (): CompanionInput[] => {
+    const slots = buildAdultCompanionSlots(parseInt(adults, 10) || 1)
+    return slots.map((slot, index) => {
+      const companion = companions[index] ?? emptyCompanionDraft()
+      return {
+        companionType: slot.companionType,
+        sortOrder: index,
+        name: companion.name.trim(),
+        phone: companion.phone.trim() || null,
+        nationality: companion.guestNationality.trim() || DEFAULT_NATIONALITY,
+        idType: companion.idType,
+        idNumber: companion.idNumber.trim() || null,
+        visaExpiryDate: null,
+      }
+    })
+  }
+
+  const buildCorporateCompanionsPayload = (): CompanionInput[] => {
+    const slots = buildAdultCompanionSlots(parseInt(adults, 10) || 1)
+    return slots.map((slot, index) => {
+      const companion = corporateCompanions[index] ?? emptyCorporateCompanionDraft()
+      return {
+        companionType: slot.companionType,
+        sortOrder: index,
+        name: companion.name.trim(),
+        company: companion.company.trim(),
+        phone: companion.phone.trim(),
+        designation: companion.designation.trim(),
+        address: companion.address.trim(),
+      }
+    })
+  }
+
+  const companionValidationError = (): string | null => {
+    const adultCount = parseInt(adults, 10) || 1
+    const childCount = parseInt(children, 10) || 0
+    if (isCorporateGuest) {
+      const primaryMissing = getCorporateGuestMissingFields(corporateGuestFields())
+      if (primaryMissing.length > 0) {
+        return `Person 1: ${primaryMissing.join(', ')} required`
+      }
+      const primaryPhoneError = getPhoneValidationMessage(guestPhone, 'Person 1 phone')
+      if (primaryPhoneError) return primaryPhoneError
+      return validateCorporateCompanionInputs(
+        adultCount,
+        buildCorporateCompanionsPayload().map((c) => ({
+          name: c.name,
+          company: c.company ?? '',
+          phone: c.phone ?? '',
+          designation: c.designation ?? '',
+          address: c.address ?? '',
+        }))
+      )
+    }
+    const expected = expectedCompanionCount(adultCount, childCount)
+    if (expected === 0) return null
+    return validateCompanionInputs(
+      parseInt(adults, 10) || 1,
+      parseInt(children, 10) || 0,
+      buildCompanionsPayload(),
+      { requireIdFields: !hasCompanySelected }
+    )
+  }
   const patchPayment = (patch: Partial<PaymentDraft>) => patchDraft({ payment: patch })
   const setStep = (nextStep: number) => patchDraft({ step: nextStep })
 
   const datesValid = stayDatesValid(checkInDate, checkOutDate)
 
   const { data: roomsData, isLoading: roomsLoading } = useQuery({
-    queryKey: ['available-rooms', checkInDate, checkOutDate],
+    queryKey: ['available-rooms', checkInDate, checkOutDate, editBookingId],
     queryFn: () =>
-      api.get<{ success: boolean; data: Room[] }>(
-        `/rooms?forBooking=true&checkIn=${encodeURIComponent(checkInDate)}&checkOut=${encodeURIComponent(checkOutDate)}&limit=200`
+      api.get<RoomsAvailabilityResponse<Room>>(
+        buildRoomsAvailabilityQueryUrl({
+          checkIn: checkInDate,
+          checkOut: checkOutDate,
+          forBooking: true,
+          excludeBookingId: isEditMode ? editBookingId : undefined,
+        })
       ),
     enabled: datesValid,
   })
+
+  const categoryCapacityByType = useMemo(() => {
+    const map = new Map<
+      string,
+      { typeName: string; total: number; available: number; entryHeld: number }
+    >()
+    for (const row of roomsData?.meta?.categoryCapacity ?? []) {
+      map.set(row.roomTypeId, row)
+    }
+    return map
+  }, [roomsData?.meta?.categoryCapacity])
 
   const { data: editBookingData, isLoading: editBookingLoading } = useQuery({
     queryKey: ['edit-booking', editBookingId],
@@ -352,6 +545,44 @@ export function NewReservationWizard({ editBookingId }: NewReservationWizardProp
     const customer = booking.customer as Record<string, unknown> | undefined
     const room = booking.room as { id?: string } | undefined
     const idDocs = (booking.idDocuments as { filePath: string }[] | undefined) ?? []
+    const adultCount = Math.max(1, parseInt(String(booking.adults ?? 1), 10) || 1)
+    const childCount = Math.max(0, parseInt(String(booking.children ?? 0), 10) || 0)
+    const rawCompanions =
+      (booking.companions as Array<Record<string, unknown>> | undefined) ?? []
+    const companionSlots = buildAdultCompanionSlots(adultCount)
+    const adultOnlyCompanions = rawCompanions.filter(
+      (c) => c.companionType !== 'CHILD'
+    )
+    const loadedCompanions = companionSlots.map((_, index) => {
+      const companion = adultOnlyCompanions[index]
+      if (!companion) return emptyCompanionDraft()
+      const nationality = String(companion.nationality ?? DEFAULT_NATIONALITY)
+      const idTypeRaw = companion.idType
+      const resolvedType =
+        idTypeRaw === 'passport' ||
+        idTypeRaw === 'driving_license' ||
+        idTypeRaw === 'national_id'
+          ? (idTypeRaw as IdDocumentType)
+          : 'national_id'
+      return {
+        name: String(companion.name ?? ''),
+        phone: String(companion.phone ?? ''),
+        guestNationality: nationality,
+        idType: resolveIdTypeForNationality(nationality, resolvedType),
+        idNumber: String(companion.idNumber ?? ''),
+      }
+    })
+    const loadedCorporateCompanions = companionSlots.map((_, index) => {
+      const companion = adultOnlyCompanions[index]
+      if (!companion) return emptyCorporateCompanionDraft()
+      return {
+        name: String(companion.name ?? ''),
+        company: String(companion.company ?? ''),
+        phone: String(companion.phone ?? ''),
+        designation: String(companion.designation ?? ''),
+        address: String(companion.address ?? ''),
+      }
+    })
 
     setDrafts({
       new: emptyReservationDraft(String(booking.vatPercent ?? defaultVatPercent)),
@@ -367,33 +598,44 @@ export function NewReservationWizard({ editBookingId }: NewReservationWizardProp
           guestPhone: String(customer?.phone ?? ''),
           guestEmail: String(customer?.email ?? ''),
           guestAddress: String(customer?.address ?? ''),
+          guestDesignation: String(customer?.designation ?? ''),
           guestNationality: String(customer?.nationality ?? DEFAULT_NATIONALITY),
-          idType:
+          isCorporateGuest: booking.isCorporateGuest === true,
+          idType: resolveIdTypeForNationality(
+            String(customer?.nationality ?? DEFAULT_NATIONALITY),
             customer?.idType === 'passport' ||
-            customer?.idType === 'driving_license' ||
-            customer?.idType === 'national_id'
+              customer?.idType === 'driving_license' ||
+              customer?.idType === 'national_id'
               ? (customer.idType as IdDocumentType)
-              : 'national_id',
+              : 'national_id'
+          ),
           idNumber: String(customer?.idNumber ?? ''),
-          visaExpiryDate: String(customer?.visaExpiryDate ?? ''),
-          registrationNumber: String(customer?.registrationNumber ?? ''),
+          visaExpiryDate: '',
           idDocuments: idDocs.map((d) => ({ path: d.filePath, previewUrl: d.filePath })),
           existingDocsStatus: idDocs.length > 0 ? 'found' : 'none',
+          nidPhysicallyReceived: booking.nidPhysicallyReceived === true,
+          companions: booking.isCorporateGuest === true ? [] : loadedCompanions,
+          corporateCompanions:
+            booking.isCorporateGuest === true ? loadedCorporateCompanions : [],
         },
         stay: {
           selectedRoomId: String(room?.id ?? booking.roomId ?? ''),
           checkInDate: toDatePickerValue(String(booking.checkIn)),
           checkOutDate: toDatePickerValue(String(booking.checkOut)),
-          adults: String(booking.adults ?? 1),
-          children: String(booking.children ?? 0),
+          adults: String(adultCount),
+          children: String(childCount),
           withMeal: booking.withMeal === true,
         },
         payment: {
-          advancePayment: String(booking.advancePayment ?? 0),
+          advancePayment: '0',
           advancePaymentMethod: 'NONE',
           reservationNotes: String(booking.notes ?? ''),
-          vatEditEnabled: false,
+          chargesEditEnabled: booking.vatApplied === true,
           vatPercent: String(booking.vatPercent ?? defaultVatPercent),
+          serviceChargePercent: String(
+            (booking as { serviceChargePercent?: number }).serviceChargePercent ??
+              defaultServicePercent
+          ),
           discountEnabled: (booking as { discountEnabled?: boolean }).discountEnabled === true,
           discountType:
             (booking as { discountType?: string }).discountType === 'FIXED'
@@ -403,49 +645,68 @@ export function NewReservationWizard({ editBookingId }: NewReservationWizardProp
         },
       },
     })
-    setIsInitialFlow(true)
+    const advancePaid = Number(booking.advancePayment) || 0
+    setPaymentLines(
+      advancePaid > 0
+        ? [{ id: 'edit-advance', amount: advancePaid, method: 'CASH' }]
+        : []
+    )
+    const fromReservationEntry = Boolean(booking.sourceReservationEntryId)
+    setEditFromReservationEntry(fromReservationEntry)
+    setIsInitialFlow(fromReservationEntry ? booking.nidPhysicallyReceived !== true : true)
     setGuestMode('existing')
     setIdEntryStarted(true)
     setEditDraftLoaded(true)
-  }, [isEditMode, editBookingData, editDraftLoaded, defaultVatPercent])
+  }, [isEditMode, editBookingData, editDraftLoaded, defaultVatPercent, defaultServicePercent])
 
   const { data: billingSettingsData } = useQuery({
     queryKey: ['billing-settings'],
     queryFn: () =>
-      api.get<{ success: boolean; data: { vatPercent: number; vatAppliedByDefault: boolean } }>(
-        '/settings/billing'
-      ),
+      api.get<{
+        success: boolean
+        data: { vatPercent: number; serviceChargePercent: number; vatAppliedByDefault: boolean }
+      }>('/settings/billing'),
   })
 
   useEffect(() => {
-    const settings = (billingSettingsData as { data?: { vatPercent: number } })?.data
+    const settings = (billingSettingsData as { data?: { vatPercent: number; serviceChargePercent?: number } })?.data
     if (settings?.vatPercent == null) return
     const rate = String(settings.vatPercent)
+    const serviceRate = String(settings.serviceChargePercent ?? INVOICE_SERVICE_CHARGE_PERCENT)
     setDefaultVatPercent(settings.vatPercent)
+    if (settings.serviceChargePercent != null) {
+      setDefaultServicePercent(settings.serviceChargePercent)
+    }
     setDrafts((prev) => ({
       new: {
         ...prev.new,
         payment: {
           ...prev.new.payment,
-          vatPercent: prev.new.payment.vatEditEnabled ? prev.new.payment.vatPercent : rate,
+          vatPercent: prev.new.payment.chargesEditEnabled ? prev.new.payment.vatPercent : rate,
+          serviceChargePercent: prev.new.payment.chargesEditEnabled
+            ? prev.new.payment.serviceChargePercent
+            : serviceRate,
         },
       },
       existing: {
         ...prev.existing,
         payment: {
           ...prev.existing.payment,
-          vatPercent: prev.existing.payment.vatEditEnabled
+          vatPercent: prev.existing.payment.chargesEditEnabled
             ? prev.existing.payment.vatPercent
             : rate,
+          serviceChargePercent: prev.existing.payment.chargesEditEnabled
+            ? prev.existing.payment.serviceChargePercent
+            : serviceRate,
         },
       },
     }))
   }, [billingSettingsData])
 
   const availableRooms = useMemo(() => {
-    const rooms = (
-      ((roomsData as { data?: Room[] })?.data || []) as Room[]
-    ).filter((r) => r.status === 'AVAILABLE')
+    const rooms = (((roomsData as { data?: Room[] })?.data || []) as Room[]).filter(
+      (room) => room.status !== 'MAINTENANCE' && room.status !== 'CLEANING'
+    )
 
     if (!isEditMode || !selectedRoomId) return rooms
     if (rooms.some((r) => r.id === selectedRoomId)) return rooms
@@ -458,12 +719,25 @@ export function NewReservationWizard({ editBookingId }: NewReservationWizardProp
     return rooms
   }, [roomsData, isEditMode, selectedRoomId, editBookingData])
 
+  const selectedStayRoom = useMemo(
+    () => availableRooms.find((r) => r.id === selectedRoomId),
+    [availableRooms, selectedRoomId]
+  )
+
   useEffect(() => {
     if (selectedRoomId && !availableRooms.some((r) => r.id === selectedRoomId)) {
       patchStay({ selectedRoomId: '' })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only clear stale room when availability changes
   }, [availableRooms, selectedRoomId, guestMode])
+
+  useEffect(() => {
+    if (isEditMode || !initialRoomId || selectedRoomId || roomsLoading) return
+    if (availableRooms.some((r) => r.id === initialRoomId)) {
+      patchStay({ selectedRoomId: initialRoomId })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- preselect room once when it is free for these dates
+  }, [initialRoomId, isEditMode, availableRooms, selectedRoomId, roomsLoading])
 
   const resetForm = () => {
     setCompletedReservationId(null)
@@ -474,10 +748,11 @@ export function NewReservationWizard({ editBookingId }: NewReservationWizardProp
     setGuestMode(isEditMode ? 'existing' : 'new')
     if (isEditMode) {
       setEditDraftLoaded(false)
+      setEditFromReservationEntry(false)
     } else {
       setDrafts({
         new: emptyReservationDraft(String(defaultVatPercent)),
-        existing: emptyReservationDraft(String(defaultVatPercent)),
+        existing: emptyReservationDraft(String(defaultVatPercent), true),
       })
     }
   }
@@ -563,16 +838,13 @@ export function NewReservationWizard({ editBookingId }: NewReservationWizardProp
           idTypeValue
         ),
         idNumber: selected.idNumber || '',
-        visaExpiryDate: selected.visaExpiryDate || '',
-        // Registration is per reservation — never pre-fill from the guest profile.
-        registrationNumber: '',
       },
     })
     void loadGuestIdDocuments(selected.id)
   }
 
   const clearExistingGuest = () => {
-    patchDraftFor('existing', { guest: emptyGuestDraft() })
+    patchDraftFor('existing', { guest: emptyGuestDraft({ forExistingGuest: true }) })
   }
 
   const estimatedRoomCharge = () => {
@@ -583,25 +855,48 @@ export function NewReservationWizard({ editBookingId }: NewReservationWizardProp
       const ci = applyHotelTimeToBookingInput(checkInDate, times.checkInTime)
       const co = applyHotelTimeToBookingInput(checkOutDate, times.checkOutTime)
       const nights = countHotelStayNights(ci, co)
-      return nights * room.type.basePrice
+      return nights * getRoomNightlyTotal(room)
     } catch {
       return 0
     }
   }
 
-  const parsedVatPercent = () => {
-    const n = parseFloat(vatPercent)
-    return Number.isNaN(n) || n < 0 ? defaultVatPercent : n
+  const vatPayload = () => {
+    const rate = Math.max(0, parseFloat(vatPercent) || defaultVatPercent)
+    if (chargesEditEnabled && rate > 0) {
+      return { vatApplied: true, vatPercent: rate }
+    }
+    return { vatApplied: false, vatPercent: 0 }
   }
 
-  /** VAT rate used for totals — settings default unless edit mode is on. */
-  const effectiveVatPercent = () =>
-    vatEditEnabled ? parsedVatPercent() : defaultVatPercent
+  const resolvedServicePercent = () =>
+    Math.max(0, parseFloat(serviceChargePercent) || defaultServicePercent)
 
-  const vatOptions = () => ({
-    vatApplied: true,
-    vatPercent: effectiveVatPercent(),
-  })
+  const totalAdvancePaid = () => paymentLines.reduce((sum, line) => sum + line.amount, 0)
+
+  const handleRecordPayment = () => {
+    const amount = parseFloat(advancePayment) || 0
+    if (amount <= 0) {
+      toast.error('Enter a payment amount greater than zero')
+      return
+    }
+    if (advancePaymentMethod === 'NONE') {
+      toast.error('Select a form of payment')
+      return
+    }
+    setPaymentLines((prev) => [
+      ...prev,
+      {
+        id: `${Date.now()}-${prev.length}`,
+        amount,
+        method: advancePaymentMethod,
+      },
+    ])
+    patchPayment({ advancePayment: '0' })
+    toast.success('Payment recorded')
+  }
+
+  const vatOptions = () => vatPayload()
 
   const parsedDiscountValue = () => Math.max(0, parseFloat(discountValue) || 0)
 
@@ -613,7 +908,7 @@ export function NewReservationWizard({ editBookingId }: NewReservationWizardProp
 
   const estimatedTotals = () => {
     const roomCharge = estimatedRoomCharge()
-    const advance = parseFloat(advancePayment) || 0
+    const advance = totalAdvancePaid()
     return computeRoomBookingTotals(roomCharge, advance, vatOptions(), discountInput())
   }
 
@@ -627,22 +922,47 @@ export function NewReservationWizard({ editBookingId }: NewReservationWizardProp
 
   const resolvedGuestNationality = () => guestNationality.trim() || DEFAULT_NATIONALITY
 
-  const buildGuestProfilePayload = () => ({
-    name: guestName.trim(),
-    company: formatGuestCompany(guestCompany),
-    phone: guestPhone.trim(),
-    email: guestEmail.trim() || null,
-    emailVerificationToken: guestEmailVerificationToken || undefined,
-    allowUnverifiedMailbox: true,
-    address: guestAddress.trim() || null,
-    nationality: resolvedGuestNationality(),
-    idType,
-    idNumber: idNumber.trim() || null,
-    visaExpiryDate:
-      idType === 'passport' && visaExpiryDate.trim() ? visaExpiryDate.trim() : null,
-    registrationNumber: registrationNumber.trim() || null,
-    idDocPath: idDocuments[0]?.path || null,
+  const resolvedBookingCompany = () =>
+    isCorporateGuest ? guestCompany.trim() : formatGuestCompany(guestCompany)
+
+  const corporateGuestFields = () => ({
+    guestName,
+    guestCompany,
+    guestPhone,
+    guestDesignation,
+    guestAddress,
   })
+
+  const buildGuestProfilePayload = () => {
+    if (isCorporateGuest) {
+      return {
+        name: guestName.trim(),
+        company: guestCompany.trim() || null,
+        phone: guestPhone.trim(),
+        address: guestAddress.trim() || null,
+        designation: guestDesignation.trim() || null,
+        email: null,
+        nationality: null,
+        idType: null,
+        idNumber: null,
+        visaExpiryDate: null,
+        idDocPath: null,
+      }
+    }
+
+    return {
+      name: guestName.trim(),
+      company: formatGuestCompany(guestCompany),
+      phone: guestPhone.trim(),
+      email: guestEmail.trim() || null,
+      address: guestAddress.trim() || null,
+      nationality: resolvedGuestNationality(),
+      idType,
+      idNumber: idNumber.trim() || null,
+      visaExpiryDate: null,
+      idDocPath: idDocuments[0]?.path || null,
+    }
+  }
 
   const syncGuestProfile = async (customerId: string): Promise<boolean> => {
     const updateRes = (await api.put(`/customers/${customerId}`, buildGuestProfilePayload())) as {
@@ -661,9 +981,32 @@ export function NewReservationWizard({ editBookingId }: NewReservationWizardProp
   const resolveCustomerId = async (options?: {
     skipIdRequirement?: boolean
   }): Promise<string | null> => {
-    if (!options?.skipIdRequirement && idDocuments.length === 0) {
+    if (isCorporateGuest) {
+      const corporateMissing = getCorporateGuestMissingFields(corporateGuestFields())
+      if (corporateMissing.length > 0) {
+        toast.error(`Please fill required fields: ${corporateMissing.join(', ')}`)
+        return null
+      }
+      const phoneError = getPhoneValidationMessage(guestPhone, 'Person 1 phone')
+      if (phoneError) {
+        toast.error(phoneError)
+        return null
+      }
+    } else if (
+      !options?.skipIdRequirement &&
+      !nidPhysicallyReceived &&
+      idDocuments.length === 0
+    ) {
       toast.error('Upload or scan at least one ID image before continuing')
       return null
+    }
+
+    if (!isCorporateGuest && nidPhysicallyReceived && !hasCompanySelected) {
+      const physicalMissing = getPhysicalIdMissingFields({ idNumber })
+      if (physicalMissing.length > 0) {
+        toast.error(`Required: ${physicalMissing.join(', ')}`)
+        return null
+      }
     }
 
     if (guestMode === 'existing') {
@@ -675,7 +1018,12 @@ export function NewReservationWizard({ editBookingId }: NewReservationWizardProp
         toast.error('Guest name and phone are required')
         return null
       }
-      if (!resolvedGuestNationality()) {
+      const existingPhoneError = getPhoneValidationMessage(guestPhone)
+      if (existingPhoneError) {
+        toast.error(existingPhoneError)
+        return null
+      }
+      if (!isCorporateGuest && !resolvedGuestNationality()) {
         toast.error('Nationality is required')
         return null
       }
@@ -691,18 +1039,26 @@ export function NewReservationWizard({ editBookingId }: NewReservationWizardProp
       toast.error('Guest name and phone are required')
       return null
     }
-    if (!resolvedGuestNationality()) {
+    const phoneError = getPhoneValidationMessage(guestPhone)
+    if (phoneError) {
+      toast.error(phoneError)
+      return null
+    }
+    if (!isCorporateGuest && !resolvedGuestNationality()) {
       toast.error('Nationality is required')
       return null
     }
 
     const res = (await createCustomerMutation.mutateAsync({
       ...buildGuestProfilePayload(),
-      email: guestEmail.trim() || undefined,
-      address: guestAddress.trim() || undefined,
-      idNumber: idNumber.trim() || undefined,
-      registrationNumber: registrationNumber.trim() || undefined,
-      idDocPath: idDocuments[0]?.path || undefined,
+      ...(isCorporateGuest
+        ? {}
+        : {
+            email: guestEmail.trim() || undefined,
+            address: guestAddress.trim() || undefined,
+            idNumber: idNumber.trim() || undefined,
+            idDocPath: idDocuments[0]?.path || undefined,
+          }),
     })) as { success?: boolean; data?: { id: string }; error?: string; message?: string }
 
     if (!res?.success || !res.data?.id) {
@@ -733,6 +1089,8 @@ export function NewReservationWizard({ editBookingId }: NewReservationWizardProp
     queryClient.invalidateQueries({ queryKey: ['customers-list'] })
     queryClient.invalidateQueries({ queryKey: ['customers'] })
     queryClient.invalidateQueries({ queryKey: ['available-rooms'] })
+    queryClient.invalidateQueries({ queryKey: ['available-rooms-entry'] })
+    queryClient.invalidateQueries({ queryKey: ['reservation-entries-summary'] })
     queryClient.invalidateQueries({ queryKey: ['dashboard'] })
     queryClient.invalidateQueries({ queryKey: ['rooms'] })
       queryClient.invalidateQueries({ queryKey: ['edit-booking', bookingId] })
@@ -757,31 +1115,30 @@ export function NewReservationWizard({ editBookingId }: NewReservationWizardProp
     completeInitial?: boolean
   }) => {
     const { withCheckIn = false, asInitial = false, completeInitial = false } = options
-    const skipId = asInitial || (isInitialFlow && !completeInitial)
-    const customerId = await resolveCustomerId({ skipIdRequirement: skipId })
-    if (!customerId || !selectedRoomId || !checkInDate || !checkOutDate) return
 
-    if (!guestNationality.trim()) {
-      toast.error('Nationality is required')
+    const validationError = validateBeforeSubmit({ withCheckIn, asInitial, completeInitial })
+    if (validationError) {
+      toast.error(validationError)
+      focusFirstInvalidStep({ withCheckIn, asInitial, completeInitial })
       return
     }
 
-    if (completeInitial) {
-      const missing = getCompleteReservationMissingFields({
-        nationality: guestNationality,
-        idNumber,
-        email: guestEmail,
-        address: guestAddress,
-        registrationNumber,
-        idDocumentCount: idDocuments.length,
-        idType,
-        visaExpiryDate,
-      })
-      if (missing.length > 0) {
-        toast.error(`Please fill required fields: ${missing.join(', ')}`)
-        return
-      }
+    const skipId =
+      isCorporateGuest || asInitial || nidPhysicallyReceived
+    const customerId = await resolveCustomerId({ skipIdRequirement: skipId })
+    if (!customerId) return
+    if (!selectedRoomId) {
+      toast.error('Please select a room')
+      return
     }
+    if (!checkInDate || !checkOutDate) {
+      toast.error('Check-in and check-out dates are required')
+      return
+    }
+
+    const companionsPayload = isCorporateGuest
+      ? buildCorporateCompanionsPayload()
+      : buildCompanionsPayload()
 
     setIsSubmitting(true)
     try {
@@ -790,7 +1147,7 @@ export function NewReservationWizard({ editBookingId }: NewReservationWizardProp
 
       if (isEditMode && editBookingId) {
         const res = (await api.put(`/bookings/${editBookingId}`, {
-          company: formatGuestCompany(guestCompany),
+          company: resolvedBookingCompany(),
           roomId: selectedRoomId,
           checkIn: checkInDate,
           checkOut: checkOutDate,
@@ -798,27 +1155,36 @@ export function NewReservationWizard({ editBookingId }: NewReservationWizardProp
           children: parseInt(children, 10),
           notes: reservationNotes.trim() || undefined,
           idDocumentPaths: idPaths,
-          vatPercent: effectiveVatPercent(),
+          vatApplied: vatPayload().vatApplied,
+          vatPercent: vatPayload().vatPercent,
+          serviceChargePercent: resolvedServicePercent(),
           withMeal,
           discountEnabled,
           discountType,
           discountValue: discountEnabled ? parsedDiscountValue() : 0,
           isInitialReservation: completeInitial ? false : true,
-          customer: {
-            name: guestName.trim(),
-            phone: guestPhone.trim(),
-            email: guestEmail.trim() || null,
-            emailVerificationToken: guestEmailVerificationToken || undefined,
-            allowUnverifiedMailbox: true,
-            address: guestAddress.trim() || null,
-            nationality: guestNationality.trim() || DEFAULT_NATIONALITY,
-            idType,
-            idNumber: idNumber.trim() || null,
-            visaExpiryDate:
-              idType === 'passport' && visaExpiryDate.trim() ? visaExpiryDate.trim() : null,
-            registrationNumber: registrationNumber.trim() || null,
-            idDocPath: idDocuments[0]?.path || null,
-          },
+          isCorporateGuest,
+          nidPhysicallyReceived: isCorporateGuest ? false : nidPhysicallyReceived,
+          companions: companionsPayload,
+          customer: isCorporateGuest
+            ? {
+                name: guestName.trim(),
+                phone: guestPhone.trim(),
+                company: guestCompany.trim() || null,
+                designation: guestDesignation.trim() || null,
+                address: guestAddress.trim() || null,
+              }
+            : {
+                name: guestName.trim(),
+                phone: guestPhone.trim(),
+                email: guestEmail.trim() || null,
+                address: guestAddress.trim() || null,
+                nationality: guestNationality.trim() || DEFAULT_NATIONALITY,
+                idType,
+                idNumber: idNumber.trim() || null,
+                visaExpiryDate: null,
+                idDocPath: idDocuments[0]?.path || null,
+              },
         })) as { success?: boolean; data?: { id: string }; error?: string; message?: string }
 
         if (!res?.success) {
@@ -834,29 +1200,41 @@ export function NewReservationWizard({ editBookingId }: NewReservationWizardProp
         return
       }
 
-      const saveAsInitial = asInitial || (isInitialFlow && idDocuments.length === 0)
+      const saveAsInitial =
+        !isCorporateGuest && (asInitial || (isInitialFlow && idDocuments.length === 0))
 
       const res = (await createReservationMutation.mutateAsync({
         customerId,
-        company: formatGuestCompany(guestCompany),
-        companyLedgerId: companyLedgerId || undefined,
+        company: resolvedBookingCompany(),
+        companyLedgerId: isCorporateGuest ? undefined : companyLedgerId || undefined,
         roomId: selectedRoomId,
         checkIn: checkInDate,
         checkOut: checkOutDate,
         adults: parseInt(adults, 10),
         children: parseInt(children, 10),
-        advancePayment: parseFloat(advancePayment) || 0,
-        paymentMethod: advancePaymentMethod,
+        advancePayment: totalAdvancePaid(),
+        paymentMethod:
+          paymentLines.length > 0
+            ? paymentLines[paymentLines.length - 1].method
+            : advancePaymentMethod,
+        bookingPayments: paymentLines.map((line) => ({
+          amount: line.amount,
+          method: line.method,
+        })),
         notes: reservationNotes.trim() || undefined,
-        idDocumentPaths: idPaths,
-        vatApplied: true,
-        vatPercent: effectiveVatPercent(),
+        idDocumentPaths: isCorporateGuest ? undefined : idPaths,
+        vatApplied: vatPayload().vatApplied,
+        vatPercent: vatPayload().vatPercent,
+        serviceChargePercent: resolvedServicePercent(),
         checkInNow: withCheckIn,
         isInitialReservation: saveAsInitial,
+        isCorporateGuest,
         withMeal,
         discountEnabled,
         discountType,
         discountValue: discountEnabled ? parsedDiscountValue() : 0,
+        nidPhysicallyReceived: isCorporateGuest ? false : nidPhysicallyReceived,
+        companions: companionsPayload,
       })) as {
         success?: boolean
         data?: { id: string; status?: string }
@@ -887,8 +1265,14 @@ export function NewReservationWizard({ editBookingId }: NewReservationWizardProp
       }
 
       finishReservation(bookingId, didCheckIn, saveAsInitial ? 'initial' : 'full')
-    } catch {
-      toast.error(isEditMode ? 'Failed to update reservation' : 'Failed to create reservation')
+    } catch (err) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : isEditMode
+            ? 'Failed to update reservation'
+            : 'Failed to create reservation'
+      toast.error(message)
     } finally {
       setIsSubmitting(false)
     }
@@ -903,16 +1287,19 @@ export function NewReservationWizard({ editBookingId }: NewReservationWizardProp
   const hasIdActivity = idDocuments.length > 0 || Boolean(idNumber.trim())
   const showCompleteRequiredMarkers = isEditMode
     ? hasIdActivity
-    : !isInitialFlow && hasIdActivity
+    : !isInitialFlow && (hasIdActivity || nidPhysicallyReceived)
+  const idNumberRequired =
+    !hasCompanySelected && (nidPhysicallyReceived || showCompleteRequiredMarkers)
+  const emailAddressRequired =
+    showCompleteRequiredMarkers && !nidPhysicallyReceived && !hasCompanySelected
   const completeReservationMissing = getCompleteReservationMissingFields({
     nationality: guestNationality,
     idNumber,
     email: guestEmail,
     address: guestAddress,
-    registrationNumber,
     idDocumentCount: idDocuments.length,
-    idType,
-    visaExpiryDate,
+    nidPhysicallyReceived,
+    hasCompanySelected,
   })
   const canCompleteReservation = completeReservationMissing.length === 0
   const initialMissingFields = getInitialReservationGuestMissingFields(guestMode, {
@@ -921,20 +1308,199 @@ export function NewReservationWizard({ editBookingId }: NewReservationWizardProp
     guestPhone,
     guestNationality,
   })
-  const guestDetailsReady = initialMissingFields.length === 0
-  /** Step 1: initial fields only, or all completion fields once ID entry has started / full reservation. */
-  const canGoStep2 =
-    guestDetailsReady &&
-    (isInitialFlow && !hasIdActivity ? true : completeReservationMissing.length === 0)
-  const canGoStep3 = datesValid && Boolean(selectedRoomId) && !roomsLoading
-  const advanceAmount = parseFloat(advancePayment) || 0
-  const canGoStep4 =
-    (!discountEnabled || parsedDiscountValue() > 0) &&
-    (advanceAmount <= 0 || (advanceAmount > 0 && advancePaymentMethod !== 'NONE'))
-  const canProceedToNextStep =
-    step === 1 ? canGoStep2 : step === 2 ? canGoStep3 : step === 3 ? canGoStep4 : true
   const showInitialReservationOption =
-    !isEditMode && idDocuments.length === 0 && !hasIdActivity
+    !isCorporateGuest &&
+    !isEditMode &&
+    !nidPhysicallyReceived &&
+    idDocuments.length === 0 &&
+    !hasIdActivity
+
+  const validateGuestStep = (options?: { forInitialSave?: boolean }): string | null => {
+    const forInitialSave = options?.forInitialSave === true
+
+    if (isCorporateGuest) {
+      const corporateMissing = getCorporateGuestMissingFields(corporateGuestFields())
+      if (corporateMissing.length > 0) {
+        return `Please fill required fields: ${corporateMissing.join(', ')}`
+      }
+      const phoneError = getPhoneValidationMessage(guestPhone, 'Person 1 phone')
+      if (phoneError) return phoneError
+      const companionError = companionValidationError()
+      if (companionError) return companionError
+      return null
+    }
+
+    const initialMissing = getInitialReservationGuestMissingFields(guestMode, {
+      selectedCustomerId,
+      guestName,
+      guestPhone,
+      guestNationality,
+    })
+    if (initialMissing.length > 0) {
+      return `Please fill required fields: ${initialMissing.join(', ')}`
+    }
+
+    const phoneError = getPhoneValidationMessage(guestPhone)
+    if (phoneError) return phoneError
+
+    const companionError = companionValidationError()
+    if (companionError) return companionError
+
+    if (forInitialSave || (isInitialFlow && !hasIdActivity && !nidPhysicallyReceived)) {
+      return null
+    }
+
+    if (nidPhysicallyReceived && !hasCompanySelected) {
+      const physicalMissing = getPhysicalIdMissingFields({ idNumber })
+      if (physicalMissing.length > 0) {
+        return `Required: ${physicalMissing.join(', ')}`
+      }
+      return null
+    }
+
+    if (!forInitialSave && idDocuments.length === 0) {
+      return 'Upload or scan at least one ID image, or turn on “ID documents physically received”'
+    }
+
+    const completeMissing = getCompleteReservationMissingFields({
+      nationality: guestNationality,
+      idNumber,
+      email: guestEmail,
+      address: guestAddress,
+      idDocumentCount: idDocuments.length,
+      nidPhysicallyReceived,
+      hasCompanySelected,
+    })
+    if (completeMissing.length > 0) {
+      return `Please fill required fields: ${completeMissing.join(', ')}`
+    }
+
+    return null
+  }
+
+  const validateStayStep = (): string | null => {
+    if (!checkInDate || !checkOutDate) {
+      return 'Check-in and check-out dates are required'
+    }
+    if (!datesValid) {
+      return 'Check-out date must be after check-in date'
+    }
+    if (roomsLoading) {
+      return 'Loading available rooms — please wait'
+    }
+    if (!selectedRoomId) {
+      return 'Please select a room'
+    }
+    if (!availableRooms.some((room) => room.id === selectedRoomId)) {
+      return 'Selected room is not available for these dates — it may be blocked by a reservation entry or another booking'
+    }
+    const selectedRoom = availableRooms.find((room) => room.id === selectedRoomId)
+    if (selectedRoom) {
+      const cap = categoryCapacityByType.get(selectedRoom.typeId)
+      if (cap && cap.available <= 0) {
+        return `No ${cap.typeName} inventory left for these dates (${cap.entryHeld} held by reservation entries)`
+      }
+    }
+    return null
+  }
+
+  const validatePaymentStep = (): string | null => {
+    if (discountEnabled && parsedDiscountValue() <= 0) {
+      return 'Enter a discount amount or turn off discount'
+    }
+    const pending = parseFloat(advancePayment) || 0
+    if (pending > 0) {
+      return 'Click Pay to record the payment amount, or clear the payment field to continue'
+    }
+    return null
+  }
+
+  const validateBeforeSubmit = (options: {
+    asInitial?: boolean
+    completeInitial?: boolean
+    withCheckIn?: boolean
+  }): string | null => {
+    if (options.withCheckIn && options.asInitial) {
+      return 'Initial reservations cannot be checked in immediately. Complete guest details first.'
+    }
+
+    const guestError = validateGuestStep({
+      forInitialSave: options.asInitial === true && options.completeInitial !== true,
+    })
+    if (guestError) return guestError
+
+    const stayError = validateStayStep()
+    if (stayError) return stayError
+
+    const paymentError = validatePaymentStep()
+    if (paymentError) return paymentError
+
+    if (options.completeInitial) {
+      const missing = isCorporateGuest
+        ? getCorporateGuestMissingFields(corporateGuestFields())
+        : getCompleteReservationMissingFields({
+            nationality: guestNationality,
+            idNumber,
+            email: guestEmail,
+            address: guestAddress,
+            idDocumentCount: idDocuments.length,
+            nidPhysicallyReceived,
+            hasCompanySelected,
+          })
+      if (missing.length > 0) {
+        return `Please fill required fields: ${missing.join(', ')}`
+      }
+    }
+
+    return null
+  }
+
+  const focusFirstInvalidStep = (options?: {
+    asInitial?: boolean
+    completeInitial?: boolean
+    withCheckIn?: boolean
+  }) => {
+    const guestError = validateGuestStep({
+      forInitialSave: options?.asInitial === true && options?.completeInitial !== true,
+    })
+    if (guestError) {
+      setStep(1)
+      return
+    }
+    if (validateStayStep()) {
+      setStep(2)
+      return
+    }
+    if (validatePaymentStep()) {
+      setStep(3)
+    }
+  }
+
+  const getCurrentStepValidationError = (): string | null => {
+    if (step === 1) return validateGuestStep({ forInitialSave: isInitialFlow })
+    if (step === 2) return validateStayStep()
+    if (step === 3) return validatePaymentStep()
+    return null
+  }
+
+  const stepValidationHint =
+    step === 4
+      ? validateBeforeSubmit({
+          asInitial: isInitialFlow && !hasRequiredIdDocs,
+        })
+      : getCurrentStepValidationError()
+
+  const canProceedToNextStep = step < 4 && !getCurrentStepValidationError()
+
+  const handleNextStep = () => {
+    const error = getCurrentStepValidationError()
+    if (error) {
+      toast.error(error)
+      return
+    }
+
+    setStep(Math.min(4, step + 1))
+  }
 
   useEffect(() => {
     if (initialMissingFields.length === 0) {
@@ -943,15 +1509,18 @@ export function NewReservationWizard({ editBookingId }: NewReservationWizardProp
   }, [initialMissingFields.length])
 
   const handleStartInitialReservation = () => {
-    const missing = getInitialReservationGuestMissingFields(guestMode, {
-      selectedCustomerId,
-      guestName,
-      guestPhone,
-      guestNationality,
-    })
-    if (missing.length > 0) {
-      setInitialFlowFieldError(missing)
-      toast.error(`Please fill required fields: ${missing.join(', ')}`)
+    const error = validateGuestStep({ forInitialSave: true })
+    if (error) {
+      const missing = getInitialReservationGuestMissingFields(guestMode, {
+        selectedCustomerId,
+        guestName,
+        guestPhone,
+        guestNationality,
+      })
+      if (missing.length > 0) {
+        setInitialFlowFieldError(missing)
+      }
+      toast.error(error)
       return
     }
     setInitialFlowFieldError(null)
@@ -964,6 +1533,32 @@ export function NewReservationWizard({ editBookingId }: NewReservationWizardProp
 
   if (isEditMode && editBookingLoading && !editDraftLoaded) {
     return <p className="text-sm text-muted-foreground">Loading reservation…</p>
+  }
+
+  if (!isEditMode && flowMode === 'reservation_entry') {
+    return (
+      <div className="space-y-6">
+        <div className="flex flex-wrap gap-2 print:hidden">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setFlowMode('standard')}
+          >
+            Guest reservation
+          </Button>
+          <Button
+            type="button"
+            variant="default"
+            size="sm"
+            className="bg-amber-600 hover:bg-amber-700"
+          >
+            Reservation entry
+          </Button>
+        </div>
+        <ReservationEntryWizard />
+      </div>
+    )
   }
 
   return (
@@ -995,6 +1590,23 @@ export function NewReservationWizard({ editBookingId }: NewReservationWizardProp
           )
         })}
       </div>
+
+      {step < 4 && stepValidationHint && (
+        <div
+          className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950 print:hidden cursor-pointer"
+          role="status"
+          onClick={() => toast.error(stepValidationHint)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault()
+              toast.error(stepValidationHint)
+            }
+          }}
+          tabIndex={0}
+        >
+          {stepValidationHint}
+        </div>
+      )}
 
       {displayStep === 5 && completedReservationId ? (
         <div className="space-y-6">
@@ -1040,14 +1652,54 @@ export function NewReservationWizard({ editBookingId }: NewReservationWizardProp
         <>
           {step === 1 && (
             <div className="space-y-4">
-              {!isEditMode && (
-                <div className="flex gap-2">
+              <Card className="border-violet-200 bg-violet-50/40">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-violet-900">Corporate guest</p>
+                      <p className="text-xs text-muted-foreground">
+                        Company representative — name, company, phone, designation, and address only
+                      </p>
+                    </div>
+                    <Switch
+                      checked={isCorporateGuest}
+                      onCheckedChange={(on) => {
+                        const patch: Partial<GuestDraft> = { isCorporateGuest: on }
+                        if (on) {
+                          patch.companyLedgerId = ''
+                          patch.companions = []
+                          patch.corporateCompanions = buildAdultCompanionSlots(
+                            parseInt(adults, 10) || 1
+                          ).map((_, index) => ({
+                            ...emptyCorporateCompanionDraft(),
+                            ...(corporateCompanions[index] ?? {}),
+                          }))
+                          if (guestCompany === DEFAULT_GUEST_COMPANY) {
+                            patch.guestCompany = ''
+                          }
+                          patch.nidPhysicallyReceived = false
+                        } else {
+                          patch.corporateCompanions = []
+                        }
+                        patchGuest(patch)
+                        if (on) setGuestMode('new')
+                        setIsInitialFlow(false)
+                      }}
+                      aria-label="Corporate guest"
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+
+              {!isEditMode && !isCorporateGuest && (
+                <div className="flex flex-wrap gap-2">
                   <Button
                     type="button"
-                    variant={guestMode === 'new' ? 'default' : 'outline'}
+                    variant={flowMode === 'standard' && guestMode === 'new' ? 'default' : 'outline'}
                     size="sm"
-                    className={guestMode === 'new' ? 'bg-amber-600 hover:bg-amber-700' : ''}
+                    className={flowMode === 'standard' && guestMode === 'new' ? 'bg-amber-600 hover:bg-amber-700' : ''}
                     onClick={() => {
+                      setFlowMode('standard')
                       setGuestMode('new')
                       setIsInitialFlow(false)
                     }}
@@ -1056,23 +1708,49 @@ export function NewReservationWizard({ editBookingId }: NewReservationWizardProp
                   </Button>
                   <Button
                     type="button"
-                    variant={guestMode === 'existing' ? 'default' : 'outline'}
+                    variant={flowMode === 'standard' && guestMode === 'existing' ? 'default' : 'outline'}
                     size="sm"
-                    className={guestMode === 'existing' ? 'bg-amber-600 hover:bg-amber-700' : ''}
-                    onClick={() => setGuestMode('existing')}
+                    className={flowMode === 'standard' && guestMode === 'existing' ? 'bg-amber-600 hover:bg-amber-700' : ''}
+                    onClick={() => {
+                      setFlowMode('standard')
+                      setGuestMode('existing')
+                      setIsInitialFlow(false)
+                    }}
                   >
                     Existing guest
                   </Button>
+                  <Button
+                    type="button"
+                    variant={flowMode === 'reservation_entry' ? 'default' : 'outline'}
+                    size="sm"
+                    className={flowMode === 'reservation_entry' ? 'bg-amber-600 hover:bg-amber-700' : ''}
+                    onClick={() => setFlowMode('reservation_entry')}
+                  >
+                    Reservation entry
+                  </Button>
                 </div>
               )}
-              {isEditMode && (
+              {isEditMode && !isCorporateGuest && (
                 <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-                  Editing initial reservation — fill all fields marked * (NID, email, address,
-                  registration number, and ID images), then use Complete reservation before check-in.
+                  {editFromReservationEntry && nidPhysicallyReceived ? (
+                    <>
+                      This room was converted from a multi-room reservation entry —{' '}
+                      <strong>ID physically received</strong> is on. Enter this guest&apos;s real
+                      name, phone, and ID/passport (walk-in only), then save. Upload scanned ID
+                      from the bookings list before checkout.
+                    </>
+                  ) : (
+                    <>
+                      Editing initial reservation — fill all fields marked * (
+                      {idNumberRequired ? 'ID / passport number, ' : ''}
+                      {nidPhysicallyReceived ? '' : 'email, address, '}
+                      and ID documents if applicable), then use Complete reservation before check-in.
+                    </>
+                  )}
                 </div>
               )}
 
-              {guestMode === 'existing' && (
+              {!isCorporateGuest && guestMode === 'existing' && (
                 <>
                   <GuestSearchField
                     selectedId={selectedCustomerId}
@@ -1094,6 +1772,92 @@ export function NewReservationWizard({ editBookingId }: NewReservationWizardProp
 
               {showGuestDetails && (
                 <>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>Adults *</Label>
+                      <Input
+                        type="number"
+                        min={1}
+                        value={adults}
+                        onChange={(e) => patchGuestStayCounts(e.target.value, children)}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Children</Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        value={children}
+                        onChange={(e) => patchGuestStayCounts(adults, e.target.value)}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Count only — no guest details required for children.
+                      </p>
+                    </div>
+                  </div>
+
+                  {isCorporateGuest ? (
+                    <>
+                      <CorporateCompanionGuestFields
+                        label="Person 1 (Primary guest)"
+                        value={{
+                          name: guestName,
+                          company: guestCompany,
+                          phone: guestPhone,
+                          designation: guestDesignation,
+                          address: guestAddress,
+                        }}
+                        onChange={(patch) =>
+                          patchGuest({
+                            ...(patch.name !== undefined ? { guestName: patch.name } : {}),
+                            ...(patch.company !== undefined ? { guestCompany: patch.company } : {}),
+                            ...(patch.phone !== undefined ? { guestPhone: patch.phone } : {}),
+                            ...(patch.designation !== undefined
+                              ? { guestDesignation: patch.designation }
+                              : {}),
+                            ...(patch.address !== undefined ? { guestAddress: patch.address } : {}),
+                          })
+                        }
+                      />
+                      {buildAdultCompanionSlots(parseInt(adults, 10) || 1).map((slot, index) => (
+                        <CorporateCompanionGuestFields
+                          key={`${slot.companionType}-${index}`}
+                          label={`Person ${index + 2} (${slot.label})`}
+                          value={corporateCompanions[index] ?? emptyCorporateCompanionDraft()}
+                          onChange={(patch) => {
+                            const next = [...corporateCompanions]
+                            next[index] = {
+                              ...(next[index] ?? emptyCorporateCompanionDraft()),
+                              ...patch,
+                            }
+                            patchGuest({ corporateCompanions: next })
+                          }}
+                        />
+                      ))}
+                    </>
+                  ) : (
+                    <>
+                  <Card className="border-sky-200 bg-sky-50/40">
+                    <CardContent className="p-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold text-sky-900">ID documents physically received</p>
+                          <p className="text-xs text-muted-foreground">
+                            When on, upload ID documents from the bookings list before checkout.
+                            {hasCompanySelected
+                              ? ' Company guests do not need ID/passport numbers here.'
+                              : ' Direct/walk-in guests must enter ID/passport details.'}
+                          </p>
+                        </div>
+                        <Switch
+                          checked={nidPhysicallyReceived}
+                          onCheckedChange={(on) => patchGuest({ nidPhysicallyReceived: on })}
+                          aria-label="ID documents physically received"
+                        />
+                      </div>
+                    </CardContent>
+                  </Card>
+
                   {existingDocsStatus === 'loading' && (
                     <p className="text-sm text-muted-foreground">Loading previous ID files…</p>
                   )}
@@ -1115,7 +1879,7 @@ export function NewReservationWizard({ editBookingId }: NewReservationWizardProp
                   {isInitialFlow && showInitialReservationOption && (
                     <div className="rounded-md border border-sky-300 bg-sky-50 px-3 py-2 text-sm text-sky-900">
                       <strong>Initial reservation</strong> — guest name, phone, and nationality for
-                      now. NID and ID images can be added later before check-in. Missing fields will
+                      now. ID documents can be added later before check-in. Missing fields will
                       show on the confirmation document.
                     </div>
                   )}
@@ -1131,14 +1895,12 @@ export function NewReservationWizard({ editBookingId }: NewReservationWizardProp
                     <p className="text-sm font-medium text-foreground">ID document images *</p>
                   )}
 
+                  {!nidPhysicallyReceived && (
                   <IdDocumentScanner
                 nationality={guestNationality}
                 idType={idType}
                 onIdTypeChange={(type) => {
-                  patchGuest({
-                    idType: type,
-                    visaExpiryDate: type === 'passport' ? visaExpiryDate : '',
-                  })
+                  patchGuest({ idType: type })
                   if (idDocuments.length > 0 || idNumber.trim()) {
                     setIsInitialFlow(false)
                     setIdEntryStarted(true)
@@ -1161,6 +1923,9 @@ export function NewReservationWizard({ editBookingId }: NewReservationWizardProp
                   }
                 }}
               />
+                  )}
+
+              <p className="text-sm font-semibold text-foreground">Person 1 (Primary guest)</p>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div className="space-y-1">
@@ -1197,7 +1962,7 @@ export function NewReservationWizard({ editBookingId }: NewReservationWizardProp
                     </div>
                     <div className="space-y-1">
                       <Label>
-                        NID / Passport number{showCompleteRequiredMarkers ? ' *' : ''}
+                        ID / Passport number{idNumberRequired ? ' *' : ''}
                       </Label>
                       <Input
                         value={idNumber}
@@ -1213,28 +1978,6 @@ export function NewReservationWizard({ editBookingId }: NewReservationWizardProp
                         }}
                       />
                     </div>
-                    {idType === 'passport' && (
-                      <div className="space-y-1">
-                        <Label>
-                          Visa expiry date{showCompleteRequiredMarkers ? ' *' : ''}
-                        </Label>
-                        <Input
-                          type="date"
-                          value={visaExpiryDate}
-                          onChange={(e) => patchGuest({ visaExpiryDate: e.target.value })}
-                        />
-                      </div>
-                    )}
-                    <div className="space-y-1">
-                      <Label>
-                        Registration number{showCompleteRequiredMarkers ? ' *' : ''}
-                      </Label>
-                      <Input
-                        value={registrationNumber}
-                        onChange={(e) => patchGuest({ registrationNumber: e.target.value })}
-                        placeholder="Guest registration / reference no."
-                      />
-                    </div>
                     <div className="space-y-1">
                       <Label>Phone *</Label>
                       <Input
@@ -1244,19 +1987,15 @@ export function NewReservationWizard({ editBookingId }: NewReservationWizardProp
                       />
                     </div>
                     <div className="space-y-1">
-                      <Label>Email{showCompleteRequiredMarkers ? ' *' : ''}</Label>
+                      <Label>Email{emailAddressRequired ? ' *' : ''}</Label>
                       <EmailInput
                         value={guestEmail}
                         onChange={(email) => patchGuest({ guestEmail: email })}
-                        optional={!showCompleteRequiredMarkers}
-                        allowUnverifiedMailbox
-                        onValidationChange={(result) => {
-                          setGuestEmailVerificationToken(result.verificationToken ?? null)
-                        }}
+                        optional={!emailAddressRequired}
                       />
                     </div>
-                    <div className="space-y-1 sm:col-span-2">
-                      <Label>Address{showCompleteRequiredMarkers ? ' *' : ''}</Label>
+                    <div className="space-y-1">
+                      <Label>Address{emailAddressRequired ? ' *' : ''}</Label>
                       <Input
                         value={guestAddress}
                         onChange={(e) => patchGuest({ guestAddress: e.target.value })}
@@ -1265,6 +2004,10 @@ export function NewReservationWizard({ editBookingId }: NewReservationWizardProp
                 {idDocuments.length > 0 ? (
                   <p className="text-xs text-emerald-600 sm:col-span-2">
                     {idDocuments.length} ID image(s) attached — included on confirmation page 2
+                  </p>
+                ) : nidPhysicallyReceived ? (
+                  <p className="text-xs text-sky-700 sm:col-span-2">
+                    Physical ID documents will be collected — upload scanned copies from the bookings list before checkout.
                   </p>
                 ) : isInitialFlow ? (
                   <p className="text-xs text-sky-700 sm:col-span-2">
@@ -1277,6 +2020,28 @@ export function NewReservationWizard({ editBookingId }: NewReservationWizardProp
                   </p>
                 )}
               </div>
+
+              {!isCorporateGuest && buildAdultCompanionSlots(parseInt(adults, 10) || 1).length > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  Additional guests (children are recorded by count only).
+                </p>
+              )}
+              {!isCorporateGuest &&
+                buildAdultCompanionSlots(parseInt(adults, 10) || 1).map((slot, index) => (
+                  <CompanionGuestFields
+                    key={`${slot.companionType}-${index}`}
+                    label={slot.label}
+                    value={companions[index] ?? emptyCompanionDraft()}
+                    requireId={!hasCompanySelected}
+                    onChange={(patch) => {
+                      const next = [...companions]
+                      next[index] = { ...(next[index] ?? emptyCompanionDraft()), ...patch }
+                      patchGuest({ companions: next })
+                    }}
+                  />
+                ))}
+                    </>
+                  )}
                 </>
               )}
               {showInitialReservationOption && (
@@ -1302,7 +2067,7 @@ export function NewReservationWizard({ editBookingId }: NewReservationWizardProp
                   </Button>
                   <p className="text-xs text-muted-foreground text-center">
                     Requires full name, phone, and nationality
-                    {guestMode === 'existing' ? ', and guest selection' : ''}. NID and ID images can
+                    {guestMode === 'existing' ? ', and guest selection' : ''}. ID documents can
                     be added later.
                   </p>
                 </>
@@ -1348,40 +2113,82 @@ export function NewReservationWizard({ editBookingId }: NewReservationWizardProp
                   </p>
                 </div>
               </div>
-              <div className="space-y-2">
-                <Label>Room *</Label>
-                <Select
-                  value={selectedRoomId}
-                  onValueChange={(value) => patchStay({ selectedRoomId: value })}
-                  disabled={!datesValid || roomsLoading}
-                >
-                  <SelectTrigger>
-                    <SelectValue
-                      placeholder={
-                        !datesValid
-                          ? 'Select valid check-in and check-out dates'
-                          : roomsLoading
-                            ? 'Loading available rooms...'
-                            : availableRooms.length === 0
-                              ? 'No rooms available for these dates'
-                              : 'Choose room'
-                      }
-                    />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {availableRooms.map((r) => (
-                      <SelectItem key={r.id} value={r.id}>
-                        Room {r.roomNumber} — {r.type.name} (৳{r.type.basePrice}/night)
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {datesValid && !roomsLoading && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Room *</Label>
+                  <Select
+                    value={selectedRoomId}
+                    onValueChange={(value) => patchStay({ selectedRoomId: value })}
+                    disabled={!datesValid || roomsLoading}
+                  >
+                    <SelectTrigger>
+                      <SelectValue
+                        placeholder={
+                          !datesValid
+                            ? 'Select valid check-in and check-out dates'
+                            : roomsLoading
+                              ? 'Loading available rooms...'
+                              : availableRooms.length === 0
+                                ? 'No rooms available for these dates'
+                                : 'Choose room'
+                        }
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {availableRooms.map((r) => {
+                        const cap = categoryCapacityByType.get(r.typeId)
+                        const availHint =
+                          cap && cap.entryHeld > 0
+                            ? ` · ${cap.available}/${cap.total} available`
+                            : ''
+                        return (
+                          <SelectItem key={r.id} value={r.id}>
+                            Room {r.roomNumber} — {r.type.name}
+                            {availHint}
+                          </SelectItem>
+                        )
+                      })}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Room rent</Label>
+                  <Input
+                    readOnly
+                    tabIndex={-1}
+                    value={
+                      selectedStayRoom
+                        ? `৳${getRoomNightlyTotal(selectedStayRoom).toLocaleString()} / night (incl.)`
+                        : 'Select a room to see rent'
+                    }
+                    className="bg-muted/40 cursor-default focus-visible:ring-0"
+                  />
                   <p className="text-xs text-muted-foreground">
-                    {availableRooms.length} room{availableRooms.length === 1 ? '' : 's'} available for this stay
+                    Inclusive of VAT & service charge
                   </p>
-                )}
+                </div>
               </div>
+              {datesValid && !roomsLoading && (
+                <div className="space-y-1 text-xs text-muted-foreground">
+                  <p>
+                    {availableRooms.length} room{availableRooms.length === 1 ? '' : 's'} available for
+                    this stay
+                  </p>
+                  {(roomsData as { meta?: { categoryCapacity?: Array<{
+                    typeName: string
+                    total: number
+                    available: number
+                    entryHeld: number
+                  }> } })?.meta?.categoryCapacity
+                    ?.filter((row) => row.entryHeld > 0)
+                    .map((row) => (
+                      <p key={row.typeName}>
+                        {row.typeName}: {row.available} bookable · {row.entryHeld} held by reservation
+                        entries (of {row.total})
+                      </p>
+                    ))}
+                </div>
+              )}
               <Card className="border-amber-200 bg-amber-50/40">
                 <CardContent className="p-4 space-y-2">
                   <div className="flex items-center justify-between gap-3">
@@ -1417,31 +2224,11 @@ export function NewReservationWizard({ editBookingId }: NewReservationWizardProp
                   </p>
                 </CardContent>
               </Card>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Adults</Label>
-                  <Input
-                    type="number"
-                    min={1}
-                    value={adults}
-                    onChange={(e) => patchStay({ adults: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Children</Label>
-                  <Input
-                    type="number"
-                    min={0}
-                    value={children}
-                    onChange={(e) => patchStay({ children: e.target.value })}
-                  />
-                </div>
-              </div>
               {estimatedRoomCharge() > 0 && (
                 <Card className="bg-amber-50 border-amber-200">
                   <CardContent className="p-3 text-sm font-medium text-amber-800">
-                    Estimated total: ৳{estimatedTotals().totalWithVat.toLocaleString()}
-                    {` (incl. VAT ${effectiveVatPercent()}%)`}
+                    Estimated room total: ৳{estimatedTotals().totalWithVat.toLocaleString()}
+                    {' '}(inclusive rate — VAT & service charge included)
                   </CardContent>
                 </Card>
               )}
@@ -1450,64 +2237,13 @@ export function NewReservationWizard({ editBookingId }: NewReservationWizardProp
 
           {step === 3 && (
             <div className="space-y-4">
-              <Card className="border-amber-200 bg-amber-50/40">
-                <CardContent className="p-4 space-y-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-semibold text-amber-900">VAT</p>
-                      <p className="text-xs text-muted-foreground">
-                        Applied at {effectiveVatPercent()}%
-                        {!vatEditEnabled ? ' (from settings)' : ' (custom rate)'}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-muted-foreground">Edit</span>
-                      <span className="text-xs font-medium text-amber-900 min-w-[22px]">
-                        {vatEditEnabled ? 'On' : 'Off'}
-                      </span>
-                      <Switch
-                        checked={vatEditEnabled}
-                        onCheckedChange={(on) => {
-                          patchPayment({
-                            vatEditEnabled: on,
-                            ...(on && (!vatPercent || vatPercent === '0')
-                              ? { vatPercent: String(defaultVatPercent) }
-                              : {}),
-                          })
-                        }}
-                      />
-                    </div>
-                  </div>
-                  {vatEditEnabled ? (
-                    <div className="space-y-1">
-                      <Label className="text-xs">VAT rate (%)</Label>
-                      <Input
-                        type="number"
-                        min={0}
-                        max={100}
-                        step={VAT_PERCENT_INPUT_STEP}
-                        value={vatPercent}
-                        onChange={(e) => patchPayment({ vatPercent: e.target.value })}
-                        className="h-9 bg-card"
-                      />
-                      <p className="text-[11px] text-muted-foreground">
-                        Override the default rate for this reservation only.
-                      </p>
-                    </div>
-                  ) : (
-                    <p className="text-[11px] text-muted-foreground">
-                      Turn <strong>Edit</strong> on to change the VAT rate for this booking.
-                    </p>
-                  )}
-                </CardContent>
-              </Card>
               <Card className="border-emerald-200 bg-emerald-50/40">
                 <CardContent className="p-4 space-y-3">
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <p className="text-sm font-semibold text-emerald-900">Discount</p>
                       <p className="text-xs text-muted-foreground">
-                        Applied to room charge before VAT
+                        Applied to the inclusive room charge
                       </p>
                     </div>
                     <Switch
@@ -1556,23 +2292,64 @@ export function NewReservationWizard({ editBookingId }: NewReservationWizardProp
                   )}
                 </CardContent>
               </Card>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <Card className="border-violet-200 bg-violet-50/40">
+                <CardContent className="p-4 space-y-3">
+                  <div className="flex flex-wrap items-end gap-3">
+                    <div className="flex items-center gap-2 pb-1">
+                      <Switch
+                        checked={chargesEditEnabled}
+                        onCheckedChange={(on) => patchPayment({ chargesEditEnabled: on })}
+                        aria-label="Edit VAT and service charge"
+                      />
+                      <Label className="text-sm font-semibold text-violet-900">Edit charges</Label>
+                    </div>
+                    <div className="space-y-1 min-w-[7rem]">
+                      <Label className="text-xs">VAT %</Label>
+                      <Input
+                        type="text"
+                        inputMode="decimal"
+                        disabled={!chargesEditEnabled}
+                        value={vatPercent}
+                        onChange={(e) => patchPayment({ vatPercent: e.target.value })}
+                        className="h-9 bg-card"
+                      />
+                    </div>
+                    <div className="space-y-1 min-w-[7rem]">
+                      <Label className="text-xs">Service %</Label>
+                      <Input
+                        type="text"
+                        inputMode="decimal"
+                        disabled={!chargesEditEnabled}
+                        value={serviceChargePercent}
+                        onChange={(e) => patchPayment({ serviceChargePercent: e.target.value })}
+                        className="h-9 bg-card"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Turn on Edit charges to override VAT and service percentages on this reservation.
+                  </p>
+                </CardContent>
+              </Card>
+              <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] gap-3 items-end">
                 <div className="space-y-2">
-                  <Label>Advance payment (BDT)</Label>
+                  <Label htmlFor="reservation-payment-amount">Payment amount (BDT)</Label>
                   <Input
+                    id="reservation-payment-amount"
                     type="number"
                     min={0}
+                    className="h-10"
                     value={advancePayment}
                     onChange={(e) => patchPayment({ advancePayment: e.target.value })}
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label>Form of payment</Label>
+                  <Label htmlFor="reservation-payment-method">Form of payment</Label>
                   <Select
                     value={advancePaymentMethod}
                     onValueChange={(value) => patchPayment({ advancePaymentMethod: value })}
                   >
-                    <SelectTrigger>
+                    <SelectTrigger id="reservation-payment-method" className="h-10 w-full">
                       <SelectValue placeholder="Select method" />
                     </SelectTrigger>
                     <SelectContent>
@@ -1583,11 +2360,32 @@ export function NewReservationWizard({ editBookingId }: NewReservationWizardProp
                       ))}
                     </SelectContent>
                   </Select>
-                  <p className="text-[11px] text-muted-foreground">
-                    Shown on the reservation confirmation (print/PDF).
-                  </p>
                 </div>
+                <Button
+                  type="button"
+                  className="h-10 w-full bg-emerald-600 hover:bg-emerald-700 text-white sm:w-auto sm:min-w-[5.5rem]"
+                  onClick={handleRecordPayment}
+                >
+                  Pay
+                </Button>
               </div>
+              {paymentLines.length > 0 && (
+                <Card className="border-emerald-200">
+                  <CardContent className="p-3 space-y-2">
+                    <p className="text-sm font-semibold text-emerald-900">Payments recorded</p>
+                    {paymentLines.map((line) => (
+                      <div key={line.id} className="flex justify-between text-sm">
+                        <span>{formatPaymentMethod(line.method)}</span>
+                        <span className="font-medium">৳{line.amount.toLocaleString()}</span>
+                      </div>
+                    ))}
+                    <div className="flex justify-between text-sm font-semibold border-t pt-2">
+                      <span>Total paid</span>
+                      <span>৳{totalAdvancePaid().toLocaleString()}</span>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
               <Card className="bg-muted/50">
                 <CardContent className="p-4 space-y-2 text-sm">
                   <div className="flex justify-between">
@@ -1603,28 +2401,28 @@ export function NewReservationWizard({ editBookingId }: NewReservationWizardProp
                       <span>-৳{estimatedTotals().discountAmount.toLocaleString()}</span>
                     </div>
                   )}
-                  <div className="flex justify-between">
-                    <span>VAT ({effectiveVatPercent()}%)</span>
-                    <span>৳{estimatedTotals().vatAmount.toLocaleString()}</span>
+                  <div className="flex justify-between text-muted-foreground">
+                    <span>VAT ({chargesEditEnabled ? vatPercent : 'incl.'}%)</span>
+                    <span>
+                      {chargesEditEnabled && estimatedTotals().vatAmount > 0
+                        ? `৳${estimatedTotals().vatAmount.toLocaleString()}`
+                        : 'Included'}
+                    </span>
                   </div>
-                  <div className="flex justify-between">
-                    <span>Total (incl. VAT)</span>
+                  <div className="flex justify-between text-muted-foreground">
+                    <span>Service ({serviceChargePercent}%)</span>
+                    <span>Included in rate</span>
+                  </div>
+                  <div className="flex justify-between font-medium border-t pt-2">
+                    <span>Room total</span>
                     <span>৳{estimatedTotals().totalWithVat.toLocaleString()}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span>Advance paid</span>
-                    <span>৳{(parseFloat(advancePayment) || 0).toLocaleString()}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Form of payment</span>
-                    <span>
-                      {(parseFloat(advancePayment) || 0) > 0 && advancePaymentMethod !== 'NONE'
-                        ? formatPaymentMethod(advancePaymentMethod)
-                        : 'Not paid at booking'}
-                    </span>
+                    <span>Total paid</span>
+                    <span>৳{totalAdvancePaid().toLocaleString()}</span>
                   </div>
                   <div className="flex justify-between font-bold border-t pt-2">
-                    <span>Due (incl. VAT)</span>
+                    <span>Due</span>
                     <span className="text-red-600">
                       ৳{estimatedTotals().dueAmount.toLocaleString()}
                     </span>
@@ -1645,6 +2443,14 @@ export function NewReservationWizard({ editBookingId }: NewReservationWizardProp
           {step === 4 && (
             <Card>
               <CardContent className="p-4 space-y-2 text-sm">
+                {stepValidationHint && (
+                  <div
+                    className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-900"
+                    role="alert"
+                  >
+                    {stepValidationHint}
+                  </div>
+                )}
                 <h3 className="font-semibold">Reservation summary</h3>
                 <div className="grid grid-cols-2 gap-2">
                   <span className="text-muted-foreground">Guest</span>
@@ -1652,15 +2458,44 @@ export function NewReservationWizard({ editBookingId }: NewReservationWizardProp
                     {guestName || '—'}
                   </span>
                   <span className="text-muted-foreground">Company</span>
-                  <span>{formatGuestCompany(guestCompany)}</span>
+                  <span>{isCorporateGuest ? guestCompany || '—' : formatGuestCompany(guestCompany)}</span>
+                  {isCorporateGuest && (
+                    <>
+                      <span className="text-muted-foreground">Designation</span>
+                      <span>{guestDesignation || '—'}</span>
+                      <span className="text-muted-foreground">Phone</span>
+                      <span>{guestPhone || '—'}</span>
+                      <span className="text-muted-foreground">Address</span>
+                      <span>{guestAddress || '—'}</span>
+                    </>
+                  )}
+                  <span className="text-muted-foreground">Adults</span>
+                  <span>{adults}</span>
+                  <span className="text-muted-foreground">Children</span>
+                  <span>{children}</span>
                   <span className="text-muted-foreground">Room</span>
                   <span>{availableRooms.find((r) => r.id === selectedRoomId)?.roomNumber}</span>
                   <span className="text-muted-foreground">Check-in</span>
-                  <span>{checkInDate ? formatCheckIn(checkInDate) : '—'}</span>
+                  <span>{checkInDate ? formatBookingDateOnly(checkInDate) : '—'}</span>
                   <span className="text-muted-foreground">Check-out</span>
-                  <span>{checkOutDate ? formatCheckOut(checkOutDate) : '—'}</span>
+                  <span>{checkOutDate ? formatBookingDateOnly(checkOutDate) : '—'}</span>
+                  <span className="text-muted-foreground">Nights</span>
+                  <span>
+                    {datesValid
+                      ? countHotelStayNights(
+                          applyHotelTimeToBookingInput(checkInDate, times.checkInTime),
+                          applyHotelTimeToBookingInput(checkOutDate, times.checkOutTime)
+                        )
+                      : '—'}
+                  </span>
                   <span className="text-muted-foreground">Meal plan</span>
                   <span>{formatReservationMealPlan(withMeal)}</span>
+                  <span className="text-muted-foreground">VAT / Service</span>
+                  <span>
+                    {chargesEditEnabled
+                      ? `${vatPercent}% VAT · ${serviceChargePercent}% service`
+                      : 'Included in room rate'}
+                  </span>
                   {discountEnabled && estimatedTotals().discountAmount > 0 && (
                     <>
                       <span className="text-muted-foreground">Discount</span>
@@ -1679,14 +2514,18 @@ export function NewReservationWizard({ editBookingId }: NewReservationWizardProp
                   <span className="text-red-600 font-medium">
                     ৳{estimatedTotals().dueAmount.toLocaleString()}
                   </span>
-                  <span className="text-muted-foreground">Advance paid</span>
-                  <span>৳{(parseFloat(advancePayment) || 0).toLocaleString()}</span>
-                  <span className="text-muted-foreground">Form of payment</span>
-                  <span>
-                    {(parseFloat(advancePayment) || 0) > 0
-                      ? formatPaymentMethod(advancePaymentMethod)
-                      : 'Not paid at booking'}
-                  </span>
+                  <span className="text-muted-foreground">Total paid</span>
+                  <span>৳{totalAdvancePaid().toLocaleString()}</span>
+                  {paymentLines.length > 0 && (
+                    <>
+                      <span className="text-muted-foreground">Payments</span>
+                      <span>
+                        {paymentLines
+                          .map((p) => `${formatPaymentMethod(p.method)} ৳${p.amount.toLocaleString()}`)
+                          .join(' · ')}
+                      </span>
+                    </>
+                  )}
                 </div>
                 <p className="text-xs text-muted-foreground pt-2">
                   {isInitialFlow && !hasRequiredIdDocs ? (
@@ -1720,9 +2559,10 @@ export function NewReservationWizard({ editBookingId }: NewReservationWizardProp
             )}
             {step < 4 ? (
               <Button
-                className="bg-amber-600 hover:bg-amber-700 text-white ml-auto"
+                type="button"
+                className="bg-amber-600 hover:bg-amber-700 text-white ml-auto disabled:opacity-50"
                 disabled={!canProceedToNextStep}
-                onClick={() => setStep(Math.min(4, step + 1))}
+                onClick={handleNextStep}
               >
                 Next
               </Button>
@@ -1740,7 +2580,7 @@ export function NewReservationWizard({ editBookingId }: NewReservationWizardProp
                     </Button>
                     <Button
                       className="bg-amber-600 hover:bg-amber-700 text-white"
-                      disabled={isSubmitting || !canCompleteReservation}
+                      disabled={isSubmitting}
                       onClick={handleCompleteInitial}
                     >
                       {isSubmitting ? 'Please wait...' : 'Complete reservation'}

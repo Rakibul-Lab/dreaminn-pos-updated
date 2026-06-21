@@ -22,8 +22,6 @@ import {
   Plus,
   Search,
   Phone,
-  Mail,
-  MapPin,
   History,
   FileDown,
   Loader2,
@@ -31,21 +29,21 @@ import {
   CalendarRange,
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { StatusBadge } from '../shared/StatusBadge';
 import { NationalityField } from '../shared/NationalityField';
 import { getPaginationPages } from '@/lib/pagination-pages';
 import { cn } from '@/lib/utils';
 import { useHotelTimes } from '@/hooks/use-hotel-times';
-import { formatGuestId, getIdTypeOptionsForNationality } from '@/lib/id-type-label';
+import { formatGuestId, getIdTypeOptionsForNationality, DEFAULT_NATIONALITY, defaultIdTypeForNationality } from '@/lib/id-type-label';
 import { formatListBookingCheckIn, formatListBookingCheckOut } from '@/lib/hotel-times';
-import { downloadGuestHistoryPdf } from '@/lib/guest-history-export';
 import { useAuthStore, canAccessAdmin } from '@/lib/auth-store';
+import { GuestHistoryDialog } from './GuestHistoryDialog';
 import {
   BOOKING_DATE_PRESET_OPTIONS,
   buildGuestsExportFilterLabels,
-  resolveBookingDateRange,
+  resolveBookingDateRangeWithBusinessDate,
   type BookingDatePreset,
 } from '@/lib/booking-date-filter';
+import { useBusinessDate } from '@/hooks/use-business-date';
 import {
   buildGuestsExportQuery,
   downloadGuestsExcel,
@@ -77,7 +75,7 @@ interface Customer {
 }
 
 export function CustomersPage() {
-  const { times, formatCheckIn, formatCheckOut } = useHotelTimes();
+  const { times } = useHotelTimes();
   const queryClient = useQueryClient();
   const user = useAuthStore((s) => s.user);
   const isAdmin = canAccessAdmin(user?.role);
@@ -85,7 +83,7 @@ export function CustomersPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
-  const [datePreset, setDatePreset] = useState<BookingDatePreset>('today');
+  const [datePreset, setDatePreset] = useState<BookingDatePreset>('all');
   const [customDateFrom, setCustomDateFrom] = useState('');
   const [customDateTo, setCustomDateTo] = useState('');
   const [exporting, setExporting] = useState<'excel' | 'pdf' | null>(null);
@@ -98,23 +96,24 @@ export function CustomersPage() {
     return () => window.clearTimeout(timer);
   }, [searchInput]);
 
+  const { data: businessDateRes } = useBusinessDate();
+  const businessDate = businessDateRes?.data?.businessDate;
+
   const dateRange = useMemo(
-    () => resolveBookingDateRange(datePreset, customDateFrom, customDateTo),
-    [datePreset, customDateFrom, customDateTo]
+    () => resolveBookingDateRangeWithBusinessDate(datePreset, customDateFrom, customDateTo, businessDate),
+    [datePreset, customDateFrom, customDateTo, businessDate]
   );
 
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [historyCustomer, setHistoryCustomer] = useState<Customer | null>(null);
-  const [exportingHistoryPdf, setExportingHistoryPdf] = useState(false);
+  const [historyCustomerId, setHistoryCustomerId] = useState<string | null>(null);
 
   const [formName, setFormName] = useState('');
   const [formPhone, setFormPhone] = useState('');
   const [formEmail, setFormEmail] = useState('');
   const [formEmailBlocking, setFormEmailBlocking] = useState(false);
-  const [formEmailVerificationToken, setFormEmailVerificationToken] = useState<string | null>(null);
   const [formAddress, setFormAddress] = useState('');
-  const [formNationality, setFormNationality] = useState('');
-  const [formIdType, setFormIdType] = useState('');
+  const [formNationality, setFormNationality] = useState(DEFAULT_NATIONALITY);
+  const [formIdType, setFormIdType] = useState('national_id');
   const [formIdNumber, setFormIdNumber] = useState('');
   const [formNotes, setFormNotes] = useState('');
 
@@ -127,8 +126,8 @@ export function CustomersPage() {
     setFormNationality(value);
     setFormIdType((current) => {
       const options = getIdTypeOptionsForNationality(value);
-      if (current && !options.some((opt) => opt.value === current)) return '';
-      return current;
+      if (current && options.some((opt) => opt.value === current)) return current;
+      return defaultIdTypeForNationality(value);
     });
   }, []);
 
@@ -151,12 +150,6 @@ export function CustomersPage() {
   const rangeStart = total === 0 ? 0 : (page - 1) * pageSize + 1;
   const rangeEnd = Math.min(page * pageSize, total);
   const pageNumbers = getPaginationPages(page, totalPages);
-
-  const { data: customerBookings, isLoading: historyBookingsLoading } = useQuery({
-    queryKey: ['customer-bookings', historyCustomer?.id],
-    queryFn: () => api.get(`/bookings?customerId=${historyCustomer?.id}&limit=50`),
-    enabled: !!historyCustomer?.id,
-  });
 
   const createMutation = useMutation({
     mutationFn: (body: any) => api.post('/customers', body),
@@ -181,10 +174,9 @@ export function CustomersPage() {
     setFormName('');
     setFormPhone('');
     setFormEmail('');
-    setFormEmailVerificationToken(null);
     setFormAddress('');
-    setFormNationality('');
-    setFormIdType('');
+    setFormNationality(DEFAULT_NATIONALITY);
+    setFormIdType('national_id');
     setFormIdNumber('');
     setFormNotes('');
   };
@@ -203,7 +195,6 @@ export function CustomersPage() {
       name: formName,
       phone: formPhone,
       email: formEmail || null,
-      emailVerificationToken: formEmailVerificationToken || undefined,
       address: formAddress || null,
       nationality: formNationality || null,
       idType: formIdType || null,
@@ -222,34 +213,6 @@ export function CustomersPage() {
   const formatStayCheckOut = (stay: GuestStay | null | undefined) => {
     if (!stay) return '—';
     return formatListBookingCheckOut(stay, times, true);
-  };
-
-  const historyBookings = ((customerBookings as any)?.data || []) as Array<{
-    id: string
-    confirmationNumber?: string | null
-    status: string
-    checkIn: string
-    checkOut: string
-    actualCheckIn?: string | null
-    actualCheckOut?: string | null
-    totalRoomCharge: number
-    totalWithVat?: number
-    dueAmount?: number
-    room?: { roomNumber: string; type?: { name: string } }
-  }>;
-
-  const handleExportHistoryPdf = async () => {
-    if (!historyCustomer) return;
-    setExportingHistoryPdf(true);
-    const toastId = toast.loading('Generating PDF…');
-    try {
-      await downloadGuestHistoryPdf(historyCustomer, historyBookings, times);
-      toast.success('Guest history exported to PDF', { id: toastId });
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to export PDF', { id: toastId });
-    } finally {
-      setExportingHistoryPdf(false);
-    }
   };
 
   const buildExportMeta = () => ({
@@ -361,7 +324,7 @@ export function CustomersPage() {
         <div className="relative flex-1 min-w-[200px] max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Search name, mobile, email, ID, address, nationality…"
+            placeholder="Search name, mobile, reg. no., email, ID, address…"
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
             className="pl-9"
@@ -508,7 +471,7 @@ export function CustomersPage() {
                         variant="outline"
                         size="sm"
                         className="h-7 gap-1 px-2 text-xs"
-                        onClick={() => setHistoryCustomer(customer)}
+                        onClick={() => setHistoryCustomerId(customer.id)}
                       >
                         <History className="h-3.5 w-3.5" />
                         History
@@ -621,7 +584,6 @@ export function CustomersPage() {
                 placeholder="email@example.com"
                 onValidationChange={(result) => {
                   setFormEmailBlocking(result.isBlocking);
-                  setFormEmailVerificationToken(result.verificationToken ?? null);
                 }}
               />
             </div>
@@ -673,107 +635,11 @@ export function CustomersPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={!!historyCustomer} onOpenChange={() => setHistoryCustomer(null)}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <History className="h-5 w-5 text-amber-600" />
-              Guest History
-            </DialogTitle>
-          </DialogHeader>
-          {historyCustomer && (
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <h3 className="text-lg font-semibold">{historyCustomer.name}</h3>
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Phone className="w-4 h-4" />
-                  {historyCustomer.phone}
-                </div>
-                {historyCustomer.email && (
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <Mail className="w-4 h-4" />
-                    {historyCustomer.email}
-                  </div>
-                )}
-                {historyCustomer.address && (
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <MapPin className="w-4 h-4" />
-                    {historyCustomer.address}
-                  </div>
-                )}
-                {historyCustomer.nationality && (
-                  <p className="text-sm text-muted-foreground">
-                    Nationality: <span className="text-foreground">{historyCustomer.nationality}</span>
-                  </p>
-                )}
-              </div>
-              {(historyCustomer.idType || historyCustomer.idNumber) && (
-                <div className="text-sm">
-                  <span className="text-muted-foreground">ID: </span>
-                  <span className="font-medium">
-                    {formatGuestId(historyCustomer.idType, historyCustomer.idNumber)}
-                  </span>
-                </div>
-              )}
-              {historyCustomer.stay && (
-                <div className="rounded-lg border bg-muted/40 p-3 text-sm space-y-1">
-                  <p>
-                    <span className="text-muted-foreground">Current check-in: </span>
-                    {formatStayCheckIn(historyCustomer.stay)}
-                  </p>
-                  <p>
-                    <span className="text-muted-foreground">Current check-out: </span>
-                    {formatStayCheckOut(historyCustomer.stay)}
-                  </p>
-                </div>
-              )}
-
-              <div>
-                <h4 className="text-sm font-semibold mb-2">Reservation history</h4>
-                <div className="max-h-48 overflow-y-auto custom-scrollbar">
-                  {historyBookings.length > 0 ? (
-                    <div className="space-y-2">
-                      {historyBookings.map((booking) => (
-                        <div key={booking.id} className="flex items-center justify-between p-2 bg-muted/50 rounded-lg text-sm">
-                          <div>
-                            <p className="font-medium">Room {booking.room?.roomNumber}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {formatCheckIn(booking.checkIn)} – {formatCheckOut(booking.checkOut)}
-                            </p>
-                          </div>
-                          <div className="text-right">
-                            <p className="font-medium">৳{booking.totalRoomCharge}</p>
-                            <StatusBadge status={booking.status} />
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-sm text-muted-foreground text-center py-3">No bookings yet</p>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-          <DialogFooter className="gap-2 sm:gap-3">
-            <Button variant="outline" onClick={() => setHistoryCustomer(null)}>
-              Close
-            </Button>
-            <Button
-              className="bg-amber-600 hover:bg-amber-700 text-white gap-2"
-              onClick={() => void handleExportHistoryPdf()}
-              disabled={!historyCustomer || exportingHistoryPdf || historyBookingsLoading}
-            >
-              {exportingHistoryPdf ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <FileDown className="h-4 w-4" />
-              )}
-              Export PDF
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <GuestHistoryDialog
+        customerId={historyCustomerId}
+        highlightRegistrationNumber={searchQuery.trim() || undefined}
+        onClose={() => setHistoryCustomerId(null)}
+      />
     </div>
   );
 }

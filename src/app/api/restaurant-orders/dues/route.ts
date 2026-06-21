@@ -122,7 +122,7 @@ function mapOrderDueRow(
 
 export async function GET(request: NextRequest) {
   try {
-    const authResult = requireAuth(request);
+    const authResult = await requireAuth(request);
     if (authResult instanceof Response) return authResult;
 
     if (!canAccessRestaurant(authResult.role) && authResult.role !== 'HOTEL_STAFF' && authResult.role !== 'HOTEL_FD') {

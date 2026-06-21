@@ -1,9 +1,15 @@
-import { startOfDay } from 'date-fns'
+import { endOfDay, parseISO, startOfDay } from 'date-fns'
 import { Prisma } from '@prisma/client'
 
 export type StayDateRange = {
   start: Date
   end: Date
+}
+
+function parseDateOnlyParam(value: string): Date | null {
+  const trimmed = value.trim()
+  const parsed = parseISO(trimmed.includes('T') ? trimmed : `${trimmed}T12:00:00`)
+  return Number.isNaN(parsed.getTime()) ? null : parsed
 }
 
 export function parseStayDateRange(
@@ -14,18 +20,12 @@ export function parseStayDateRange(
   let end: Date | null = null
 
   if (dateFrom) {
-    const parsed = new Date(dateFrom)
-    if (!Number.isNaN(parsed.getTime())) {
-      parsed.setHours(0, 0, 0, 0)
-      start = parsed
-    }
+    const parsed = parseDateOnlyParam(dateFrom)
+    if (parsed) start = startOfDay(parsed)
   }
   if (dateTo) {
-    const parsed = new Date(dateTo)
-    if (!Number.isNaN(parsed.getTime())) {
-      parsed.setHours(23, 59, 59, 999)
-      end = parsed
-    }
+    const parsed = parseDateOnlyParam(dateTo)
+    if (parsed) end = endOfDay(parsed)
   }
 
   if (!start && !end) return null
@@ -60,11 +60,10 @@ export function getGuestDepartureCalendarDay(booking: StayBoundsSource): Date {
 }
 
 /**
- * Daily in-house report: guest appears on every calendar day they occupy a room,
- * from arrival day through departure day — not only on the day they checked in.
- *
- * Example: checked in yesterday, checkout in 2 days → on yesterday's list,
- * today's list, and each day until checkout. Check-in column still shows real check-in time.
+ * PMS daily guest visibility:
+ * - RESERVED: appears on scheduled check-in business day only (expected arrival).
+ * - CHECKED_IN: appears every business day from actual check-in through checkout.
+ * - CHECKED_OUT: appears on each day the guest was in-house (historical).
  */
 export function guestStayOverlapsRange(
   booking: StayBoundsSource,
@@ -76,10 +75,16 @@ export function guestStayOverlapsRange(
   const range = parseStayDateRange(dateFrom, dateTo)
   if (!range) return true
 
-  const arrivalDay = getGuestArrivalCalendarDay(booking)
-  const departureDay = getGuestDepartureCalendarDay(booking)
   const filterStartDay = startOfDay(range.start)
   const filterEndDay = startOfDay(range.end)
+
+  if (booking.status === 'RESERVED') {
+    const scheduledArrival = startOfDay(new Date(booking.checkIn))
+    return scheduledArrival >= filterStartDay && scheduledArrival <= filterEndDay
+  }
+
+  const arrivalDay = getGuestArrivalCalendarDay(booking)
+  const departureDay = getGuestDepartureCalendarDay(booking)
 
   return arrivalDay <= filterEndDay && departureDay >= filterStartDay
 }
@@ -111,7 +116,41 @@ export function pickGuestStayBooking<T extends StayBoundsSource>(
   })[0]
 }
 
-/** Prisma filter: guest occupied the hotel on at least one day in the period. */
+/** Checked-in guests occupying the hotel across at least one day in the period. */
+export function buildInHouseStayOverlapWhere(
+  dateFrom: string | null,
+  dateTo: string | null
+): Prisma.BookingWhereInput | null {
+  const range = parseStayDateRange(dateFrom, dateTo)
+  if (!range) return null
+
+  const { start, end } = range
+  const scheduledInHouse = {
+    checkIn: { lte: end },
+    checkOut: { gte: start },
+  }
+
+  return {
+    status: 'CHECKED_IN',
+    OR: [
+      {
+        AND: [
+          { actualCheckIn: { not: null } },
+          { actualCheckIn: { lte: end } },
+          { checkOut: { gte: start } },
+        ],
+      },
+      {
+        AND: [{ actualCheckIn: null }, scheduledInHouse],
+      },
+    ],
+  }
+}
+
+/**
+ * Prisma filter: guests visible on a business day per PMS rules.
+ * Reserved = scheduled arrival day; checked-in = full stay span.
+ */
 export function buildGuestStayOverlapWhere(
   dateFrom: string | null,
   dateTo: string | null
@@ -130,6 +169,10 @@ export function buildGuestStayOverlapWhere(
     status: { not: 'CANCELLED' },
     OR: [
       {
+        status: 'RESERVED',
+        checkIn: { gte: start, lte: end },
+      },
+      {
         status: 'CHECKED_IN',
         OR: [
           {
@@ -143,10 +186,6 @@ export function buildGuestStayOverlapWhere(
             AND: [{ actualCheckIn: null }, scheduledInHouse],
           },
         ],
-      },
-      {
-        status: 'RESERVED',
-        ...scheduledInHouse,
       },
       {
         status: 'CHECKED_OUT',

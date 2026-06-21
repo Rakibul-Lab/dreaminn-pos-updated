@@ -48,6 +48,15 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { PosLiveSearchField } from './PosLiveSearchField'
+import { useBusinessDate } from '@/hooks/use-business-date'
+import { RestaurantOrderDeliveredActions } from './RestaurantOrderDeliveredActions'
+import { RestaurantOrderPaymentSummary } from './RestaurantOrderPaymentSummary'
+import {
+  RestaurantOrderPaymentDialog,
+  type RestaurantOrderPaymentTarget,
+} from './RestaurantOrderPaymentDialog'
+import { isRoomServiceGuestOrder } from '@/lib/restaurant-order-billing'
+import { cn } from '@/lib/utils'
 
 // Types
 interface MenuCategory {
@@ -118,9 +127,14 @@ interface PosOrder {
   totalAmount: number
   notes: string | null
   createdAt: string
+  bookingId?: string | null
+  billingDisposition?: 'PENDING' | 'HOTEL_BILL' | 'PAID_DIRECT'
   items: PosOrderItem[]
+  payments?: { amount: number; paymentType: string; settlementSource?: string | null }[]
+  companyLedgerBill?: { id: string } | null
   room: { roomNumber: string } | null
   table: { tableNumber: string } | null
+  booking?: { id: string } | null
 }
 
 const POS_STATUS_STEPS: {
@@ -259,6 +273,11 @@ export default function POSPage() {
   const [notes, setNotes] = useState('')
   const [showNotes, setShowNotes] = useState(false)
   const [activeStatusPanel, setActiveStatusPanel] = useState<PosOrderStatus | null>(null)
+  const [payTarget, setPayTarget] = useState<{
+    order: RestaurantOrderPaymentTarget
+    roomGuest: boolean
+  } | null>(null)
+  const [payDialogOpen, setPayDialogOpen] = useState(false)
 
   useEffect(() => {
     const id = window.setInterval(() => setNow(new Date()), 1000)
@@ -282,13 +301,19 @@ export default function POSPage() {
   })
   const menuItems = menuItemsData?.data || []
 
-  // Fetch occupied rooms for room service
+  const { data: businessDateRes } = useBusinessDate()
+  const businessDate = businessDateRes?.data?.businessDate
+
+  // Room service: only guests checked in on the current business day
   const { data: occupiedRoomsData, isLoading: roomsLoading } = useQuery({
-    queryKey: ['occupied-rooms'],
-    queryFn: () => api.get<{ success: boolean; data: OccupiedRoom[] }>('/occupied-rooms'),
-    enabled: orderType === 'ROOM_SERVICE',
+    queryKey: ['occupied-rooms', 'pos-business-day', businessDate],
+    queryFn: () =>
+      api.get<{ success: boolean; data: OccupiedRoom[] }>(
+        '/occupied-rooms?businessDayCheckIn=1'
+      ),
+    enabled: orderType === 'ROOM_SERVICE' && !!businessDate,
   })
-  const occupiedRooms = occupiedRoomsData?.data || []
+  const occupiedRooms = (occupiedRoomsData?.data ?? []).filter((r) => r.current_booking_id)
 
   // Fetch restaurant tables (dine-in + room service)
   const { data: tablesData, isLoading: tablesLoading } = useQuery({
@@ -355,6 +380,24 @@ export default function POSPage() {
     },
     onError: (error: Error) => {
       toast.error('Failed to update order', { description: error.message })
+    },
+  })
+
+  const sendToHotelMutation = useMutation({
+    mutationFn: (orderId: string) => api.post(`/restaurant-orders/${orderId}/send-to-hotel`, {}),
+    onSuccess: (res: { success?: boolean; message?: string; error?: string }) => {
+      if (!res?.success) {
+        toast.error(res?.error || 'Failed to send to hotel')
+        return
+      }
+      toast.success(res.message || 'Order sent to hotel billing')
+      queryClient.invalidateQueries({ queryKey: ['pos-today-orders'] })
+      queryClient.invalidateQueries({ queryKey: ['restaurant-orders'] })
+      queryClient.invalidateQueries({ queryKey: ['cloudview-ledger'] })
+      queryClient.invalidateQueries({ queryKey: ['company-ledger'] })
+    },
+    onError: (error: Error) => {
+      toast.error('Failed to send to hotel', { description: error.message })
     },
   })
 
@@ -446,7 +489,9 @@ export default function POSPage() {
   const handleRoomServiceNext = () => {
     if (roomServiceStep === 1) {
       if (!roomId) {
-        toast.error('Select a room', { description: 'Choose an occupied room to continue.' })
+        toast.error('Select a room', {
+          description: 'Choose a room with check-in on today’s business day.',
+        })
         return
       }
       setRoomServiceStep(2)
@@ -1034,7 +1079,14 @@ export default function POSPage() {
               </div>
 
               {roomServiceStep === 1 && (
-                <PosLiveSearchField
+                <div className="space-y-2">
+                  {businessDate && (
+                    <p className="text-[11px] text-muted-foreground">
+                      Showing rooms checked in on business day{' '}
+                      <span className="font-medium text-foreground">{businessDate}</span>
+                    </p>
+                  )}
+                  <PosLiveSearchField
                   label="Step 1 — Room number"
                   placeholder="Search room number or type…"
                   selectedId={roomId}
@@ -1061,9 +1113,14 @@ export default function POSPage() {
                     setTableId('')
                     setRoomServiceSetupComplete(false)
                   }}
-                  emptyMessage="No occupied rooms available for room service"
+                  emptyMessage={
+                    businessDate
+                      ? `No check-ins on business day ${businessDate}`
+                      : 'No rooms checked in on this business day'
+                  }
                   noResultsMessage="No rooms match your search"
                 />
+                </div>
               )}
 
               {roomServiceStep === 2 && (
@@ -1345,17 +1402,20 @@ export default function POSPage() {
         open={!!activeStatusPanel}
         onOpenChange={(open) => !open && setActiveStatusPanel(null)}
       >
-        <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col p-0 gap-0">
+        <DialogContent className="flex h-[min(88vh,920px)] w-[calc(100%-1.5rem)] max-w-[calc(100%-1.5rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl">
           <DialogHeader className="px-6 pt-6 pb-4 border-b shrink-0">
             <DialogTitle>{activeStatusPanelMeta?.panelTitle ?? "Today's Orders"}</DialogTitle>
             <p className="text-sm text-muted-foreground">
-              {activeStatusPanel
-                ? `${todayOrderCounts[activeStatusPanel]} order${todayOrderCounts[activeStatusPanel] === 1 ? '' : 's'} — tap an action to move to the next stage`
-                : ''}
+              {activeStatusPanel === 'DELIVERED'
+                ? `${todayOrderCounts.DELIVERED} order${todayOrderCounts.DELIVERED === 1 ? '' : 's'} — payment, due, and billing actions`
+                : activeStatusPanel
+                  ? `${todayOrderCounts[activeStatusPanel]} order${todayOrderCounts[activeStatusPanel] === 1 ? '' : 's'} — tap an action to move to the next stage`
+                  : ''}
             </p>
           </DialogHeader>
 
-          <ScrollArea className="flex-1 max-h-[calc(85vh-8rem)] px-6 py-4">
+          <ScrollArea className="min-h-0 flex-1">
+            <div className="px-6 py-4">
             {statusOrdersLoading ? (
               <div className="space-y-3">
                 {Array.from({ length: 3 }).map((_, i) => (
@@ -1433,43 +1493,80 @@ export default function POSPage() {
                         </p>
                       )}
 
-                      <div className="flex items-center justify-between pt-1">
-                        <span className="text-sm font-semibold">৳{order.totalAmount.toFixed(0)}</span>
-                        {nextStep?.next ? (
-                          <Button
-                            size="sm"
-                            className={`h-8 text-xs text-white ${nextStep.buttonClass}`}
-                            disabled={statusUpdateMutation.isPending}
-                            onClick={() =>
-                              statusUpdateMutation.mutate({
-                                id: order.id,
-                                status: nextStep.next!,
-                              })
-                            }
-                          >
-                            {nextStep.next === 'COOKING' && <Flame className="h-3.5 w-3.5 mr-1" />}
-                            {nextStep.next === 'READY' && (
-                              <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
-                            )}
-                            {nextStep.next === 'DELIVERED' && (
-                              <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
-                            )}
-                            {nextStep.label}
-                          </Button>
-                        ) : (
-                          <Badge variant="secondary" className="text-xs">
-                            Completed
-                          </Badge>
+                      {activeStatusPanel === 'DELIVERED' && (
+                        <RestaurantOrderPaymentSummary
+                          totalAmount={order.totalAmount}
+                          payments={order.payments}
+                          billingDisposition={order.billingDisposition}
+                          companyLedgerBill={order.companyLedgerBill}
+                        />
+                      )}
+
+                      <div className="flex items-center justify-between gap-2 pt-1">
+                        {activeStatusPanel !== 'DELIVERED' && (
+                          <span className="text-sm font-semibold shrink-0">
+                            ৳{order.totalAmount.toFixed(0)}
+                          </span>
                         )}
+                        <div
+                          className={cn(
+                            'flex flex-row flex-nowrap items-center gap-1 min-w-0',
+                            activeStatusPanel === 'DELIVERED' ? 'w-full justify-end' : 'justify-end'
+                          )}
+                        >
+                          {nextStep?.next ? (
+                            <Button
+                              size="sm"
+                              className={`h-8 shrink-0 text-xs text-white ${nextStep.buttonClass}`}
+                              disabled={statusUpdateMutation.isPending}
+                              onClick={() =>
+                                statusUpdateMutation.mutate({
+                                  id: order.id,
+                                  status: nextStep.next!,
+                                })
+                              }
+                            >
+                              {nextStep.next === 'COOKING' && <Flame className="h-3.5 w-3.5 mr-1" />}
+                              {nextStep.next === 'READY' && (
+                                <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
+                              )}
+                              {nextStep.next === 'DELIVERED' && (
+                                <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
+                              )}
+                              {nextStep.label}
+                            </Button>
+                          ) : null}
+                          {activeStatusPanel === 'DELIVERED' && (
+                            <RestaurantOrderDeliveredActions
+                              order={order}
+                              iconOnly
+                              onPay={(selected) => {
+                                setPayTarget({
+                                  order: {
+                                    id: selected.id,
+                                    orderNumber: selected.orderNumber,
+                                    totalAmount: selected.totalAmount,
+                                    payments: selected.payments,
+                                  },
+                                  roomGuest: isRoomServiceGuestOrder(selected),
+                                })
+                                setPayDialogOpen(true)
+                              }}
+                              onSendToHotel={(orderId) => sendToHotelMutation.mutate(orderId)}
+                              sendToHotelPending={sendToHotelMutation.isPending}
+                            />
+                          )}
+                        </div>
                       </div>
                     </div>
                   )
                 })}
               </div>
             )}
+            </div>
           </ScrollArea>
 
-          <DialogFooter className="px-6 py-4 border-t shrink-0">
+          <DialogFooter className="px-6 py-4 border-t shrink-0 bg-muted/20">
             <Button type="button" variant="outline" onClick={() => setActiveStatusPanel(null)}>
               Close
             </Button>
@@ -1571,6 +1668,16 @@ export default function POSPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <RestaurantOrderPaymentDialog
+        order={payTarget?.order ?? null}
+        open={payDialogOpen}
+        onOpenChange={(open) => {
+          setPayDialogOpen(open)
+          if (!open) setPayTarget(null)
+        }}
+        roomGuestOrder={payTarget?.roomGuest ?? false}
+      />
     </div>
   )
 }

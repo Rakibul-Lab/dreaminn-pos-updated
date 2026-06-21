@@ -9,6 +9,7 @@ import {
   isValidAccountLastFour,
 } from '@/lib/deposit-form';
 import { BANGLADESH_BANKS } from '@/lib/bangladesh-banks';
+import { stampCurrentBusinessDate } from '@/lib/business-date';
 import { PaymentMethod, Prisma } from '@prisma/client';
 
 const ALLOWED_DEPOSIT_METHODS = new Set<PaymentMethod>([
@@ -31,7 +32,7 @@ function parseDepositedAt(value: unknown): Date {
 // GET /api/deposits — list hotel deposit records
 export async function GET(request: NextRequest) {
   try {
-    const authResult = requireAuth(request);
+    const authResult = await requireAuth(request);
     if (authResult instanceof Response) return authResult;
 
     if (!canAccessHotel(authResult.role)) {
@@ -113,7 +114,7 @@ export async function GET(request: NextRequest) {
 // POST /api/deposits — record a new hotel deposit
 export async function POST(request: NextRequest) {
   try {
-    const authResult = requireAuth(request);
+    const authResult = await requireAuth(request);
     if (authResult instanceof Response) return authResult;
 
     if (!canAccessHotel(authResult.role)) {
@@ -151,10 +152,13 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    const businessDate = await stampCurrentBusinessDate();
+
     const deposit = await db.hotelDeposit.create({
       data: {
         amount,
         method,
+        businessDate,
         bankName: depositRequiresBank(method) ? bankName : null,
         accountLastFour: depositRequiresLastFour(method) ? accountLastFour : null,
         reference,

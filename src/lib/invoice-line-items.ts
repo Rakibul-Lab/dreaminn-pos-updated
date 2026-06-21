@@ -1,5 +1,7 @@
 import type { Prisma } from '@prisma/client'
 import { countHotelStayNights } from '@/lib/hotel-times'
+import { filterGuestFolioRestaurantOrders } from '@/lib/restaurant-order-billing'
+import { computeOrderDue, computeOrderFolioBalance } from '@/lib/restaurant-order-dues'
 
 export type InvoiceLineItemInput = {
   itemType: string
@@ -25,6 +27,10 @@ type RestaurantOrderRow = {
   discount: number
   vatPercent?: number
   vatAmount?: number
+  notes?: string | null
+  billingDisposition?: string | null
+  status?: string
+  payments?: { amount: number; paymentType: string }[]
   items?: Array<{
     id: string
     quantity: number
@@ -101,10 +107,12 @@ function buildRoomChargeLines(input: BuildInvoiceLineItemsInput): InvoiceLineIte
 }
 
 function buildExtraChargeLines(input: BuildInvoiceLineItemsInput): InvoiceLineItemInput[] {
-  if (input.includeExtraCharges === false) return []
-
   return input.charges
-    .filter((c) => c.chargeType !== 'ROOM_RATE')
+    .filter((c) => {
+      if (c.chargeType === 'ROOM_RATE') return false
+      if (c.chargeType === 'LATE_CHECKOUT' && input.includeExtraCharges === false) return false
+      return true
+    })
     .map((charge) => ({
       itemType: 'extra_service',
       referenceId: charge.id,
@@ -114,11 +122,22 @@ function buildExtraChargeLines(input: BuildInvoiceLineItemsInput): InvoiceLineIt
           ? 'Early checkout fee'
           : charge.chargeType === 'DAMAGE'
             ? 'Damage charges'
-            : charge.chargeType.replace(/_/g, ' ')),
+            : charge.chargeType === 'MINIBAR'
+              ? charge.description || 'Beverage / minibar'
+              : charge.chargeType.replace(/_/g, ' ')),
       quantity: charge.quantity,
       unitPrice: charge.amount,
       total: charge.amount * charge.quantity,
     }))
+}
+
+function formatRestaurantPartialDescription(
+  orderLabel: string,
+  billTotal: number,
+  folioDue: number,
+  paidAtRestaurant: number
+): string {
+  return `Restaurant ${orderLabel} — Bill ৳${Math.round(billTotal).toLocaleString()}, due ৳${Math.round(folioDue).toLocaleString()} (৳${Math.round(paidAtRestaurant).toLocaleString()} paid at restaurant)`
 }
 
 function buildRestaurantLines(orders: RestaurantOrderRow[]): InvoiceLineItemInput[] {
@@ -126,6 +145,42 @@ function buildRestaurantLines(orders: RestaurantOrderRow[]): InvoiceLineItemInpu
 
   for (const order of orders) {
     const orderLabel = order.orderNumber ? `#${order.orderNumber}` : order.id.slice(-6)
+    const folio = computeOrderFolioBalance(order)
+    if (folio.folioDue <= 0.009) continue
+
+    const { paidAmount } = computeOrderDue(order.totalAmount, order.payments ?? [])
+    const isPartial = paidAmount > 0.009
+    const partialDescription = isPartial
+      ? formatRestaurantPartialDescription(
+          orderLabel,
+          order.totalAmount,
+          folio.folioDue,
+          paidAmount
+        )
+      : ''
+
+    if (isPartial) {
+      lines.push({
+        itemType: 'food_order',
+        referenceId: order.id,
+        description: partialDescription,
+        quantity: 1,
+        unitPrice: folio.folioNet,
+        total: folio.folioNet,
+      })
+      if (folio.folioVat > 0.009) {
+        const pct = order.vatPercent != null ? ` (${order.vatPercent}%)` : ''
+        lines.push({
+          itemType: 'vat_restaurant',
+          referenceId: order.id,
+          description: `Restaurant VAT${pct} — ${partialDescription}`,
+          quantity: 1,
+          unitPrice: folio.folioVat,
+          total: folio.folioVat,
+        })
+      }
+      continue
+    }
 
     if (order.items && order.items.length > 0) {
       for (const item of order.items) {
@@ -151,10 +206,13 @@ function buildRestaurantLines(orders: RestaurantOrderRow[]): InvoiceLineItemInpu
     } else {
       const net = Math.max(0, order.subtotal - order.discount)
       if (net > 0) {
+        const label = order.notes?.trim()?.split('\n')[0]?.trim()
         lines.push({
           itemType: 'food_order',
           referenceId: order.id,
-          description: `Restaurant order ${orderLabel}`,
+          description: label
+            ? `${label} (Order ${orderLabel})`
+            : `Restaurant order ${orderLabel}`,
           quantity: 1,
           unitPrice: net,
           total: net,
@@ -182,10 +240,11 @@ function buildRestaurantLines(orders: RestaurantOrderRow[]): InvoiceLineItemInpu
 export function buildInvoiceChargeLinesOnly(
   input: Omit<BuildInvoiceLineItemsInput, 'discount' | 'hotelVat' | 'restaurantVat'>
 ): InvoiceLineItemInput[] {
+  const folioOrders = filterGuestFolioRestaurantOrders(input.restaurantOrders)
   return [
     ...buildRoomChargeLines(input),
     ...buildExtraChargeLines(input),
-    ...buildRestaurantLines(input.restaurantOrders),
+    ...buildRestaurantLines(folioOrders),
   ]
 }
 
@@ -222,6 +281,77 @@ export function buildInvoiceLineItems(input: BuildInvoiceLineItemsInput): Invoic
       quantity: 1,
       unitPrice: input.restaurantVat,
       total: input.restaurantVat,
+    })
+  }
+
+  return items
+}
+
+/** Simplified line items when amounts are entered manually at invoice generation. */
+export function buildManualInvoiceLineItems(input: {
+  roomNumber: string
+  roomTypeName: string
+  checkIn: Date
+  checkOut: Date
+  roomCharges: number
+  foodCharges: number
+  serviceCharges: number
+  discount: number
+  hotelVat: number
+  hotelVatPercent: number
+  vatApplied?: boolean
+}): InvoiceLineItemInput[] {
+  const items: InvoiceLineItemInput[] = []
+  const nights = Math.max(1, countBookedNights(input.checkIn, input.checkOut))
+
+  if (input.roomCharges > 0) {
+    items.push({
+      itemType: 'room_charge',
+      description: `Room ${input.roomNumber} (${input.roomTypeName}) – ${nights} night${nights > 1 ? 's' : ''}`,
+      quantity: nights,
+      unitPrice: input.roomCharges / nights,
+      total: input.roomCharges,
+    })
+  }
+
+  if (input.foodCharges > 0) {
+    items.push({
+      itemType: 'food_order',
+      description: 'Restaurant / food charges',
+      quantity: 1,
+      unitPrice: input.foodCharges,
+      total: input.foodCharges,
+    })
+  }
+
+  if (input.serviceCharges > 0) {
+    items.push({
+      itemType: 'extra_service',
+      description: 'Service charges',
+      quantity: 1,
+      unitPrice: input.serviceCharges,
+      total: input.serviceCharges,
+    })
+  }
+
+  if (input.discount > 0) {
+    items.push({
+      itemType: 'discount',
+      description: 'Discount',
+      quantity: 1,
+      unitPrice: -input.discount,
+      total: -input.discount,
+    })
+  }
+
+  if (input.hotelVat > 0) {
+    const rateLabel = input.vatApplied === false ? '' : ` (${input.hotelVatPercent}%)`
+    items.push({
+      itemType: 'vat_hotel',
+      description: `Hotel VAT${rateLabel}`,
+      quantity: 1,
+      unitPrice: input.hotelVat,
+      total: input.hotelVat,
     })
   }
 

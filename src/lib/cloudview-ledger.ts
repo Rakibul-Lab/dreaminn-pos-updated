@@ -45,9 +45,10 @@ export async function postRestaurantOrderToCloudViewLedger(
   if (order.billingDisposition === 'PAID_DIRECT') {
     throw new Error('This order was paid at restaurant and cannot be billed to the hotel')
   }
-  const { paidAmount } = computeOrderDue(order.totalAmount, order.payments)
-  if (paidAmount > 0.009) {
-    throw new Error('Cannot send to hotel after payment has been recorded on this order')
+
+  const { paidAmount, dueAmount } = computeOrderDue(order.totalAmount, order.payments)
+  if (dueAmount <= 0.009) {
+    throw new Error('No remaining balance to send to hotel')
   }
 
   const ledger = await ensureCloudViewRestaurantLedger(db)
@@ -56,7 +57,15 @@ export async function postRestaurantOrderToCloudViewLedger(
     order.booking?.customer?.name?.trim() ||
     'Room guest'
   const roomNumber = order.room?.roomNumber ?? null
-  const totalAmount = Math.max(0, order.totalAmount)
+  const ledgerAmount = dueAmount
+  const ledgerNotes = [
+    order.bookingId ? 'Hotel guest room service — billed to hotel' : null,
+    paidAmount > 0.009
+      ? `Restaurant collected ৳${Math.round(paidAmount).toLocaleString()}; hotel balance ৳${Math.round(ledgerAmount).toLocaleString()}`
+      : null,
+  ]
+    .filter(Boolean)
+    .join('. ')
 
   await db.companyLedgerBill.create({
     data: {
@@ -69,18 +78,18 @@ export async function postRestaurantOrderToCloudViewLedger(
       roomNumber,
       orderNumber: order.orderNumber,
       orderType: order.orderType,
-      totalAmount,
+      totalAmount: ledgerAmount,
       paidAmount: 0,
-      dueAmount: totalAmount,
-      notes: order.bookingId ? 'Hotel guest room service — billed to hotel' : null,
+      dueAmount: ledgerAmount,
+      notes: ledgerNotes || null,
     },
   })
 
   await db.companyLedger.update({
     where: { id: ledger.id },
     data: {
-      totalBilled: { increment: totalAmount },
-      dueAmount: { increment: totalAmount },
+      totalBilled: { increment: ledgerAmount },
+      dueAmount: { increment: ledgerAmount },
     },
   })
 
@@ -168,7 +177,11 @@ export async function recordRestaurantLedgerBillPayment(
 
   const bill = await db.companyLedgerBill.findUnique({
     where: { id: input.billId },
-    include: { restaurantOrder: true },
+    include: {
+      restaurantOrder: {
+        include: { payments: { select: { amount: true, paymentType: true } } },
+      },
+    },
   })
   if (!bill) throw new Error('Bill not found')
   if (bill.billType !== 'RESTAURANT_ORDER') {
@@ -220,6 +233,22 @@ export async function recordRestaurantLedgerBillPayment(
       dueAmount: { decrement: amount },
     },
   })
+
+  if (fullyPaid && bill.restaurantOrder) {
+    const orderDue = computeOrderDue(
+      bill.restaurantOrder.totalAmount,
+      [
+        ...bill.restaurantOrder.payments,
+        { amount, paymentType: 'RESTAURANT' },
+      ]
+    )
+    if (orderDue.dueAmount <= 0.009) {
+      await db.restaurantOrder.update({
+        where: { id: orderId },
+        data: { billingDisposition: 'PAID_DIRECT' },
+      })
+    }
+  }
 
   return { paymentId: payment.id, billDueAmount: newDue }
 }

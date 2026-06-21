@@ -12,6 +12,14 @@ export type SettingDefinition = {
 /** Canonical defaults — merged with DB on read so hotel/restaurant sections always appear. */
 export const SETTING_DEFINITIONS: SettingDefinition[] = [
   {
+    key: 'current_business_date',
+    value: '',
+    group: 'hotel',
+    label: 'Current Business Date',
+    inputType: 'text',
+    hint: 'Hotel operating date (yyyy-MM-dd). Advanced automatically on day close.',
+  },
+  {
     key: 'hotel_name',
     value: 'RRP Dream Inn',
     group: 'hotel',
@@ -67,6 +75,14 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
     hint: 'Default VAT on room charges, reservations, and hotel invoices',
   },
   {
+    key: 'hotel_service_charge_percent',
+    value: '10',
+    group: 'hotel',
+    label: 'Room Service Charge (%)',
+    inputType: 'number',
+    hint: 'Default service charge % shown on reservations and hotel invoices',
+  },
+  {
     key: 'restaurant_name',
     value: 'CloudView',
     group: 'restaurant',
@@ -104,7 +120,8 @@ export function guessGroupFromKey(key: string): string {
     key.startsWith('late_checkout') ||
     key.startsWith('early_checkout') ||
     key === 'check_in_time' ||
-    key === 'check_out_time'
+    key === 'check_out_time' ||
+    key === 'current_business_date'
   ) {
     return 'hotel'
   }

@@ -36,3 +36,13 @@ export function isWalkInBooking(booking: {
 }): boolean {
   return getBookingSourceLabel(booking) === WALK_IN_LABEL
 }
+
+/** True when a company ledger or non-walk-in company name is set on the booking. */
+export function hasBookingCompany(booking: {
+  company?: string | null
+  companyLedgerId?: string | null
+  companyLedger?: { name: string } | null
+}): boolean {
+  if (booking.companyLedgerId) return true
+  return Boolean(getBookingCompanyName(booking))
+}

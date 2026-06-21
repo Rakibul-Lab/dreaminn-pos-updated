@@ -9,8 +9,10 @@
     "build:cpanel": "node scripts/build-cpanel.js",
     "pack:upload": "node scripts/prepare-server-upload.js",
     "start": "cross-env NODE_ENV=production node server.js",
-    "lint": "eslint .",
+    "lint": "eslint src/**/*.{ts,tsx,js,jsx}",
     "db:push": "prisma db push",
+    "db:sync": "prisma db push && prisma generate",
+    "db:migrate-room-prices": "node scripts/migrate-room-prices.js",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:reset": "prisma migrate reset"

@@ -3,12 +3,12 @@ import { db } from '@/lib/db';
 import { requireRole } from '@/lib/auth';
 import { successResponse, errorResponse, paginatedResponse, logActivity } from '@/lib/api-utils';
 import { hashPassword } from '@/lib/password';
-import { getEmailValidationError } from '@/lib/email-verify-server';
+import { getEmailValidationError } from '@/lib/email-validation';
 
 // GET /api/users - List users (ADMIN only)
 export async function GET(request: NextRequest) {
   try {
-    const authResult = requireRole(request, 'ADMIN');
+    const authResult = await requireRole(request, 'ADMIN');
     if (authResult instanceof Response) return authResult;
 
     const { searchParams } = new URL(request.url);
@@ -61,7 +61,7 @@ export async function GET(request: NextRequest) {
 // POST /api/users - Create user (ADMIN only)
 export async function POST(request: NextRequest) {
   try {
-    const authResult = requireRole(request, 'ADMIN');
+    const authResult = await requireRole(request, 'ADMIN');
     if (authResult instanceof Response) return authResult;
 
     const body = await request.json();
@@ -71,16 +71,12 @@ export async function POST(request: NextRequest) {
       return errorResponse('Name, email, password, and role are required');
     }
 
-    const emailError = await getEmailValidationError(
-      email,
-      false,
-      body.emailVerificationToken
-    );
+    const emailError = getEmailValidationError(email, false);
     if (emailError) return errorResponse(emailError);
 
-    const validRoles = ['ADMIN', 'HOTEL_STAFF', 'HOTEL_FD', 'RESTAURANT_STAFF'];
+    const validRoles = ['ADMIN', 'HOTEL_STAFF', 'HOTEL_FD', 'RESTAURANT_STAFF', 'HOUSEKEEPER'];
     if (!validRoles.includes(role)) {
-      return errorResponse('Invalid role. Must be ADMIN, HOTEL_STAFF, HOTEL_FD, or RESTAURANT_STAFF');
+      return errorResponse('Invalid role. Must be ADMIN, HOTEL_STAFF, HOTEL_FD, RESTAURANT_STAFF, or HOUSEKEEPER');
     }
 
     const existing = await db.user.findUnique({ where: { email } });
@@ -128,7 +124,7 @@ export async function POST(request: NextRequest) {
 // PUT /api/users - Update user (ADMIN only)
 export async function PUT(request: NextRequest) {
   try {
-    const authResult = requireRole(request, 'ADMIN');
+    const authResult = await requireRole(request, 'ADMIN');
     if (authResult instanceof Response) return authResult;
 
     const body = await request.json();
@@ -144,11 +140,7 @@ export async function PUT(request: NextRequest) {
     }
 
     if (email !== undefined) {
-      const emailError = await getEmailValidationError(
-        email,
-        false,
-        body.emailVerificationToken
-      );
+      const emailError = getEmailValidationError(email, false);
       if (emailError) return errorResponse(emailError);
     }
 
@@ -156,9 +148,9 @@ export async function PUT(request: NextRequest) {
     if (name !== undefined) updateData.name = name;
     if (email !== undefined) updateData.email = email;
     if (role !== undefined) {
-      const validRoles = ['ADMIN', 'HOTEL_STAFF', 'HOTEL_FD', 'RESTAURANT_STAFF'];
+      const validRoles = ['ADMIN', 'HOTEL_STAFF', 'HOTEL_FD', 'RESTAURANT_STAFF', 'HOUSEKEEPER'];
       if (!validRoles.includes(role)) {
-        return errorResponse('Invalid role. Must be ADMIN, HOTEL_STAFF, HOTEL_FD, or RESTAURANT_STAFF');
+        return errorResponse('Invalid role. Must be ADMIN, HOTEL_STAFF, HOTEL_FD, RESTAURANT_STAFF, or HOUSEKEEPER');
       }
       updateData.role = role;
     }

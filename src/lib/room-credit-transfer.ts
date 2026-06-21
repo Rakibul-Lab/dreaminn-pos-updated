@@ -1,6 +1,7 @@
 import type { PrismaClient } from '@prisma/client'
 import { computeHotelDiscountAmount, parseBookingDiscountType } from '@/lib/booking-discount'
 import { bookingVatOptions, sumBookingNetPaid } from '@/lib/booking-totals'
+import { getRoomNightlyTotal } from '@/lib/room-pricing'
 import {
   computeCheckoutSettlement,
   type CheckoutSettlementParams,
@@ -28,7 +29,7 @@ export type CreditTransferBookingRow = {
   discountValue?: number | null
   notes?: string | null
   customer: { name: string }
-  room: { id: string; roomNumber: string; type: { name: string; basePrice: number } }
+  room: { id: string; roomNumber: string; totalPrice: number; type: { name: string } }
   charges: Array<{
     id: string
     chargeType: string
@@ -111,7 +112,7 @@ export function computeTransferSourceSettlement(
 ): CheckoutSettlementResult {
   return computeCheckoutSettlement({
     booking: source,
-    nightlyRate: source.room.type.basePrice,
+    nightlyRate: getRoomNightlyTotal(source.room),
     restaurantOrders,
     lateCheckoutCharge: 0,
     payments,
@@ -346,10 +347,14 @@ export async function prepareCreditTransfers(
   for (const source of sources) {
     const restaurantOrders = await db.restaurantOrder.findMany({
       where: { bookingId: source.id, status: { not: 'CANCELLED' } },
+      include: {
+        payments: { select: { amount: true, paymentType: true } },
+      },
     })
     const restaurantOrdersWithItems = await db.restaurantOrder.findMany({
       where: { bookingId: source.id, status: { not: 'CANCELLED' } },
       include: {
+        payments: { select: { amount: true, paymentType: true } },
         items: {
           include: { menuItem: { select: { name: true } } },
         },

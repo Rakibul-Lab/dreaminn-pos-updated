@@ -99,6 +99,7 @@ const roleNavItems: Record<string, ViewId[]> = {
   RESTAURANT_STAFF: [
     'restaurant-pos', 'menu', 'orders', 'kitchen', 'tables',
   ],
+  HOUSEKEEPER: ['rooms', 'inventory'],
 };
 
 interface SidebarProps {

@@ -9,10 +9,9 @@ import {
   paymentRequiresReference,
   isValidPaymentAccountLastFour,
 } from '@/lib/payment-method';
-import { computeLateCheckoutFee } from '@/lib/app-settings';
-import { sumBookingNetPaid } from '@/lib/booking-totals';
+import { getRoomNightlyTotal } from '@/lib/room-pricing';
+import { sumCheckoutBookingPaid } from '@/lib/booking-totals';
 import {
-  bookingDueAfterPayments,
   computeCheckoutSettlement,
 } from '@/lib/checkout-settlement';
 import { buildInvoiceLineItems, replaceInvoiceLineItems } from '@/lib/invoice-line-items';
@@ -26,6 +25,8 @@ import {
   prepareCreditTransfers,
 } from '@/lib/room-credit-transfer';
 import { postCompanyLedgerBill } from '@/lib/company-ledger-billing';
+import { processAllOverdueStayExtensions, extendOverdueCheckedInBooking } from '@/lib/auto-stay-extension';
+import { resolveCheckoutDiscount } from '@/lib/checkout-discount';
 
 async function loadCheckoutBooking(id: string) {
   return db.booking.findUnique({
@@ -56,18 +57,20 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const authResult = requireRole(request, 'ADMIN' as RoleType, 'HOTEL_STAFF' as RoleType, 'HOTEL_FD' as RoleType);
+    const authResult = await requireRole(request, 'ADMIN' as RoleType, 'HOTEL_STAFF' as RoleType, 'HOTEL_FD' as RoleType);
     if (authResult instanceof Response) return authResult;
 
     const { id } = await params;
     const { searchParams } = new URL(request.url);
-    const adjustStayEnabled = searchParams.get('adjustStay') === 'true';
     const chargeableNightsParam = searchParams.get('chargeableNights');
     const chargeableNights =
       chargeableNightsParam != null ? parseInt(chargeableNightsParam, 10) : null;
     const stayAdjustmentMode =
       searchParams.get('stayMode') === 'extend' ? ('extend' as const) : ('shrink' as const);
-    const includeExtraCharges = searchParams.get('includeExtraCharges') !== 'false';
+    const includeExtraCharges = searchParams.get('includeExtraCharges') === 'true';
+    const lateCheckoutAmount = includeExtraCharges
+      ? Math.max(0, Number(searchParams.get('lateCheckoutAmount') || 0))
+      : 0;
     const includeDamageCharge = searchParams.get('includeDamageCharge') === 'true';
     const damageChargeAmount = includeDamageCharge
       ? Math.max(0, Number(searchParams.get('damageChargeAmount') || 0))
@@ -81,34 +84,56 @@ export async function GET(
     const creditTransferBookingIds = roomCreditTransferEnabled
       ? parseCreditTransferBookingIds(searchParams.get('creditTransferBookingIds'))
       : [];
+    const roomChargeParam = searchParams.get('roomCharge');
+    const roomChargeOverride =
+      roomChargeParam != null && roomChargeParam !== ''
+        ? Math.max(0, Number(roomChargeParam))
+        : null;
 
-    const booking = await loadCheckoutBooking(id);
+    let booking = await loadCheckoutBooking(id);
     if (!booking) return notFoundResponse('Booking');
     if (booking.status !== 'CHECKED_IN') {
       return errorResponse('Only checked-in bookings can be checked out');
     }
 
+    await extendOverdueCheckedInBooking(db, id);
+    booking = await loadCheckoutBooking(id);
+    if (!booking) return notFoundResponse('Booking');
+
     const now = new Date();
-    const { amount: lateCheckoutCharge } = await computeLateCheckoutFee(booking.checkOut, now);
     const restaurantOrders = await db.restaurantOrder.findMany({
       where: { bookingId: id, status: { not: 'CANCELLED' } },
+      include: {
+        payments: { select: { amount: true, paymentType: true } },
+      },
     });
     const bookingPayments = await db.payment.findMany({
       where: { bookingId: id },
       select: { amount: true, paymentType: true },
     });
 
+    const checkoutDiscount = resolveCheckoutDiscount(booking, {
+      enabled: includeDiscount,
+      type: discountType,
+      value: discountValue,
+    });
+
     const primarySettlement = computeCheckoutSettlement({
       booking,
-      nightlyRate: booking.room.type.basePrice,
+      nightlyRate: getRoomNightlyTotal(booking.room),
       restaurantOrders,
-      lateCheckoutCharge,
+      lateCheckoutCharge: 0,
       payments: bookingPayments,
-      discountEnabled: includeDiscount,
-      discountType,
-      discountValue,
+      discountEnabled: checkoutDiscount.discountEnabled,
+      discountType: checkoutDiscount.discountType,
+      discountValue: checkoutDiscount.discountValue,
       includeExtraCharges,
       damageChargeAmount,
+      lateCheckoutAmount,
+      roomChargeOverride:
+        roomChargeOverride != null && !Number.isNaN(roomChargeOverride)
+          ? roomChargeOverride
+          : null,
       asOf: now,
     });
 
@@ -151,9 +176,9 @@ export async function GET(
     const settlement = hasInboundTransfers
       ? mergeCreditTransferSettlements(primarySettlement, inboundTransfers, {
           payingBooking: booking,
-          discountEnabled: includeDiscount,
-          discountType,
-          discountValue,
+          discountEnabled: checkoutDiscount.discountEnabled,
+          discountType: checkoutDiscount.discountType,
+          discountValue: checkoutDiscount.discountValue,
           primaryPayments: bookingPayments,
         })
       : primarySettlement;
@@ -167,6 +192,7 @@ export async function GET(
       checkOut: booking.checkOut,
       actualCheckIn: booking.actualCheckIn,
       checkoutAt: now,
+      reservationDiscountLocked: checkoutDiscount.reservationDiscountLocked,
       ...settlement,
       ...companyLedgerCheckoutFields(booking),
     });
@@ -181,7 +207,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const authResult = requireRole(request, 'ADMIN' as RoleType, 'HOTEL_STAFF' as RoleType, 'HOTEL_FD' as RoleType);
+    const authResult = await requireRole(request, 'ADMIN' as RoleType, 'HOTEL_STAFF' as RoleType, 'HOTEL_FD' as RoleType);
     if (authResult instanceof Response) return authResult;
 
     const authUser = await db.user.findUnique({
@@ -203,7 +229,10 @@ export async function POST(
       ? String(body.paymentAccountLastFour).trim()
       : null;
     const paymentNotes = body?.paymentNotes || null;
-    const includeExtraCharges = body?.includeExtraCharges !== false;
+    const includeExtraCharges = body?.includeExtraCharges === true;
+    const lateCheckoutAmount = includeExtraCharges
+      ? Math.max(0, Number(body?.lateCheckoutAmount || 0))
+      : 0;
     const includeDamageCharge = body?.includeDamageCharge === true;
     const damageChargeAmount = includeDamageCharge
       ? Math.max(0, Number(body?.damageChargeAmount || 0))
@@ -217,43 +246,96 @@ export async function POST(
     const creditTransferBookingIds = roomCreditTransferEnabled
       ? parseCreditTransferBookingIds(body?.creditTransferBookingIds)
       : [];
+    const roomChargeOverride =
+      body?.roomCharge != null && body?.roomCharge !== ''
+        ? Math.max(0, Number(body.roomCharge))
+        : null;
 
-    const booking = await loadCheckoutBooking(id);
+    let booking = await loadCheckoutBooking(id);
     if (!booking) return notFoundResponse('Booking');
     if (booking.status !== 'CHECKED_IN') {
       return errorResponse('Only checked-in bookings can be checked out');
     }
 
-    await db.booking.update({
-      where: { id },
-      data: {
-        discountEnabled: includeDiscount,
-        discountType: includeDiscount ? discountType : null,
-        discountValue: includeDiscount ? discountValue : 0,
-      },
+    await extendOverdueCheckedInBooking(db, id);
+    booking = await loadCheckoutBooking(id);
+    if (!booking) return notFoundResponse('Booking');
+
+    const idDocCount = await db.bookingIdDocument.count({ where: { bookingId: id } });
+    if (!booking.isCorporateGuest && idDocCount === 0) {
+      return errorResponse('Upload ID documents before checkout');
+    }
+
+    if (
+      roomChargeOverride != null &&
+      !Number.isNaN(roomChargeOverride) &&
+      roomChargeOverride >= 0
+    ) {
+      await db.booking.update({
+        where: { id },
+        data: { totalRoomCharge: roomChargeOverride },
+      });
+      booking = { ...booking, totalRoomCharge: roomChargeOverride };
+    }
+
+    const checkoutDiscount = resolveCheckoutDiscount(booking, {
+      enabled: includeDiscount,
+      type: discountType,
+      value: discountValue,
     });
 
-    const now = new Date();
-    const { amount: lateCheckoutCharge, hoursLate } = await computeLateCheckoutFee(
-      booking.checkOut,
-      now
-    );
+    if (!checkoutDiscount.reservationDiscountLocked) {
+      await db.booking.update({
+        where: { id },
+        data: {
+          discountEnabled: checkoutDiscount.discountEnabled,
+          discountType: checkoutDiscount.discountEnabled ? checkoutDiscount.discountType : null,
+          discountValue: checkoutDiscount.discountEnabled ? checkoutDiscount.discountValue : 0,
+        },
+      });
+      booking = {
+        ...booking,
+        discountEnabled: checkoutDiscount.discountEnabled,
+        discountType: checkoutDiscount.discountEnabled ? checkoutDiscount.discountType : null,
+        discountValue: checkoutDiscount.discountEnabled ? checkoutDiscount.discountValue : 0,
+      };
+    }
 
-    if (includeExtraCharges && lateCheckoutCharge > 0) {
-      const hasLateCharge = booking.charges.some((c) => c.chargeType === 'LATE_CHECKOUT');
-      if (!hasLateCharge) {
+    const now = new Date();
+
+    if (!includeExtraCharges) {
+      await db.roomCharge.deleteMany({
+        where: { bookingId: id, chargeType: 'LATE_CHECKOUT' },
+      });
+      booking.charges = booking.charges.filter((c) => c.chargeType !== 'LATE_CHECKOUT');
+    } else if (lateCheckoutAmount > 0) {
+      const existingLate = booking.charges.find((c) => c.chargeType === 'LATE_CHECKOUT');
+      if (existingLate) {
+        await db.roomCharge.update({
+          where: { id: existingLate.id },
+          data: {
+            amount: lateCheckoutAmount,
+            description: 'Late checkout charge',
+          },
+        });
+      } else {
         await db.roomCharge.create({
           data: {
             bookingId: id,
             chargeType: 'LATE_CHECKOUT',
-            description: `Late checkout - ${hoursLate} hour(s) after scheduled time`,
-            amount: lateCheckoutCharge,
+            description: 'Late checkout charge',
+            amount: lateCheckoutAmount,
             quantity: 1,
             chargeDate: now,
           },
         });
       }
       booking.charges = await db.roomCharge.findMany({ where: { bookingId: id } });
+    } else {
+      await db.roomCharge.deleteMany({
+        where: { bookingId: id, chargeType: 'LATE_CHECKOUT' },
+      });
+      booking.charges = booking.charges.filter((c) => c.chargeType !== 'LATE_CHECKOUT');
     }
 
     if (!includeDamageCharge) {
@@ -285,6 +367,9 @@ export async function POST(
 
     const restaurantOrders = await db.restaurantOrder.findMany({
       where: { bookingId: id, status: { not: 'CANCELLED' } },
+      include: {
+        payments: { select: { amount: true, paymentType: true } },
+      },
     });
     let bookingPayments = await db.payment.findMany({
       where: { bookingId: id },
@@ -293,15 +378,20 @@ export async function POST(
 
     const primarySettlement = computeCheckoutSettlement({
       booking,
-      nightlyRate: booking.room.type.basePrice,
+      nightlyRate: getRoomNightlyTotal(booking.room),
       restaurantOrders,
-      lateCheckoutCharge,
+      lateCheckoutCharge: 0,
       payments: bookingPayments,
-      discountEnabled: includeDiscount,
-      discountType,
-      discountValue,
+      discountEnabled: checkoutDiscount.discountEnabled,
+      discountType: checkoutDiscount.discountType,
+      discountValue: checkoutDiscount.discountValue,
       includeExtraCharges,
       damageChargeAmount: includeDamageCharge ? damageChargeAmount : 0,
+      lateCheckoutAmount,
+      roomChargeOverride:
+        roomChargeOverride != null && !Number.isNaN(roomChargeOverride)
+          ? roomChargeOverride
+          : null,
       asOf: now,
     });
 
@@ -355,9 +445,9 @@ export async function POST(
     const settlement = hasInboundTransfers
       ? mergeCreditTransferSettlements(primarySettlement, inboundTransfers, {
           payingBooking: booking,
-          discountEnabled: includeDiscount,
-          discountType,
-          discountValue,
+          discountEnabled: checkoutDiscount.discountEnabled,
+          discountType: checkoutDiscount.discountType,
+          discountValue: checkoutDiscount.discountValue,
           primaryPayments: bookingPayments,
         })
       : primarySettlement;
@@ -383,7 +473,51 @@ export async function POST(
 
     const isCompanyLedgerCheckout = !!booking.companyLedgerId;
 
-    if (finalPayment > finalDueAmount + 0.01) {
+    type CheckoutPaymentRow = {
+      amount?: unknown
+      method?: string
+      reference?: string
+      accountLastFour?: string
+      notes?: string
+    };
+
+    const checkoutPaymentRows: CheckoutPaymentRow[] = Array.isArray(body?.checkoutPayments)
+      ? body.checkoutPayments
+      : finalPayment > 0
+        ? [
+            {
+              amount: finalPayment,
+              method: paymentMethod,
+              reference: paymentReference ?? undefined,
+              accountLastFour: paymentAccountLastFour ?? undefined,
+              notes: paymentNotes ?? undefined,
+            },
+          ]
+        : [];
+
+    let totalFinalPayment = 0;
+    for (const row of checkoutPaymentRows) {
+      const amount = Math.max(0, Number(row.amount || 0));
+      if (amount <= 0) continue;
+      const method = parsePaymentMethod(row.method, 'CASH');
+      const reference = row.reference ? String(row.reference).trim() : null;
+      const accountLastFour = row.accountLastFour ? String(row.accountLastFour).trim() : null;
+      const notes = row.notes ? String(row.notes).trim() : 'Final payment at check-out';
+
+      if (paymentRequiresReference(method) && !reference) {
+        return errorResponse('Payment reference is required for this payment method');
+      }
+      if (
+        paymentRequiresLastFour(method) &&
+        (!accountLastFour || !isValidPaymentAccountLastFour(accountLastFour))
+      ) {
+        return errorResponse('Last 4 digits are required for card / bKash / Nagad / Upay');
+      }
+
+      totalFinalPayment += amount;
+    }
+
+    if (totalFinalPayment > finalDueAmount + 0.01) {
       return errorResponse(
         `Payment cannot exceed due amount. Maximum: ৳${finalDueAmount.toFixed(2)}`
       );
@@ -392,54 +526,52 @@ export async function POST(
     if (
       !isCompanyLedgerCheckout &&
       finalDueAmount > 0.01 &&
-      finalPayment + 0.01 < finalDueAmount
+      totalFinalPayment + 0.01 < finalDueAmount
     ) {
       return errorResponse(
         `Due amount must be fully cleared to checkout. Required: ৳${finalDueAmount.toFixed(2)}`
       );
     }
 
-    if (finalPayment > 0) {
-      if (paymentRequiresReference(paymentMethod) && !paymentReference) {
-        return errorResponse('Payment reference is required for this payment method');
-      }
-      if (
-        paymentRequiresLastFour(paymentMethod) &&
-        (!paymentAccountLastFour || !isValidPaymentAccountLastFour(paymentAccountLastFour))
-      ) {
-        return errorResponse('Last 4 digits are required for card / bKash / Nagad / Upay');
-      }
+    for (const row of checkoutPaymentRows) {
+      const amount = Math.max(0, Number(row.amount || 0));
+      if (amount <= 0) continue;
+      const method = parsePaymentMethod(row.method, 'CASH');
+      const reference = row.reference ? String(row.reference).trim() : null;
+      const accountLastFour = row.accountLastFour ? String(row.accountLastFour).trim() : null;
+      const notes = row.notes ? String(row.notes).trim() : 'Final payment at check-out';
 
       await db.payment.create({
         data: {
-          amount: finalPayment,
-          method: paymentMethod,
+          amount,
+          method,
           paymentType: 'FINAL',
           bookingId: id,
           receivedBy: authUser.id,
-          reference: paymentRequiresReference(paymentMethod) ? paymentReference : null,
-          accountLastFour: paymentRequiresLastFour(paymentMethod)
-            ? paymentAccountLastFour
-            : null,
-          notes: paymentNotes || 'Final payment at check-out',
+          reference: paymentRequiresReference(method) ? reference : null,
+          accountLastFour: paymentRequiresLastFour(method) ? accountLastFour : null,
+          notes,
         },
       });
+    }
+
+    if (totalFinalPayment > 0) {
       bookingPayments = await db.payment.findMany({
         where: { bookingId: id },
         select: { amount: true, paymentType: true },
       });
     }
 
-    const totalPaidAfter = sumBookingNetPaid(bookingPayments);
-    const guestDueAmount = isCompanyLedgerCheckout
-      ? 0
-      : bookingDueAfterPayments(booking.totalRoomCharge, totalPaidAfter, booking);
+    const totalPaidAfter = sumCheckoutBookingPaid(bookingPayments);
+    const invoiceDue = Math.max(0, totalAmount - totalPaidAfter);
+    const guestDueAmount = isCompanyLedgerCheckout ? 0 : invoiceDue;
 
     const updatedBooking = await db.booking.update({
       where: { id },
       data: {
         status: 'CHECKED_OUT',
         actualCheckOut: now,
+        totalRoomCharge: roomCharges,
         dueAmount: guestDueAmount,
       },
       include: {
@@ -473,6 +605,7 @@ export async function POST(
     const restaurantOrdersWithItems = await db.restaurantOrder.findMany({
       where: { bookingId: id, status: { not: 'CANCELLED' } },
       include: {
+        payments: { select: { amount: true, paymentType: true } },
         items: {
           include: { menuItem: { select: { name: true } } },
         },
@@ -520,7 +653,6 @@ export async function POST(
         });
 
     const paidAmount = totalPaidAfter;
-    const invoiceDue = Math.max(0, totalAmount - paidAmount);
     const invoiceStatus = invoiceDue <= 0 ? 'PAID' : 'ISSUED';
     const companyLedgerDue = isCompanyLedgerCheckout ? invoiceDue : 0;
 
@@ -589,11 +721,11 @@ export async function POST(
         chargeableNights: settledNights,
         bookedNights: settlement.bookedNights,
         actualStayNights: settlement.actualStayNights,
-        lateCheckoutCharge,
+        lateCheckoutCharge: settlement.lateCheckoutCharge,
         damageCharge: settlement.damageCharge,
         roomCharges,
         totalAmount,
-        finalPayment,
+        finalPayment: totalFinalPayment,
         finalDueAmount,
         creditAmount,
         invoiceId: generatedInvoiceId,

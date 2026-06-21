@@ -7,7 +7,7 @@ import { RoleType } from '@prisma/client'
 /** Restaurant operational settings for POS and orders. */
 export async function GET(request: NextRequest) {
   try {
-    const authResult = requireRole(
+    const authResult = await requireRole(
       request,
       'ADMIN' as RoleType,
       'HOTEL_STAFF' as RoleType,

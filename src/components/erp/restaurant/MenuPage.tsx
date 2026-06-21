@@ -20,6 +20,8 @@ import {
   X,
   ImageIcon,
   Sparkles,
+  FileDown,
+  Loader2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -63,6 +65,12 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
+import {
+  buildMenuItemsExportQuery,
+  downloadMenuExcel,
+  downloadMenuPdf,
+  type MenuItemExportRecord,
+} from '@/lib/menu-export'
 
 function buildFoodPlaceholderSrc(itemId: string, itemName: string, width: number, height: number) {
   const params = new URLSearchParams({
@@ -189,6 +197,7 @@ export default function MenuPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [filterCategory, setFilterCategory] = useState<string>('all')
   const [sortBy, setSortBy] = useState<string>('name')
+  const [exporting, setExporting] = useState<'excel' | 'pdf' | null>(null)
 
   const handleChooseImage = async (file: File | null) => {
     if (!file) return
@@ -261,6 +270,78 @@ export default function MenuPage() {
       if (sortBy === 'price') return a.price - b.price
       return 0
     })
+
+  const categoryLabel =
+    filterCategory === 'all'
+      ? 'All categories'
+      : categories.find((c) => c.id === filterCategory)?.name ?? filterCategory
+
+  const buildExportMeta = () => ({
+    exportedAt: new Date(),
+    generatedBy: user ? { name: user.name, email: user.email, role: user.role } : undefined,
+    category: filterCategory,
+    categoryLabel,
+    search: searchQuery.trim() || undefined,
+    sort: sortBy,
+  })
+
+  const fetchExportRows = async (): Promise<MenuItemExportRecord[]> => {
+    const path = buildMenuItemsExportQuery({
+      categoryId: filterCategory,
+      search: searchQuery.trim() || undefined,
+    })
+    const res = await api.get<{ success: boolean; data: MenuItemExportRecord[] }>(path)
+    const rows = res.data ?? []
+    if (!searchQuery.trim()) return rows
+    const q = searchQuery.toLowerCase()
+    return rows.filter(
+      (item) =>
+        item.name.toLowerCase().includes(q) ||
+        item.description?.toLowerCase().includes(q)
+    )
+  }
+
+  const handleExportExcel = async () => {
+    setExporting('excel')
+    const toastId = toast.loading('Preparing Excel export…')
+    try {
+      const rows = await fetchExportRows()
+      if (!rows.length) {
+        toast.error('No menu items to export', { id: toastId, description: 'Adjust filters or search to include items.' })
+        return
+      }
+      await downloadMenuExcel(rows, buildExportMeta())
+      toast.success(`Exported ${rows.length} item(s) to Excel`, { id: toastId })
+    } catch (err) {
+      toast.error('Export failed', {
+        id: toastId,
+        description: err instanceof Error ? err.message : 'Could not export menu',
+      })
+    } finally {
+      setExporting(null)
+    }
+  }
+
+  const handleExportPdf = async () => {
+    setExporting('pdf')
+    const toastId = toast.loading('Preparing PDF export…')
+    try {
+      const rows = await fetchExportRows()
+      if (!rows.length) {
+        toast.error('No menu items to export', { id: toastId, description: 'Adjust filters or search to include items.' })
+        return
+      }
+      await downloadMenuPdf(rows, buildExportMeta())
+      toast.success(`Exported ${rows.length} item(s) to PDF`, { id: toastId })
+    } catch (err) {
+      toast.error('Export failed', {
+        id: toastId,
+        description: err instanceof Error ? err.message : 'Could not export menu',
+      })
+    } finally {
+      setExporting(null)
+    }
+  }
 
   // Category mutations
   const createCategoryMutation = useMutation({
@@ -431,6 +512,34 @@ export default function MenuPage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 gap-1.5 border border-slate-500 bg-slate-800/80 text-white hover:bg-slate-700 hover:text-white hover:border-slate-400"
+              onClick={() => void handleExportExcel()}
+              disabled={!!exporting || itemsLoading}
+            >
+              {exporting === 'excel' ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <FileDown className="w-4 h-4" />
+              )}
+              Export Excel
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 gap-1.5 border border-slate-500 bg-slate-800/80 text-white hover:bg-slate-700 hover:text-white hover:border-slate-400"
+              onClick={() => void handleExportPdf()}
+              disabled={!!exporting || itemsLoading}
+            >
+              {exporting === 'pdf' ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <FileDown className="w-4 h-4" />
+              )}
+              Export PDF
+            </Button>
             {isAdmin ? (
               <>
                 <Button

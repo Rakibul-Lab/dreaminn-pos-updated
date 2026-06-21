@@ -22,17 +22,16 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    const authResult = requireRole(request, 'ADMIN' as RoleType);
+    const authResult = await requireRole(request, 'ADMIN' as RoleType);
     if (authResult instanceof Response) return authResult;
 
     const body = await request.json();
-    const { name, description, basePrice, capacity, hourlyRate, amenities } = body;
+    const { name, description, capacity, amenities } = body;
 
-    if (!name || basePrice === undefined) {
-      return errorResponse('Name and base price are required');
+    if (!name) {
+      return errorResponse('Name is required');
     }
 
-    // Check for duplicate name
     const existing = await db.roomType.findUnique({ where: { name } });
     if (existing) {
       return errorResponse('Room type with this name already exists');
@@ -42,9 +41,7 @@ export async function POST(request: NextRequest) {
       data: {
         name,
         description,
-        basePrice: parseFloat(String(basePrice)),
         capacity: capacity || 2,
-        hourlyRate: hourlyRate ? parseFloat(String(hourlyRate)) : null,
         amenities: amenities ? (typeof amenities === 'string' ? amenities : JSON.stringify(amenities)) : null,
       },
     });
@@ -65,11 +62,11 @@ export async function POST(request: NextRequest) {
 
 export async function PUT(request: NextRequest) {
   try {
-    const authResult = requireRole(request, 'ADMIN' as RoleType);
+    const authResult = await requireRole(request, 'ADMIN' as RoleType);
     if (authResult instanceof Response) return authResult;
 
     const body = await request.json();
-    const { id, name, description, basePrice, capacity, hourlyRate, amenities } = body;
+    const { id, name, description, capacity, amenities } = body;
 
     if (!id) {
       return errorResponse('Room type ID is required');
@@ -80,7 +77,6 @@ export async function PUT(request: NextRequest) {
       return notFoundResponse('Room type');
     }
 
-    // Check for duplicate name if name is being changed
     if (name && name !== existing.name) {
       const duplicate = await db.roomType.findUnique({ where: { name } });
       if (duplicate) {
@@ -91,10 +87,10 @@ export async function PUT(request: NextRequest) {
     const updateData: Record<string, unknown> = {};
     if (name !== undefined) updateData.name = name;
     if (description !== undefined) updateData.description = description;
-    if (basePrice !== undefined) updateData.basePrice = parseFloat(String(basePrice));
     if (capacity !== undefined) updateData.capacity = parseInt(String(capacity));
-    if (hourlyRate !== undefined) updateData.hourlyRate = hourlyRate ? parseFloat(String(hourlyRate)) : null;
-    if (amenities !== undefined) updateData.amenities = typeof amenities === 'string' ? amenities : JSON.stringify(amenities);
+    if (amenities !== undefined) {
+      updateData.amenities = typeof amenities === 'string' ? amenities : JSON.stringify(amenities);
+    }
 
     const roomType = await db.roomType.update({
       where: { id },

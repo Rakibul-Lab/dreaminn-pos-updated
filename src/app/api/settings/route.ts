@@ -16,7 +16,7 @@ import {
 // GET /api/settings - List all settings (ADMIN only)
 export async function GET(request: NextRequest) {
   try {
-    const authResult = requireRole(request, 'ADMIN');
+    const authResult = await requireRole(request, 'ADMIN');
     if (authResult instanceof Response) return authResult;
 
     const dbSettings = await db.setting.findMany({
@@ -39,7 +39,7 @@ export async function GET(request: NextRequest) {
 // PUT /api/settings - Update settings (ADMIN only)
 export async function PUT(request: NextRequest) {
   try {
-    const authResult = requireRole(request, 'ADMIN');
+    const authResult = await requireRole(request, 'ADMIN');
     if (authResult instanceof Response) return authResult;
 
     const user = authResult;

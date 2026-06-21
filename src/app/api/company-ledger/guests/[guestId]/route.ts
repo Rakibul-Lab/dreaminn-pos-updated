@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { requireRole } from '@/lib/auth';
 import { successResponse, errorResponse, notFoundResponse, logActivity } from '@/lib/api-utils';
-import { bookingVatOptions, computeRoomBookingTotals, sumBookingNetPaid } from '@/lib/booking-totals';
+import { resolveBookingRegistrationNumber } from '@/lib/booking-registration';
 import { RoleType } from '@prisma/client';
 
 export async function GET(
@@ -10,7 +10,7 @@ export async function GET(
   { params }: { params: Promise<{ guestId: string }> }
 ) {
   try {
-    const authResult = requireRole(request, 'ADMIN' as RoleType, 'HOTEL_STAFF' as RoleType, 'HOTEL_FD' as RoleType);
+    const authResult = await requireRole(request, 'ADMIN' as RoleType, 'HOTEL_STAFF' as RoleType, 'HOTEL_FD' as RoleType);
     if (authResult instanceof Response) return authResult;
 
     const { guestId } = await params;
@@ -60,6 +60,7 @@ export async function GET(
         booking: {
           id: booking.id,
           confirmationNumber: booking.confirmationNumber,
+          registrationNumber: resolveBookingRegistrationNumber(booking),
           status: booking.status,
           checkIn: booking.checkIn,
           checkOut: booking.checkOut,
@@ -129,7 +130,7 @@ export async function PUT(
   { params }: { params: Promise<{ guestId: string }> }
 ) {
   try {
-    const authResult = requireRole(request, 'ADMIN' as RoleType, 'HOTEL_STAFF' as RoleType, 'HOTEL_FD' as RoleType);
+    const authResult = await requireRole(request, 'ADMIN' as RoleType, 'HOTEL_STAFF' as RoleType, 'HOTEL_FD' as RoleType);
     if (authResult instanceof Response) return authResult;
 
     const { guestId } = await params;
@@ -188,15 +189,33 @@ export async function DELETE(
   { params }: { params: Promise<{ guestId: string }> }
 ) {
   try {
-    const authResult = requireRole(request, 'ADMIN' as RoleType, 'HOTEL_STAFF' as RoleType, 'HOTEL_FD' as RoleType);
+    const authResult = await requireRole(request, 'ADMIN' as RoleType, 'HOTEL_STAFF' as RoleType, 'HOTEL_FD' as RoleType);
     if (authResult instanceof Response) return authResult;
 
     const { guestId } = await params;
     const existing = await db.companyLedgerGuest.findUnique({
       where: { id: guestId },
-      include: { companyLedger: { select: { name: true } } },
+      include: {
+        companyLedger: { select: { name: true } },
+        bookings: {
+          select: {
+            companyLedgerBill: { select: { dueAmount: true } },
+          },
+        },
+      },
     });
     if (!existing) return notFoundResponse('Company ledger guest');
+
+    const guestDue = existing.bookings.reduce(
+      (sum, booking) => sum + (booking.companyLedgerBill?.dueAmount ?? 0),
+      0
+    );
+    if (guestDue > 0.009) {
+      return errorResponse(
+        `Cannot remove guest with outstanding company balance (৳${guestDue.toFixed(2)} due). Settle bills first.`,
+        400
+      );
+    }
 
     await db.companyLedgerGuest.delete({ where: { id: guestId } });
 

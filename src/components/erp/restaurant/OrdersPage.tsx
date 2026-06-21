@@ -11,6 +11,7 @@ import {
 } from '@/lib/restaurant-order-date-filter'
 import {
   buildRestaurantOrdersExportQuery,
+  downloadRestaurantOrdersExcel,
   downloadRestaurantOrdersPdf,
   type RestaurantOrderExportRecord,
 } from '@/lib/restaurant-orders-export'
@@ -30,22 +31,17 @@ import {
   FileDown,
   Loader2,
   ArrowUpDown,
-  Building2,
-  Wallet,
-  Printer,
 } from 'lucide-react'
 import {
-  canPayOrderDirectly,
-  canSendOrderToHotel,
-  formatOrderBillingState,
+  formatOrderBillingDetail,
+  isRoomServiceGuestOrder,
   resolveOrderBillingState,
 } from '@/lib/restaurant-order-billing'
-import { computeOrderDue } from '@/lib/restaurant-order-dues'
+import { RestaurantOrderDeliveredActions } from './RestaurantOrderDeliveredActions'
 import {
-  PAYMENT_METHOD_OPTIONS_WITH_PAYMENT,
-  paymentRequiresReference,
-} from '@/lib/payment-method'
-import { openRestaurantReceiptTab } from '@/lib/restaurant-receipt-navigation'
+  RestaurantOrderPaymentDialog,
+  type RestaurantOrderPaymentTarget,
+} from './RestaurantOrderPaymentDialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -68,7 +64,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Textarea } from '@/components/ui/textarea'
 import {
   Table,
   TableBody,
@@ -110,11 +105,13 @@ interface RestaurantOrder {
   vatPercent: number
   totalAmount: number
   billingDisposition?: 'PENDING' | 'HOTEL_BILL' | 'PAID_DIRECT'
+  bookingId?: string | null
   notes: string | null
   createdAt: string
   items: OrderItem[]
   payments?: { amount: number; paymentType: string; settlementSource?: string | null }[]
   companyLedgerBill?: { id: string } | null
+  booking?: { id: string } | null
   room: { id: string; roomNumber: string; status: string } | null
   table: { id: string; tableNumber: string; capacity: number; status: string } | null
   creator: { id: string; name: string; email: string } | null
@@ -135,6 +132,12 @@ const ORDER_TYPE_CONFIG: Record<string, { icon: typeof UtensilsCrossed; label: s
 }
 
 type OrderSort = 'newest' | 'oldest'
+
+function billingBadgeClass(state: string) {
+  if (state === 'HOTEL_BILL') return 'bg-sky-50 text-sky-800 border-sky-200'
+  if (state === 'PAID_DIRECT') return 'bg-emerald-50 text-emerald-800 border-emerald-200'
+  return 'bg-amber-50 text-amber-800 border-amber-200'
+}
 
 function buildOrdersQueryParams(input: {
   activeTab: string
@@ -178,11 +181,11 @@ export default function OrdersPage() {
   const [customDateFrom, setCustomDateFrom] = useState('')
   const [customDateTo, setCustomDateTo] = useState('')
   const [sortOrder, setSortOrder] = useState<OrderSort>('newest')
-  const [exporting, setExporting] = useState(false)
-  const [payOrder, setPayOrder] = useState<RestaurantOrder | null>(null)
-  const [payMethod, setPayMethod] = useState('CASH')
-  const [payReference, setPayReference] = useState('')
-  const [payNotes, setPayNotes] = useState('')
+  const [exporting, setExporting] = useState<'excel' | 'pdf' | null>(null)
+  const [payTarget, setPayTarget] = useState<{
+    order: RestaurantOrderPaymentTarget
+    roomGuest: boolean
+  } | null>(null)
 
   const dateRange = useMemo(
     () => resolveBookingDateRange(datePreset, customDateFrom, customDateTo),
@@ -285,107 +288,16 @@ export default function OrdersPage() {
     },
   })
 
-  const payMutation = useMutation({
-    mutationFn: (payload: {
-      orderId: string
-      method: string
-      reference: string
-      notes?: string
-    }) =>
-      api.post(`/restaurant-orders/${payload.orderId}/settle`, {
-        settleFull: true,
-        method: payload.method,
-        reference: payload.reference,
-        notes: payload.notes,
-      }),
-    onSuccess: (
-      res: { success?: boolean; message?: string; error?: string; data?: { isFullySettled?: boolean } },
-      variables
-    ) => {
-      if (!res?.success) {
-        toast.error(res?.error || 'Payment failed')
-        return
-      }
-      toast.success(res.message || 'Payment recorded')
-      setPayOrder(null)
-      setPayReference('')
-      setPayNotes('')
-      queryClient.invalidateQueries({ queryKey: ['restaurant-orders'] })
-      queryClient.invalidateQueries({ queryKey: ['payments'] })
-      if (res.data?.isFullySettled) {
-        openRestaurantReceiptTab(variables.orderId, { autoPrint: true })
-      }
-    },
-    onError: (error: Error) => {
-      toast.error('Payment failed', { description: error.message })
-    },
-  })
-
-  const openPayDialog = (order: RestaurantOrder) => {
-    setPayOrder(order)
-    setPayMethod('CASH')
-    setPayReference(`CASH-${order.orderNumber}`)
-    setPayNotes('')
-  }
-
-  const billingBadgeClass = (state: string) => {
-    if (state === 'HOTEL_BILL') return 'bg-sky-50 text-sky-800 border-sky-200'
-    if (state === 'PAID_DIRECT') return 'bg-emerald-50 text-emerald-800 border-emerald-200'
-    return 'bg-amber-50 text-amber-800 border-amber-200'
-  }
-
-  const renderDeliveredActions = (order: RestaurantOrder, compact = false) => {
-    if (order.status !== 'DELIVERED') return null
-    const billingState = resolveOrderBillingState(order)
-
-    if (billingState === 'PAID_DIRECT') {
-      return (
-        <Button
-          size={compact ? 'sm' : 'default'}
-          variant="outline"
-          className={compact ? 'h-7 text-xs' : ''}
-          onClick={() => openRestaurantReceiptTab(order.id)}
-        >
-          <Printer className="w-3.5 h-3.5 mr-1" />
-          Receipt
-        </Button>
-      )
-    }
-
-    if (billingState === 'HOTEL_BILL') {
-      return (
-        <Badge variant="outline" className={`${billingBadgeClass('HOTEL_BILL')} text-xs`}>
-          Sent to hotel
-        </Badge>
-      )
-    }
-
-    return (
-      <div className={`flex ${compact ? 'flex-col gap-1 items-end' : 'flex-wrap gap-2'}`}>
-        {canSendOrderToHotel(order) && (
-          <Button
-            size="sm"
-            variant="outline"
-            className={`h-7 text-xs border-sky-300 text-sky-800 hover:bg-sky-50 ${compact ? 'w-full' : ''}`}
-            disabled={sendToHotelMutation.isPending}
-            onClick={() => sendToHotelMutation.mutate(order.id)}
-          >
-            <Building2 className="w-3.5 h-3.5 mr-1" />
-            Send hotel
-          </Button>
-        )}
-        {canPayOrderDirectly(order) && (
-          <Button
-            size="sm"
-            className={`h-7 text-xs bg-emerald-600 hover:bg-emerald-700 text-white ${compact ? 'w-full' : ''}`}
-            onClick={() => openPayDialog(order)}
-          >
-            <Wallet className="w-3.5 h-3.5 mr-1" />
-            Payment
-          </Button>
-        )}
-      </div>
-    )
+  const openPayForOrder = (order: RestaurantOrder) => {
+    setPayTarget({
+      order: {
+        id: order.id,
+        orderNumber: order.orderNumber,
+        totalAmount: order.totalAmount,
+        payments: order.payments,
+      },
+      roomGuest: isRoomServiceGuestOrder(order),
+    })
   }
 
   const filteredOrders = orders.filter((order) => matchesOrderSearch(order, searchQuery))
@@ -428,46 +340,75 @@ export default function OrdersPage() {
     })
   }
 
-  const handleExportPdf = async () => {
-    setExporting(true)
+  const buildExportMeta = () => ({
+    exportedAt: new Date(),
+    generatedBy: user ? { name: user.name, email: user.email, role: user.role } : undefined,
+    datePreset,
+    customDateFrom,
+    customDateTo,
+    orderType: filterType,
+    status: activeTab,
+    sort: sortOrder,
+    search: searchQuery.trim() || undefined,
+  })
+
+  const fetchExportRows = async (): Promise<RestaurantOrderExportRecord[]> => {
+    const path = buildRestaurantOrdersExportQuery({
+      status: activeTab,
+      orderType: filterType,
+      dateFrom: dateRange.dateFrom,
+      dateTo: dateRange.dateTo,
+      sort: sortOrder === 'oldest' ? 'asc' : 'desc',
+    })
+    const res = await api.get<{ success: boolean; data: RestaurantOrderExportRecord[] }>(path)
+    return (res.data ?? []).filter((order) => matchesOrderSearch(order as RestaurantOrder, searchQuery))
+  }
+
+  const handleExportExcel = async () => {
+    setExporting('excel')
+    const toastId = toast.loading('Preparing Excel export…')
     try {
-      const path = buildRestaurantOrdersExportQuery({
-        status: activeTab,
-        orderType: filterType,
-        dateFrom: dateRange.dateFrom,
-        dateTo: dateRange.dateTo,
-        sort: sortOrder === 'oldest' ? 'asc' : 'desc',
-      })
-      const res = await api.get<{ success: boolean; data: RestaurantOrderExportRecord[] }>(path)
-      const exportRows = (res.data ?? []).filter((order) =>
-        matchesOrderSearch(order as RestaurantOrder, searchQuery)
-      )
+      const exportRows = await fetchExportRows()
       if (!exportRows.length) {
         toast.error('No orders to export', {
+          id: toastId,
           description: 'Adjust filters or search to include orders in the export.',
         })
         return
       }
-      await downloadRestaurantOrdersPdf(exportRows, {
-        exportedAt: new Date(),
-        generatedBy: user
-          ? { name: user.name, email: user.email, role: user.role }
-          : undefined,
-        datePreset,
-        customDateFrom,
-        customDateTo,
-        orderType: filterType,
-        status: activeTab,
-        sort: sortOrder,
-        search: searchQuery.trim() || undefined,
-      })
-      toast.success('Orders PDF downloaded')
+      await downloadRestaurantOrdersExcel(exportRows, buildExportMeta())
+      toast.success(`Exported ${exportRows.length} order(s) to Excel`, { id: toastId })
     } catch (err) {
       toast.error('Export failed', {
+        id: toastId,
         description: err instanceof Error ? err.message : 'Could not export orders',
       })
     } finally {
-      setExporting(false)
+      setExporting(null)
+    }
+  }
+
+  const handleExportPdf = async () => {
+    setExporting('pdf')
+    const toastId = toast.loading('Preparing PDF export…')
+    try {
+      const exportRows = await fetchExportRows()
+      if (!exportRows.length) {
+        toast.error('No orders to export', {
+          id: toastId,
+          description: 'Adjust filters or search to include orders in the export.',
+        })
+        return
+      }
+      await downloadRestaurantOrdersPdf(exportRows, buildExportMeta())
+      toast.success(`Exported ${exportRows.length} order(s) to PDF`, { id: toastId })
+    } catch (err) {
+      toast.error('Export failed', {
+        id: toastId,
+        description: err instanceof Error ? err.message : 'Could not export orders',
+      })
+    } finally {
+      setExporting(null)
     }
   }
 
@@ -494,20 +435,36 @@ export default function OrdersPage() {
               <p className="text-xs text-slate-300">CloudView Restaurant</p>
             </div>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            className="border-slate-600 text-slate-100 hover:bg-slate-800 hover:text-white"
-            onClick={() => void handleExportPdf()}
-            disabled={exporting || isLoading}
-          >
-            {exporting ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            ) : (
-              <FileDown className="h-4 w-4 mr-2" />
-            )}
-            Export PDF
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 gap-1.5 border border-slate-500 bg-slate-800/80 text-white hover:bg-slate-700 hover:text-white hover:border-slate-400"
+              onClick={() => void handleExportExcel()}
+              disabled={!!exporting || isLoading}
+            >
+              {exporting === 'excel' ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <FileDown className="h-4 w-4 mr-2" />
+              )}
+              Export Excel
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 gap-1.5 border border-slate-500 bg-slate-800/80 text-white hover:bg-slate-700 hover:text-white hover:border-slate-400"
+              onClick={() => void handleExportPdf()}
+              disabled={!!exporting || isLoading}
+            >
+              {exporting === 'pdf' ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <FileDown className="h-4 w-4 mr-2" />
+              )}
+              Export PDF
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -682,7 +639,7 @@ export default function OrdersPage() {
                                 variant="outline"
                                 className={`${billingBadgeClass(resolveOrderBillingState(order))} text-[10px] w-fit`}
                               >
-                                {formatOrderBillingState(resolveOrderBillingState(order))}
+                                {formatOrderBillingDetail(order)}
                               </Badge>
                             )}
                           </div>
@@ -694,32 +651,39 @@ export default function OrdersPage() {
                         </TableCell>
                         <TableCell className="text-right">
                           <div
-                            className="flex flex-col items-end gap-1"
+                            className="flex flex-row flex-nowrap items-center justify-end gap-1"
                             onClick={(e) => e.stopPropagation()}
                           >
-                            <div className="flex items-center justify-end gap-1">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 shrink-0"
+                              title="View order"
+                              onClick={() => setSelectedOrder(order)}
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                            </Button>
+                            {nextStatus && (
                               <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-7 w-7"
-                                onClick={() => setSelectedOrder(order)}
+                                size="sm"
+                                className="h-7 shrink-0 text-xs bg-amber-600 hover:bg-amber-700"
+                                onClick={() =>
+                                  statusMutation.mutate({ id: order.id, status: nextStatus })
+                                }
+                                disabled={statusMutation.isPending}
                               >
-                                <Eye className="w-3.5 h-3.5" />
+                                {getNextStatusLabel(order.status)}
                               </Button>
-                              {nextStatus && (
-                                <Button
-                                  size="sm"
-                                  className="h-7 text-xs bg-amber-600 hover:bg-amber-700"
-                                  onClick={() =>
-                                    statusMutation.mutate({ id: order.id, status: nextStatus })
-                                  }
-                                  disabled={statusMutation.isPending}
-                                >
-                                  {getNextStatusLabel(order.status)}
-                                </Button>
-                              )}
-                            </div>
-                            {renderDeliveredActions(order, true)}
+                            )}
+                            {order.status === 'DELIVERED' && (
+                              <RestaurantOrderDeliveredActions
+                                order={order}
+                                iconOnly
+                                onPay={openPayForOrder}
+                                onSendToHotel={(orderId) => sendToHotelMutation.mutate(orderId)}
+                                sendToHotelPending={sendToHotelMutation.isPending}
+                              />
+                            )}
                           </div>
                         </TableCell>
                       </TableRow>
@@ -901,10 +865,16 @@ export default function OrdersPage() {
               {selectedOrder.status === 'DELIVERED' && (
                 <div className="space-y-2 pt-2 border-t">
                   <p className="text-xs text-muted-foreground">
-                    Billing: {formatOrderBillingState(resolveOrderBillingState(selectedOrder))}
+                    Billing: {formatOrderBillingDetail(selectedOrder)}
                   </p>
                   <div className="flex flex-wrap gap-2">
-                    {renderDeliveredActions(selectedOrder)}
+                    <RestaurantOrderDeliveredActions
+                      order={selectedOrder}
+                      iconOnly
+                      onPay={openPayForOrder}
+                      onSendToHotel={(orderId) => sendToHotelMutation.mutate(orderId)}
+                      sendToHotelPending={sendToHotelMutation.isPending}
+                    />
                   </div>
                 </div>
               )}
@@ -913,98 +883,14 @@ export default function OrdersPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={!!payOrder} onOpenChange={(open) => !open && setPayOrder(null)}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Record payment — {payOrder?.orderNumber}</DialogTitle>
-          </DialogHeader>
-          {payOrder && (
-            <div className="space-y-4">
-              <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-3 text-sm">
-                <p className="text-muted-foreground">Amount due</p>
-                <p className="text-2xl font-bold text-emerald-800">
-                  ৳{computeOrderDue(payOrder.totalAmount, payOrder.payments ?? []).dueAmount.toFixed(0)}
-                </p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Paid orders are not sent to hotel billing.
-                </p>
-              </div>
-              <div className="space-y-2">
-                <Label>Payment method</Label>
-                <Select
-                  value={payMethod}
-                  onValueChange={(v) => {
-                    setPayMethod(v)
-                    if (v === 'CASH') {
-                      setPayReference(`CASH-${payOrder.orderNumber}`)
-                    }
-                  }}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {PAYMENT_METHOD_OPTIONS_WITH_PAYMENT.map((opt) => (
-                      <SelectItem key={opt.value} value={opt.value}>
-                        {opt.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              {paymentRequiresReference(payMethod) && (
-                <div className="space-y-2">
-                  <Label>Reference / receipt no.</Label>
-                  <Input
-                    value={payReference}
-                    onChange={(e) => setPayReference(e.target.value)}
-                    placeholder="Transaction reference"
-                  />
-                </div>
-              )}
-              <div className="space-y-2">
-                <Label>Notes (optional)</Label>
-                <Textarea
-                  value={payNotes}
-                  onChange={(e) => setPayNotes(e.target.value)}
-                  rows={2}
-                />
-              </div>
-            </div>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setPayOrder(null)}>
-              Cancel
-            </Button>
-            <Button
-              className="bg-emerald-600 hover:bg-emerald-700 text-white"
-              disabled={payMutation.isPending || !payOrder}
-              onClick={() => {
-                if (!payOrder) return
-                const reference =
-                  payReference.trim() ||
-                  (payMethod === 'CASH' ? `CASH-${payOrder.orderNumber}` : '')
-                if (!reference) {
-                  toast.error('Reference is required for this payment method')
-                  return
-                }
-                payMutation.mutate({
-                  orderId: payOrder.id,
-                  method: payMethod,
-                  reference,
-                  notes: payNotes.trim() || undefined,
-                })
-              }}
-            >
-              {payMutation.isPending ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                'Pay & print receipt'
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <RestaurantOrderPaymentDialog
+        order={payTarget?.order ?? null}
+        open={!!payTarget}
+        onOpenChange={(open) => {
+          if (!open) setPayTarget(null)
+        }}
+        roomGuestOrder={payTarget?.roomGuest ?? false}
+      />
     </div>
   )
 }

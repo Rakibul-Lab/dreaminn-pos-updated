@@ -43,6 +43,7 @@ export type RoomsAvailabilityMeta = {
     total: number
     available: number
     entryHeld: number
+    maintenance: number
   }>
 }
 

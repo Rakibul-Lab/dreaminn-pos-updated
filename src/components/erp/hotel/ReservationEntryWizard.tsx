@@ -40,6 +40,7 @@ import {
   buildRoomsAvailabilityQueryUrl,
   type RoomsAvailabilityResponse,
 } from '@/lib/rooms-availability-query'
+import { filterSellableRooms } from '@/lib/room-sellability'
 
 type RoomType = { id: string; name: string }
 
@@ -97,7 +98,7 @@ function maxQuantityForLine(
   allLines: EntryLineDraft[],
   categoryCapacityByType: Map<
     string,
-    { available: number; total: number; entryHeld: number; typeName: string }
+    { available: number; total: number; entryHeld: number; maintenance: number; typeName: string }
   >
 ): number {
   if (!line.roomTypeId || line.roomId) return 1
@@ -165,11 +166,11 @@ export function ReservationEntryWizard() {
       ),
     enabled: datesValid,
   })
-  const availableRooms = roomsData?.data ?? []
+  const availableRooms = filterSellableRooms(roomsData?.data ?? [])
   const categoryCapacityByType = useMemo(() => {
     const map = new Map<
       string,
-      { typeName: string; total: number; available: number; entryHeld: number }
+      { typeName: string; total: number; available: number; entryHeld: number; maintenance: number }
     >()
     for (const row of roomsData?.meta?.categoryCapacity ?? []) {
       map.set(row.roomTypeId, row)
@@ -589,6 +590,7 @@ export function ReservationEntryWizard() {
                       {row.typeName}:{' '}
                       <span className="font-medium text-foreground">{row.available} available</span>
                       {row.entryHeld > 0 ? ` (${row.entryHeld} in entry pool)` : ''}
+                      {row.maintenance > 0 ? ` · ${row.maintenance} maintenance` : ''}
                       {' · '}
                       {row.total} total
                     </span>
@@ -687,7 +689,7 @@ export function ReservationEntryWizard() {
                           ? (() => {
                               const cap = categoryCapacityByType.get(line.roomTypeId)
                               return cap
-                                ? `No. of rooms (${maxQty} available · ${cap.entryHeld} in entry pool · ${cap.total} total)`
+                                ? `No. of rooms (${maxQty} available · ${cap.entryHeld} in entry pool${cap.maintenance > 0 ? ` · ${cap.maintenance} maintenance` : ''} · ${cap.total} total)`
                                 : `No. of rooms (${maxQty} available)`
                             })()
                           : 'No. of rooms (0 available)'

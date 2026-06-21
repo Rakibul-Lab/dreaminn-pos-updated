@@ -343,6 +343,11 @@ export async function convertReservationEntry(input: {
     if (room.typeId !== slot.roomTypeId) {
       throw new Error(`Room ${room.roomNumber} is not in the expected category`)
     }
+    if (room.status === 'MAINTENANCE' || room.status === 'CLEANING') {
+      throw new Error(
+        `Room ${room.roomNumber} is not available (${room.status === 'MAINTENANCE' ? 'maintenance' : 'cleaning'})`
+      )
+    }
 
     const overlap = await db.booking.count({
       where: {

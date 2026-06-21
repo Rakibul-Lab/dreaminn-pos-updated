@@ -85,6 +85,7 @@ import {
   buildRoomsAvailabilityQueryUrl,
   type RoomsAvailabilityResponse,
 } from '@/lib/rooms-availability-query'
+import { filterSellableRooms } from '@/lib/room-sellability'
 import { ReservationEntryWizard } from './ReservationEntryWizard'
 
 interface Room {
@@ -522,7 +523,7 @@ export function NewReservationWizard({
   const categoryCapacityByType = useMemo(() => {
     const map = new Map<
       string,
-      { typeName: string; total: number; available: number; entryHeld: number }
+      { typeName: string; total: number; available: number; entryHeld: number; maintenance: number }
     >()
     for (const row of roomsData?.meta?.categoryCapacity ?? []) {
       map.set(row.roomTypeId, row)
@@ -704,8 +705,8 @@ export function NewReservationWizard({
   }, [billingSettingsData])
 
   const availableRooms = useMemo(() => {
-    const rooms = (((roomsData as { data?: Room[] })?.data || []) as Room[]).filter(
-      (room) => room.status !== 'MAINTENANCE' && room.status !== 'CLEANING'
+    const rooms = filterSellableRooms(
+      (((roomsData as { data?: Room[] })?.data || []) as Room[])
     )
 
     if (!isEditMode || !selectedRoomId) return rooms
@@ -713,6 +714,12 @@ export function NewReservationWizard({
 
     const booking = (editBookingData as { data?: { room?: Room } })?.data
     const currentRoom = booking?.room
+    if (
+      currentRoom?.id === selectedRoomId &&
+      !filterSellableRooms([currentRoom]).length
+    ) {
+      return rooms
+    }
     if (currentRoom?.id === selectedRoomId) {
       return [...rooms, currentRoom]
     }
@@ -2179,12 +2186,14 @@ export function NewReservationWizard({
                     total: number
                     available: number
                     entryHeld: number
+                    maintenance: number
                   }> } })?.meta?.categoryCapacity
-                    ?.filter((row) => row.entryHeld > 0)
+                    ?.filter((row) => row.entryHeld > 0 || row.maintenance > 0)
                     .map((row) => (
                       <p key={row.typeName}>
                         {row.typeName}: {row.available} bookable · {row.entryHeld} held by reservation
-                        entries (of {row.total})
+                        entries{row.maintenance > 0 ? ` · ${row.maintenance} maintenance` : ''} (of{' '}
+                        {row.total})
                       </p>
                     ))}
                 </div>

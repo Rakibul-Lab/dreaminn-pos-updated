@@ -33,6 +33,7 @@ import {
   buildRoomsAvailabilityQueryUrl,
   type RoomsAvailabilityResponse,
 } from '@/lib/rooms-availability-query'
+import { filterSellableRooms } from '@/lib/room-sellability'
 
 type EntryLine = {
   id: string
@@ -180,7 +181,7 @@ export function ReservationEntryConvertDialog({
     enabled: open && !!entryId && !!checkInDate && !!checkOutDate,
   })
 
-  const rooms = roomsRes?.data ?? []
+  const rooms = filterSellableRooms(roomsRes?.data ?? [])
   const roomById = useMemo(() => new Map(rooms.map((room) => [room.id, room])), [rooms])
 
   const unfulfilledLines = useMemo(

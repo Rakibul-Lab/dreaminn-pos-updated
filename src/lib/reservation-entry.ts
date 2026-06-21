@@ -17,6 +17,10 @@ import { generateGuestRegistrationNumber } from '@/lib/guest-registration-number
 import { generateReservationEntryConfirmationNumber } from '@/lib/confirmation-number.server'
 import { isArrivalOnOrBeforeBusinessDate } from '@/lib/room-effective-status'
 import { minCheckoutDatePickerValue } from '@/lib/hotel-times'
+import {
+  isRoomStatusBlockedForSale,
+  roomBlockedForSaleMessage,
+} from '@/lib/room-sellability'
 
 export function countLineSlots(line: {
   roomId: string | null
@@ -161,7 +165,8 @@ export async function fetchActiveReservationEntryLinesForRange(
 export async function countOverlappingBookingsForRoom(
   roomId: string,
   checkIn: Date,
-  checkOut: Date
+  checkOut: Date,
+  excludeBookingId?: string
 ) {
   return db.booking.count({
     where: {
@@ -169,6 +174,7 @@ export async function countOverlappingBookingsForRoom(
       status: { in: ['RESERVED', 'CHECKED_IN'] },
       checkIn: { lt: checkOut },
       checkOut: { gt: checkIn },
+      ...(excludeBookingId ? { id: { not: excludeBookingId } } : {}),
     },
   })
 }
@@ -178,6 +184,7 @@ export type CategoryCapacityInfo = {
   total: number
   available: number
   entryHeld: number
+  maintenance: number
 }
 
 export async function computeAvailableCapacityByType(
@@ -187,7 +194,6 @@ export async function computeAvailableCapacityByType(
   excludeBookingId?: string
 ): Promise<Map<string, CategoryCapacityInfo & { typeName: string }>> {
   const rooms = await db.room.findMany({
-    where: { status: { in: ['AVAILABLE', 'RESERVED', 'OCCUPIED'] } },
     select: { id: true, typeId: true, status: true, type: { select: { name: true } } },
   })
 
@@ -232,14 +238,18 @@ export async function computeAvailableCapacityByType(
       total: 0,
       available: 0,
       entryHeld: 0,
+      maintenance: 0,
     }
     current.total += 1
+
+    if (room.status === 'MAINTENANCE') {
+      current.maintenance += 1
+    }
 
     const isBlocked =
       bookedRoomIds.has(room.id) ||
       blockedRoomIds.has(room.id) ||
-      room.status === 'MAINTENANCE' ||
-      room.status === 'CLEANING'
+      isRoomStatusBlockedForSale(room.status)
 
     if (!isBlocked) {
       current.available += 1
@@ -331,8 +341,8 @@ export async function validateReservationEntryLines(
       if (room.typeId !== line.roomTypeId) {
         return `Room ${room.roomNumber} is not in the selected category`
       }
-      if (room.status === 'MAINTENANCE' || room.status === 'CLEANING') {
-        return `Room ${room.roomNumber} is not available`
+      if (isRoomStatusBlockedForSale(room.status)) {
+        return roomBlockedForSaleMessage(room.roomNumber, room.status)
       }
 
       const bookingOverlap = await countOverlappingBookingsForRoom(room.id, checkIn, checkOut)
@@ -486,6 +496,30 @@ export async function assertRoomAvailableForBooking(
   excludeEntryId?: string,
   excludeBookingId?: string
 ): Promise<string | null> {
+  const room = await db.room.findUnique({
+    where: { id: roomId },
+    select: { id: true, roomNumber: true, typeId: true, status: true },
+  })
+  if (!room) {
+    return 'Selected room not found'
+  }
+  if (isRoomStatusBlockedForSale(room.status)) {
+    return roomBlockedForSaleMessage(room.roomNumber, room.status)
+  }
+  if (room.typeId !== roomTypeId) {
+    return 'Selected room is not in the chosen category'
+  }
+
+  const bookingOverlap = await countOverlappingBookingsForRoom(
+    roomId,
+    checkIn,
+    checkOut,
+    excludeBookingId
+  )
+  if (bookingOverlap > 0) {
+    return `Room ${room.roomNumber} already has a booking in this date range`
+  }
+
   const entryLines = await fetchActiveReservationEntryLinesForRange(
     checkIn,
     checkOut,

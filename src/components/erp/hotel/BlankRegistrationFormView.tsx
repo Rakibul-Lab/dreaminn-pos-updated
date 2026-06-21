@@ -62,18 +62,19 @@ interface BlankRegistrationFormViewProps {
   showToolbar?: boolean
 }
 
+/** Inline fallback so name fields stay 50/50 even if the CSS file is cached or slow to load. */
+const RF_NAME_ROW_STYLE: React.CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: '1fr 1fr',
+  columnGap: '20px',
+  marginBottom: '9px',
+}
+
 export function BlankRegistrationFormView({ showToolbar = true }: BlankRegistrationFormViewProps) {
   const documentRef = useRef<HTMLDivElement>(null)
   const [downloadingPdf, setDownloadingPdf] = useState(false)
   const [printingPdf, setPrintingPdf] = useState(false)
   const [logoSrc, setLogoSrc] = useState('/brand-logo.png')
-  useEffect(() => {
-    const link = document.createElement('link')
-    link.rel = 'stylesheet'
-    link.href = '/registration-form-a4.css'
-    document.head.appendChild(link)
-    return () => link.remove()
-  }, [])
 
   useEffect(() => {
     import('@/lib/reservation-document-html')
@@ -233,7 +234,7 @@ export function BlankRegistrationFormView({ showToolbar = true }: BlankRegistrat
             </div>
             <div className="rf-guest-inner">
               <div className="rf-guest-left">
-                <div className="rf-name-row">
+                <div className="rf-name-row" style={RF_NAME_ROW_STYLE}>
                   <RegFieldRow label="Name :" />
                   <RegFieldRow label="Name :" />
                 </div>

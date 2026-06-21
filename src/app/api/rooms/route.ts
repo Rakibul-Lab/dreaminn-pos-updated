@@ -30,6 +30,10 @@ import {
   resolveRoomsViewContext,
   type RoomsViewDateScope,
 } from '@/lib/rooms-view-date-filter';
+import {
+  filterSellableRooms,
+  ROOM_STATUSES_DATE_SCOPED_CANDIDATES,
+} from '@/lib/room-sellability';
 
 function parseTotalPrice(body: Record<string, unknown>) {
   if (body.totalPrice === undefined && body.basePrice === undefined) {
@@ -66,8 +70,9 @@ export async function GET(request: NextRequest) {
     const dateScopedAvailability = Boolean(forBooking && checkIn && checkOut);
 
     if (forReservationEntry || dateScopedAvailability) {
-      // Date-based availability: room may be occupied today but free on the selected stay.
-      where.status = { in: ['AVAILABLE', 'RESERVED', 'OCCUPIED'] };
+      // Date-based availability: may include rooms occupied today but free on selected stay.
+      // Maintenance / cleaning are never sellable.
+      where.status = { in: [...ROOM_STATUSES_DATE_SCOPED_CANDIDATES] };
     } else if (forBooking) {
       where.status = 'AVAILABLE';
     } else if (status) {
@@ -123,6 +128,10 @@ export async function GET(request: NextRequest) {
       } catch (error) {
         console.error('Reservation entry room filter failed:', error);
       }
+    }
+
+    if (forBooking) {
+      rooms = filterSellableRooms(rooms);
     }
 
     let categoryCapacity: Awaited<ReturnType<typeof computeCategoryCapacityForStayDates>> = [];

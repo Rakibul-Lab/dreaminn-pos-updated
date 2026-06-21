@@ -1,8 +1,7 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
-import { requireRole } from '@/lib/auth';
+import { requireHotelManager } from '@/lib/auth';
 import { successResponse, errorResponse, notFoundResponse, logActivity } from '@/lib/api-utils';
-import { RoleType } from '@prisma/client';
 
 export async function GET() {
   try {
@@ -22,7 +21,7 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    const authResult = await requireRole(request, 'ADMIN' as RoleType);
+    const authResult = await requireHotelManager(request);
     if (authResult instanceof Response) return authResult;
 
     const body = await request.json();
@@ -62,7 +61,7 @@ export async function POST(request: NextRequest) {
 
 export async function PUT(request: NextRequest) {
   try {
-    const authResult = await requireRole(request, 'ADMIN' as RoleType);
+    const authResult = await requireHotelManager(request);
     if (authResult instanceof Response) return authResult;
 
     const body = await request.json();
@@ -108,5 +107,42 @@ export async function PUT(request: NextRequest) {
   } catch (error) {
     console.error('Room type update error:', error);
     return errorResponse('Failed to update room type', 500);
+  }
+}
+
+export async function DELETE(request: NextRequest) {
+  try {
+    const authResult = await requireHotelManager(request);
+    if (authResult instanceof Response) return authResult;
+
+    const id = request.nextUrl.searchParams.get('id')?.trim();
+    if (!id) {
+      return errorResponse('Room type ID is required');
+    }
+
+    const existing = await db.roomType.findUnique({
+      where: { id },
+      include: { _count: { select: { rooms: true } } },
+    });
+    if (!existing) {
+      return notFoundResponse('Room type');
+    }
+    if (existing._count.rooms > 0) {
+      return errorResponse('Cannot delete room type with assigned rooms');
+    }
+
+    await db.roomType.delete({ where: { id } });
+
+    await logActivity(
+      authResult.id,
+      'DELETE_ROOM_TYPE',
+      'hotel',
+      JSON.stringify({ roomTypeId: id, name: existing.name })
+    );
+
+    return successResponse(null, 'Room type deleted successfully');
+  } catch (error) {
+    console.error('Room type delete error:', error);
+    return errorResponse('Failed to delete room type', 500);
   }
 }

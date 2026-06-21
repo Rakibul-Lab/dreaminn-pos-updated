@@ -189,6 +189,11 @@ export async function PUT(
       if (!room) {
         return errorResponse('Room not found');
       }
+      if (['MAINTENANCE', 'CLEANING', 'OCCUPIED'].includes(room.status)) {
+        return errorResponse(
+          `Room is not available for booking (current status: ${room.status.toLowerCase().replace('_', ' ')})`
+        );
+      }
       updateData.roomId = body.roomId;
     }
 

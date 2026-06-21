@@ -229,6 +229,7 @@ export function RoomsPage() {
             total: number;
             available: number;
             entryHeld: number;
+            maintenance: number;
           }>;
         };
       }>(buildQuery()),
@@ -258,7 +259,10 @@ export function RoomsPage() {
     total: number;
     available: number;
     entryHeld: number;
-  }> } })?.meta?.categoryCapacity?.filter((row) => row.entryHeld > 0) ?? [];
+    maintenance: number;
+  }> } })?.meta?.categoryCapacity?.filter(
+    (row) => row.entryHeld > 0 || row.maintenance > 0
+  ) ?? [];
 
   const { data: housekeepingInProgressData } = useQuery({
     queryKey: ['housekeeping-room-status', 'IN_PROGRESS'],
@@ -1160,6 +1164,7 @@ export function RoomsPage() {
                   <li key={row.roomTypeId}>
                     <span className="font-medium">{row.typeName}:</span>{' '}
                     {row.available} available · {row.entryHeld} entry pool
+                    {row.maintenance > 0 ? ` · ${row.maintenance} maintenance` : ''}
                     <span className="text-violet-600"> (of {row.total} total)</span>
                   </li>
                 ))}

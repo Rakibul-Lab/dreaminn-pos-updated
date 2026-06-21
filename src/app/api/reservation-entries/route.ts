@@ -106,6 +106,10 @@ export async function POST(request: NextRequest) {
       guestPhone,
       guestEmail,
       guestAddress,
+      guestNationality,
+      guestIdType,
+      guestIdNumber,
+      nidPhysicallyReceived,
       company,
       companyLedgerId,
       discountEnabled,
@@ -121,6 +125,10 @@ export async function POST(request: NextRequest) {
       guestPhone?: string
       guestEmail?: string
       guestAddress?: string
+      guestNationality?: string
+      guestIdType?: string
+      guestIdNumber?: string
+      nidPhysicallyReceived?: boolean
       company?: string
       companyLedgerId?: string | null
       discountEnabled?: boolean
@@ -145,6 +153,10 @@ export async function POST(request: NextRequest) {
       guestPhone,
       guestEmail,
       guestAddress,
+      guestNationality,
+      guestIdType,
+      guestIdNumber,
+      nidPhysicallyReceived,
       company,
       companyLedgerId,
       discountEnabled,

@@ -17,6 +17,8 @@ import { generateGuestRegistrationNumber } from '@/lib/guest-registration-number
 import { generateReservationEntryConfirmationNumber } from '@/lib/confirmation-number.server'
 import { isArrivalOnOrBeforeBusinessDate } from '@/lib/room-effective-status'
 import { minCheckoutDatePickerValue } from '@/lib/hotel-times'
+import { getPhysicalIdTypeMissingFields } from '@/lib/reservation-completion-fields'
+import { isKnownNationality } from '@/lib/nationalities'
 import {
   isRoomStatusBlockedForSale,
   roomBlockedForSaleMessage,
@@ -906,6 +908,10 @@ export async function createReservationEntry(input: {
   guestPhone?: string
   guestEmail?: string
   guestAddress?: string
+  guestNationality?: string
+  guestIdType?: string
+  guestIdNumber?: string
+  nidPhysicallyReceived?: boolean
   company?: string
   companyLedgerId?: string | null
   discountEnabled?: boolean
@@ -934,6 +940,22 @@ export async function createReservationEntry(input: {
   const guestPhone = input.guestPhone?.trim() || null
   if (!guestName) throw new Error('Guest name is required')
   if (!guestPhone) throw new Error('Guest phone is required')
+
+  const requiresGuestIdFields = !input.companyLedgerId?.trim()
+
+  if (requiresGuestIdFields) {
+    const nationality = input.guestNationality?.trim() || ''
+    if (!isKnownNationality(nationality)) {
+      throw new Error('Nationality is required')
+    }
+    const typeMissing = getPhysicalIdTypeMissingFields({
+      idType: input.guestIdType ?? '',
+      nationality,
+    })
+    if (typeMissing.length > 0) {
+      throw new Error(`Required: ${typeMissing.join(', ')}`)
+    }
+  }
 
   let resolvedCompanyLedgerId: string | null = input.companyLedgerId?.trim() || null
   let resolvedCompany = formatGuestCompany(input.company)
@@ -994,6 +1016,10 @@ export async function createReservationEntry(input: {
       guestPhone,
       guestEmail: input.guestEmail?.trim() || null,
       guestAddress: input.guestAddress?.trim() || null,
+      guestNationality: requiresGuestIdFields ? input.guestNationality?.trim() || null : null,
+      guestIdType: requiresGuestIdFields ? input.guestIdType?.trim() || null : null,
+      guestIdNumber: requiresGuestIdFields ? input.guestIdNumber?.trim() || null : null,
+      nidPhysicallyReceived: requiresGuestIdFields,
       company: resolvedCompany,
       companyLedgerId: resolvedCompanyLedgerId,
       registrationNumber,

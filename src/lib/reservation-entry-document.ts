@@ -18,6 +18,9 @@ export type ReservationEntryDocumentData = {
   guestPhone: string | null
   guestEmail: string | null
   guestAddress: string | null
+  guestNationality?: string | null
+  guestIdType?: string | null
+  guestIdNumber?: string | null
   company: string | null
   totalRoomCharge: number
   advancePayment: number
@@ -164,6 +167,9 @@ export async function buildReservationEntryDocumentData(
     guestPhone: entry.guestPhone,
     guestEmail: entry.guestEmail,
     guestAddress: entry.guestAddress,
+    guestNationality: entry.guestNationality,
+    guestIdType: entry.guestIdType,
+    guestIdNumber: entry.guestIdNumber,
     company: entry.company,
     totalRoomCharge,
     advancePayment: entry.advancePayment,

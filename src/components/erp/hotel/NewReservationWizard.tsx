@@ -19,6 +19,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { IdDocumentScanner } from './IdDocumentScanner'
+import { GuestIdTypeField } from './GuestIdTypeField'
 import { GuestSearchField, type GuestSearchResult } from './GuestSearchField'
 import { CompanyLedgerSearchField } from './CompanyLedgerSearchField'
 import { NationalityField } from '@/components/erp/shared/NationalityField'
@@ -1009,7 +1010,11 @@ export function NewReservationWizard({
     }
 
     if (!isCorporateGuest && nidPhysicallyReceived && !hasCompanySelected) {
-      const physicalMissing = getPhysicalIdMissingFields({ idNumber })
+      const physicalMissing = getPhysicalIdMissingFields({
+        idNumber,
+        idType,
+        nationality: resolvedGuestNationality(),
+      })
       if (physicalMissing.length > 0) {
         toast.error(`Required: ${physicalMissing.join(', ')}`)
         return null
@@ -1302,6 +1307,7 @@ export function NewReservationWizard({
   const completeReservationMissing = getCompleteReservationMissingFields({
     nationality: guestNationality,
     idNumber,
+    idType,
     email: guestEmail,
     address: guestAddress,
     idDocumentCount: idDocuments.length,
@@ -1358,7 +1364,11 @@ export function NewReservationWizard({
     }
 
     if (nidPhysicallyReceived && !hasCompanySelected) {
-      const physicalMissing = getPhysicalIdMissingFields({ idNumber })
+      const physicalMissing = getPhysicalIdMissingFields({
+        idNumber,
+        idType,
+        nationality: resolvedGuestNationality(),
+      })
       if (physicalMissing.length > 0) {
         return `Required: ${physicalMissing.join(', ')}`
       }
@@ -1372,6 +1382,7 @@ export function NewReservationWizard({
     const completeMissing = getCompleteReservationMissingFields({
       nationality: guestNationality,
       idNumber,
+      idType,
       email: guestEmail,
       address: guestAddress,
       idDocumentCount: idDocuments.length,
@@ -1432,7 +1443,9 @@ export function NewReservationWizard({
     }
 
     const guestError = validateGuestStep({
-      forInitialSave: options.asInitial === true && options.completeInitial !== true,
+      forInitialSave:
+        (options.asInitial === true && options.completeInitial !== true) ||
+        (isEditMode && isInitialFlow && !options.completeInitial),
     })
     if (guestError) return guestError
 
@@ -1448,6 +1461,7 @@ export function NewReservationWizard({
         : getCompleteReservationMissingFields({
             nationality: guestNationality,
             idNumber,
+            idType,
             email: guestEmail,
             address: guestAddress,
             idDocumentCount: idDocuments.length,
@@ -1853,12 +1867,21 @@ export function NewReservationWizard({
                             When on, upload ID documents from the bookings list before checkout.
                             {hasCompanySelected
                               ? ' Company guests do not need ID/passport numbers here.'
-                              : ' Direct/walk-in guests must enter ID/passport details.'}
+                              : ' Select document type and enter ID/passport number to continue.'}
                           </p>
                         </div>
                         <Switch
                           checked={nidPhysicallyReceived}
-                          onCheckedChange={(on) => patchGuest({ nidPhysicallyReceived: on })}
+                          onCheckedChange={(on) => {
+                            const patch: Partial<GuestDraft> = { nidPhysicallyReceived: on }
+                            if (on && !hasCompanySelected) {
+                              patch.idType = resolveIdTypeForNationality(
+                                guestNationality,
+                                idType
+                              )
+                            }
+                            patchGuest(patch)
+                          }}
                           aria-label="ID documents physically received"
                         />
                       </div>
@@ -1891,12 +1914,29 @@ export function NewReservationWizard({
                     </div>
                   )}
 
-                  <NationalityField
-                    value={guestNationality}
-                    onChange={handleNationalityChange}
-                    label="Nationality *"
-                    placeholder="Select nationality…"
-                  />
+                  {nidPhysicallyReceived && !hasCompanySelected ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-start">
+                      <NationalityField
+                        value={guestNationality}
+                        onChange={handleNationalityChange}
+                        label="Nationality *"
+                        placeholder="Select nationality…"
+                      />
+                      <GuestIdTypeField
+                        nationality={guestNationality}
+                        idType={idType}
+                        onIdTypeChange={(type) => patchGuest({ idType: type })}
+                        required
+                      />
+                    </div>
+                  ) : (
+                    <NationalityField
+                      value={guestNationality}
+                      onChange={handleNationalityChange}
+                      label="Nationality *"
+                      placeholder="Select nationality…"
+                    />
+                  )}
 
                   {showCompleteRequiredMarkers && (
                     <p className="text-sm font-medium text-foreground">ID document images *</p>
@@ -2014,7 +2054,8 @@ export function NewReservationWizard({
                   </p>
                 ) : nidPhysicallyReceived ? (
                   <p className="text-xs text-sky-700 sm:col-span-2">
-                    Physical ID documents will be collected — upload scanned copies from the bookings list before checkout.
+                    Select ID document type and enter the ID/passport number. Physical copies
+                    will be collected — upload scanned copies from the bookings list before checkout.
                   </p>
                 ) : isInitialFlow ? (
                   <p className="text-xs text-sky-700 sm:col-span-2">

@@ -1,16 +1,9 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import {
   Dialog,
   DialogContent,
@@ -19,11 +12,10 @@ import {
 } from '@/components/ui/dialog'
 import { toast } from 'sonner'
 import { Camera, FileUp, Loader2, ScanLine, Scan, X } from 'lucide-react'
+import { GuestIdTypeField } from '@/components/erp/hotel/GuestIdTypeField'
 import { mergeIdFields, hasMinimumScanData, type ExtractedIdFields, type IdDocumentType } from '@/lib/id-ocr'
 import { tryDecodeNidBarcode } from '@/lib/id-barcode'
 import {
-  defaultIdTypeForNationality,
-  getIdTypeOptionsForNationality,
   isBangladeshNationality,
 } from '@/lib/id-type-label'
 
@@ -59,21 +51,6 @@ export function IdDocumentScanner({
   onDocumentsChange,
   onScanComplete,
 }: IdDocumentScannerProps) {
-  const idTypeOptions = useMemo(
-    () => getIdTypeOptionsForNationality(nationality),
-    [nationality]
-  )
-
-  const effectiveIdType = idTypeOptions.some((opt) => opt.value === idType)
-    ? idType
-    : defaultIdTypeForNationality(nationality)
-
-  useEffect(() => {
-    if (effectiveIdType !== idType) {
-      onIdTypeChange(effectiveIdType)
-    }
-  }, [effectiveIdType, idType, onIdTypeChange])
-
   const scannerInputRef = useRef<HTMLInputElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -372,24 +349,11 @@ export function IdDocumentScanner({
         </div>
       </div>
 
-      <div className="space-y-2">
-        <Label className="text-xs">Document type</Label>
-        <Select
-          value={effectiveIdType}
-          onValueChange={(v) => onIdTypeChange(v as IdDocumentType)}
-        >
-          <SelectTrigger className="h-9 bg-card">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {idTypeOptions.map((opt) => (
-              <SelectItem key={opt.value} value={opt.value}>
-                {opt.value === 'national_id' ? 'National ID (NID)' : opt.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+      <GuestIdTypeField
+        nationality={nationality}
+        idType={idType}
+        onIdTypeChange={onIdTypeChange}
+      />
 
       <input
         ref={scannerInputRef}

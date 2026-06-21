@@ -1,5 +1,6 @@
 import { hasBookingCompany } from '@/lib/booking-company'
 import { isKnownNationality } from '@/lib/nationalities'
+import { getIdTypeOptionsForNationality } from '@/lib/id-type-label'
 
 /** ID/passport is required only for direct/walk-in guests when ID is physically received. */
 export function requiresIdPassportFields(input: {
@@ -14,11 +15,27 @@ export function requiresIdPassportFields(input: {
   return input.requireForCompleteReservation !== false
 }
 
+/** Document type required when ID is physically received (entry flow may omit ID number). */
+export function getPhysicalIdTypeMissingFields(guest: {
+  idType?: string | null
+  nationality?: string | null
+}): string[] {
+  const missing: string[] = []
+  const options = getIdTypeOptionsForNationality(guest.nationality)
+  const type = guest.idType?.trim()
+  if (!type || !options.some((opt) => opt.value === type)) {
+    missing.push('ID document type')
+  }
+  return missing
+}
+
 /** Fields required when ID documents are physically received at the front desk. */
 export function getPhysicalIdMissingFields(guest: {
   idNumber: string
+  idType?: string | null
+  nationality?: string | null
 }): string[] {
-  const missing: string[] = []
+  const missing = getPhysicalIdTypeMissingFields(guest)
   if (!guest.idNumber.trim()) missing.push('ID / Passport number')
   return missing
 }
@@ -61,6 +78,7 @@ export function getCorporateGuestMissingFields(guest: {
 export function getCompleteReservationMissingFields(guest: {
   nationality: string
   idNumber: string
+  idType?: string | null
   email: string
   address: string
   idDocumentCount: number
@@ -69,12 +87,24 @@ export function getCompleteReservationMissingFields(guest: {
 }): string[] {
   const missing: string[] = []
   if (!isKnownNationality(guest.nationality)) missing.push('Nationality')
-  const requireId = requiresIdPassportFields({
-    hasCompanySelected: guest.hasCompanySelected,
-    nidPhysicallyReceived: guest.nidPhysicallyReceived,
-    requireForCompleteReservation: true,
-  })
-  if (requireId && !guest.idNumber.trim()) missing.push('ID / Passport number')
+
+  if (guest.nidPhysicallyReceived === true && !guest.hasCompanySelected) {
+    missing.push(
+      ...getPhysicalIdMissingFields({
+        idNumber: guest.idNumber,
+        idType: guest.idType,
+        nationality: guest.nationality,
+      })
+    )
+  } else {
+    const requireId = requiresIdPassportFields({
+      hasCompanySelected: guest.hasCompanySelected,
+      nidPhysicallyReceived: guest.nidPhysicallyReceived,
+      requireForCompleteReservation: true,
+    })
+    if (requireId && !guest.idNumber.trim()) missing.push('ID / Passport number')
+  }
+
   if (guest.nidPhysicallyReceived !== true && !guest.hasCompanySelected) {
     if (!guest.email.trim()) missing.push('Email')
     if (!guest.address.trim()) missing.push('Address')
@@ -98,14 +128,38 @@ export function getInitialReservationMissingFields(guest: {
   return missing
 }
 
-export function canBookingCheckIn(booking: {
-  isInitialReservation?: boolean | null
-  nidPhysicallyReceived?: boolean | null
-  isCorporateGuest?: boolean | null
-}): boolean {
+export function canBookingCheckIn(
+  booking: {
+    isInitialReservation?: boolean | null
+    nidPhysicallyReceived?: boolean | null
+    isCorporateGuest?: boolean | null
+    company?: string | null
+    companyLedgerId?: string | null
+  },
+  options?: {
+    customer?: Parameters<typeof isReservationGuestProfileComplete>[0]
+    idDocumentCount?: number
+  }
+): boolean {
+  if (booking.isInitialReservation === true) return false
+
+  if (options?.customer) {
+    return isReservationGuestProfileComplete(
+      options.customer,
+      options.idDocumentCount ?? 0,
+      {
+        nidPhysicallyReceived: booking.nidPhysicallyReceived,
+        isCorporateGuest: booking.isCorporateGuest,
+        company: booking.company,
+        companyLedgerId: booking.companyLedgerId,
+      }
+    )
+  }
+
+  // Without guest profile data, only allow check-in when not initial and not physical-ID-only.
   if (booking.isCorporateGuest === true) return true
-  if (booking.nidPhysicallyReceived === true) return true
-  return booking.isInitialReservation !== true
+  if (booking.nidPhysicallyReceived === true) return false
+  return true
 }
 
 export function isReservationGuestProfileComplete(
@@ -151,6 +205,7 @@ export function isReservationGuestProfileComplete(
     getCompleteReservationMissingFields({
       nationality: customer.nationality ?? '',
       idNumber: customer.idNumber ?? '',
+      idType: customer.idType,
       email: customer.email ?? '',
       address: customer.address ?? '',
       idDocumentCount,

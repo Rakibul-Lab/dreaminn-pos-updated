@@ -42,6 +42,9 @@ async function upsertEntryCustomer(entry: {
   guestPhone: string | null
   guestEmail: string | null
   guestAddress: string | null
+  guestNationality?: string | null
+  guestIdType?: string | null
+  guestIdNumber?: string | null
   company: string | null
   registrationNumber?: string | null
 }) {
@@ -58,7 +61,9 @@ async function upsertEntryCustomer(entry: {
     email: entry.guestEmail?.trim() || null,
     address: entry.guestAddress?.trim() || null,
     company: entry.company?.trim() || null,
-    nationality: 'Bangladesh',
+    nationality: entry.guestNationality?.trim() || 'Bangladesh',
+    idType: entry.guestIdType?.trim() || null,
+    idNumber: entry.guestIdNumber?.trim() || null,
   }
 
   if (customer) {
@@ -134,6 +139,9 @@ async function resolveCustomerForConvertedSlot(input: {
     guestPhone: string | null
     guestEmail: string | null
     guestAddress: string | null
+    guestNationality?: string | null
+    guestIdType?: string | null
+    guestIdNumber?: string | null
     company: string | null
     registrationNumber?: string | null
     lines: Array<{ roomId: string | null; quantity: number; lineBookings: unknown[] }>
@@ -509,7 +517,9 @@ export async function convertReservationEntry(input: {
         vatPercent: 15,
         serviceChargePercent: 10,
         isInitialReservation: true,
-        nidPhysicallyReceived: useIndividualGuests,
+        nidPhysicallyReceived: useIndividualGuests
+          ? false
+          : entry.nidPhysicallyReceived === true,
         discountEnabled: applyDiscount,
         discountType: applyDiscount ? resolvedDiscountType : null,
         discountValue: applyDiscount ? resolvedDiscountValue : 0,

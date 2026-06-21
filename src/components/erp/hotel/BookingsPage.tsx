@@ -100,8 +100,14 @@ interface Booking {
     id: string;
     name: string;
     phone: string;
-    email?: string;
+    email?: string | null;
+    address?: string | null;
+    nationality?: string | null;
+    idType?: string | null;
+    idNumber?: string | null;
     registrationNumber?: string | null;
+    company?: string | null;
+    designation?: string | null;
   };
   room: { id: string; roomNumber: string; totalPrice: number; type: { name: string } };
 }
@@ -1024,7 +1030,10 @@ export function BookingsPage() {
                         <span
                           className="inline-flex"
                           title={
-                            !canBookingCheckIn(booking)
+                            !canBookingCheckIn(booking, {
+                              customer: booking.customer,
+                              idDocumentCount: booking.idDocumentCount ?? 0,
+                            })
                               ? booking.nidPhysicallyReceived
                                 ? 'Complete required guest details before check-in'
                                 : 'Complete the initial reservation (ID documents) using Edit before check-in'
@@ -1035,17 +1044,32 @@ export function BookingsPage() {
                             variant="outline"
                             size="icon"
                             className={`h-7 w-7 shrink-0 ${
-                              !canBookingCheckIn(booking)
+                              !canBookingCheckIn(booking, {
+                              customer: booking.customer,
+                              idDocumentCount: booking.idDocumentCount ?? 0,
+                            })
                                 ? 'border-muted-foreground/30 text-muted-foreground'
                                 : 'border-emerald-600 text-emerald-700 hover:bg-emerald-50'
                             }`}
                             onClick={() => {
-                              if (!canBookingCheckIn(booking)) return;
+                              if (
+                                !canBookingCheckIn(booking, {
+                                  customer: booking.customer,
+                                  idDocumentCount: booking.idDocumentCount ?? 0,
+                                })
+                              )
+                                return;
                               setCheckInPayment('0');
                               setCheckInPaymentMethod('CASH');
                               handleOpenCheckIn(booking.id);
                             }}
-                            disabled={checkInMutation.isPending || !canBookingCheckIn(booking)}
+                            disabled={
+                              checkInMutation.isPending ||
+                              !canBookingCheckIn(booking, {
+                                customer: booking.customer,
+                                idDocumentCount: booking.idDocumentCount ?? 0,
+                              })
+                            }
                           >
                             <LogIn className="w-3 h-3" />
                           </Button>

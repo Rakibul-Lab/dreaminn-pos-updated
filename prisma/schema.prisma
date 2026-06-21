@@ -236,6 +236,10 @@ model ReservationEntry {
   guestPhone        String?                @map("guest_phone")
   guestEmail        String?                @map("guest_email")
   guestAddress      String?                @map("guest_address")
+  guestNationality  String?                @map("guest_nationality")
+  guestIdType       String?                @map("guest_id_type")
+  guestIdNumber     String?                @map("guest_id_number")
+  nidPhysicallyReceived Boolean            @default(false) @map("nid_physically_received")
   company           String?
   companyLedgerId   String?                @map("company_ledger_id")
   totalAmount       Float                  @default(0) @map("total_amount")

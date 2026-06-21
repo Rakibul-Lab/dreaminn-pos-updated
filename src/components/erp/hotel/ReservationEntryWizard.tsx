@@ -41,6 +41,12 @@ import {
   type RoomsAvailabilityResponse,
 } from '@/lib/rooms-availability-query'
 import { filterSellableRooms } from '@/lib/room-sellability'
+import { NationalityField } from '@/components/erp/shared/NationalityField'
+import { GuestIdTypeField } from '@/components/erp/hotel/GuestIdTypeField'
+import type { IdDocumentType } from '@/lib/id-ocr'
+import { getIdTypeOptionsForNationality } from '@/lib/id-type-label'
+import { isKnownNationality } from '@/lib/nationalities'
+import { getPhysicalIdTypeMissingFields } from '@/lib/reservation-completion-fields'
 
 type RoomType = { id: string; name: string }
 
@@ -135,6 +141,9 @@ export function ReservationEntryWizard() {
   const [guestPhone, setGuestPhone] = useState('')
   const [guestEmail, setGuestEmail] = useState('')
   const [guestAddress, setGuestAddress] = useState('')
+  const [guestNationality, setGuestNationality] = useState('Bangladesh')
+  const [guestIdType, setGuestIdType] = useState<IdDocumentType | ''>('')
+  const [guestIdNumber, setGuestIdNumber] = useState('')
   const [companyLedgerId, setCompanyLedgerId] = useState('')
   const [guestCompany, setGuestCompany] = useState(DEFAULT_GUEST_COMPANY)
   const [typedCompany, setTypedCompany] = useState('')
@@ -297,11 +306,31 @@ export function ReservationEntryWizard() {
     ? guestCompany
     : typedCompany.trim() || guestCompany
 
+  const requiresGuestIdFields = !companyLedgerId
+
+  const handleNationalityChange = (nationality: string) => {
+    setGuestNationality(nationality)
+    setGuestIdType((prev) => {
+      const options = getIdTypeOptionsForNationality(nationality)
+      return options.some((opt) => opt.value === prev) ? prev : ''
+    })
+  }
+
   const validateEntryStep = (): string | null => {
     if (!datesValid) return 'Select valid check-in and check-out dates'
     if (!guestName.trim()) return 'Guest name is required'
     const phoneError = getPhoneValidationMessage(guestPhone)
     if (phoneError) return phoneError
+    if (requiresGuestIdFields) {
+      if (!isKnownNationality(guestNationality)) return 'Nationality is required'
+      const typeMissing = getPhysicalIdTypeMissingFields({
+        idType: guestIdType,
+        nationality: guestNationality,
+      })
+      if (typeMissing.length > 0) {
+        return `Required: ${typeMissing.join(', ')}`
+      }
+    }
     const validLines = lines.filter((line) => line.roomTypeId)
     if (!validLines.length) return 'Add at least one room category line'
     const requestedByType = new Map<string, number>()
@@ -363,6 +392,10 @@ export function ReservationEntryWizard() {
       guestPhone: guestPhone.trim(),
       guestEmail: guestEmail.trim() || undefined,
       guestAddress: guestAddress.trim() || undefined,
+      guestNationality: requiresGuestIdFields ? guestNationality.trim() : undefined,
+      guestIdType: requiresGuestIdFields && guestIdType ? guestIdType : undefined,
+      guestIdNumber: requiresGuestIdFields ? guestIdNumber.trim() || undefined : undefined,
+      nidPhysicallyReceived: !companyLedgerId,
       company: companyLedgerId ? undefined : resolvedCompanyLabel,
       companyLedgerId: companyLedgerId || null,
       discountEnabled,
@@ -392,6 +425,9 @@ export function ReservationEntryWizard() {
     setGuestPhone('')
     setGuestEmail('')
     setGuestAddress('')
+    setGuestNationality('Bangladesh')
+    setGuestIdType('')
+    setGuestIdNumber('')
     setCompanyLedgerId('')
     setGuestCompany(DEFAULT_GUEST_COMPANY)
     setTypedCompany('')
@@ -514,6 +550,44 @@ export function ReservationEntryWizard() {
             </div>
           </div>
 
+          {!companyLedgerId ? (
+            <div
+              className="grid grid-cols-1 gap-4 md:grid-cols-3"
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+                gap: '1rem',
+              }}
+            >
+              <div className="min-w-0">
+                <NationalityField
+                  value={guestNationality}
+                  onChange={handleNationalityChange}
+                  label="Nationality *"
+                  placeholder="Select nationality…"
+                />
+              </div>
+              <div className="min-w-0">
+                <GuestIdTypeField
+                  nationality={guestNationality}
+                  idType={guestIdType}
+                  onIdTypeChange={setGuestIdType}
+                  allowUnset
+                  required
+                />
+              </div>
+              <div className="min-w-0 space-y-2">
+                <Label>ID / Passport number</Label>
+                <Input
+                  value={guestIdNumber}
+                  onChange={(e) => setGuestIdNumber(e.target.value)}
+                  placeholder="Optional — can be added later"
+                  className="h-9 bg-card"
+                />
+              </div>
+            </div>
+          ) : null}
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>Company (ledger)</Label>
@@ -610,8 +684,12 @@ export function ReservationEntryWizard() {
               const maxQty = maxQuantityForLine(line, lines, categoryCapacityByType)
               const categoryOnly = !line.roomId && !!line.roomTypeId
               return (
-                <div key={line.id} className="grid grid-cols-1 md:grid-cols-12 gap-2 items-end rounded-lg border p-3">
-                  <div className="md:col-span-4 space-y-1">
+                <div
+                  key={line.id}
+                  className="overflow-x-auto rounded-lg border p-3"
+                >
+                  <div className="grid min-w-[36rem] grid-cols-[minmax(0,2fr)_minmax(0,1.5fr)_minmax(0,1fr)_auto] gap-3 items-end">
+                  <div className="min-w-0 space-y-1">
                     <Label className="text-xs text-muted-foreground">Category</Label>
                     <Select
                       value={line.roomTypeId || 'none'}
@@ -634,7 +712,7 @@ export function ReservationEntryWizard() {
                         })
                       }}
                     >
-                      <SelectTrigger>
+                      <SelectTrigger className="w-full">
                         <SelectValue placeholder="Room category" />
                       </SelectTrigger>
                       <SelectContent>
@@ -653,14 +731,14 @@ export function ReservationEntryWizard() {
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="md:col-span-3 space-y-1">
+                  <div className="min-w-0 space-y-1">
                     <Label className="text-xs text-muted-foreground">Room (optional)</Label>
                     <Select
                       value={line.roomId || 'none'}
                       onValueChange={(v) => updateLine(line.id, { roomId: v === 'none' ? '' : v })}
                       disabled={!line.roomTypeId || roomsLoading}
                     >
-                      <SelectTrigger>
+                      <SelectTrigger className="w-full">
                         <SelectValue placeholder="Any room" />
                       </SelectTrigger>
                       <SelectContent>
@@ -682,7 +760,7 @@ export function ReservationEntryWizard() {
                       </p>
                     ) : null}
                   </div>
-                  <div className="md:col-span-3 space-y-1">
+                  <div className="min-w-0 space-y-1">
                     <Label className="text-xs text-muted-foreground">
                       {categoryOnly
                         ? maxQty > 0
@@ -722,7 +800,7 @@ export function ReservationEntryWizard() {
                       </p>
                     ) : null}
                   </div>
-                  <div className="md:col-span-2 flex justify-end">
+                  <div className="flex justify-end self-end">
                     <Button
                       type="button"
                       variant="ghost"
@@ -733,6 +811,7 @@ export function ReservationEntryWizard() {
                     >
                       <Trash2 className="h-4 w-4 text-destructive" />
                     </Button>
+                  </div>
                   </div>
                 </div>
               )
@@ -889,6 +968,32 @@ export function ReservationEntryWizard() {
                 {guestPhone ? ` · ${guestPhone}` : ''}
               </dd>
             </div>
+            {requiresGuestIdFields && guestNationality ? (
+              <div>
+                <dt className="text-muted-foreground">Nationality</dt>
+                <dd>{guestNationality}</dd>
+              </div>
+            ) : null}
+            {requiresGuestIdFields && guestIdType ? (
+              <div>
+                <dt className="text-muted-foreground">ID / Passport</dt>
+                <dd>
+                  {guestIdType === 'national_id'
+                    ? 'National ID (NID)'
+                    : guestIdType === 'passport'
+                      ? 'Passport'
+                      : guestIdType === 'driving_license'
+                        ? 'Driving License'
+                        : guestIdType}
+                  {guestIdNumber.trim() ? ` · ${guestIdNumber.trim()}` : ''}
+                </dd>
+              </div>
+            ) : guestIdNumber.trim() ? (
+              <div>
+                <dt className="text-muted-foreground">ID / Passport number</dt>
+                <dd>{guestIdNumber.trim()}</dd>
+              </div>
+            ) : null}
             {guestAddress.trim() ? (
               <div>
                 <dt className="text-muted-foreground">Address</dt>

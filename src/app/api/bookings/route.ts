@@ -29,7 +29,7 @@ import { getRoomNightlyTotal } from '@/lib/room-pricing';
 import { Prisma, RoleType } from '@prisma/client';
 import { processAllOverdueStayExtensions } from '@/lib/auto-stay-extension';
 import { ensureCustomerRegistrationNumber, generateGuestRegistrationNumber } from '@/lib/guest-registration-number';
-import { getCorporateGuestMissingFields, getPhysicalIdMissingFields } from '@/lib/reservation-completion-fields';
+import { getCorporateGuestMissingFields, getPhysicalIdMissingFields, isReservationGuestProfileComplete } from '@/lib/reservation-completion-fields';
 import { hasBookingCompany } from '@/lib/booking-company';
 import { buildGuestStayOverlapWhere } from '@/lib/guest-stay-date-filter';
 import { assertRoomAvailableForBooking, listReservationEntries } from '@/lib/reservation-entry';
@@ -282,6 +282,8 @@ export async function POST(request: NextRequest) {
     if (nidReceived && !corporateGuest && !hasCompanySelected) {
       const idMissing = getPhysicalIdMissingFields({
         idNumber: customer.idNumber ?? '',
+        idType: customer.idType ?? '',
+        nationality: customer.nationality ?? '',
       });
       if (idMissing.length > 0) {
         return errorResponse(`Required when ID documents are physically received: ${idMissing.join(', ')}`);
@@ -538,6 +540,24 @@ export async function POST(request: NextRequest) {
     }
 
     if (checkInNow === true) {
+      const idDocCount = Array.isArray(idDocumentPaths) ? idDocumentPaths.length : 0;
+      const customerForCheckIn = await db.customer.findUnique({ where: { id: customerId } });
+      if (
+        !customerForCheckIn ||
+        !isReservationGuestProfileComplete(customerForCheckIn, idDocCount, {
+          nidPhysicallyReceived: nidReceived,
+          isCorporateGuest: corporateGuest,
+          company: company ?? customerForCheckIn.company,
+          companyLedgerId: companyLedgerId ?? null,
+        })
+      ) {
+        return errorResponse(
+          corporateGuest
+            ? 'Complete corporate guest details before check-in'
+            : 'Complete guest profile (nationality, ID, email, address, and ID documents as required) before check-in'
+        );
+      }
+
       await db.room.update({
         where: { id: roomId },
         data: { status: 'OCCUPIED' },

@@ -391,6 +391,10 @@ export async function PUT(
         customerPatch?.idNumber !== undefined
           ? String(customerPatch.idNumber || '').trim()
           : existing.customer.idNumber?.trim() || '';
+      const idType =
+        customerPatch?.idType !== undefined
+          ? String(customerPatch.idType || '').trim()
+          : existing.customer.idType?.trim() || '';
       const nationality =
         customerPatch?.nationality !== undefined
           ? String(customerPatch.nationality || '').trim()
@@ -399,6 +403,7 @@ export async function PUT(
       const missing = getCompleteReservationMissingFields({
         nationality,
         idNumber,
+        idType,
         email,
         address,
         idDocumentCount: idDocCount,

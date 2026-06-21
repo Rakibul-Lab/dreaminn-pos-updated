@@ -17,6 +17,9 @@ import {
   Send,
   History,
   List,
+  FileSpreadsheet,
+  FileText,
+  Download,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
@@ -44,6 +47,11 @@ import { PAYMENT_METHOD_OPTIONS } from '@/lib/payment-method'
 import { openHotelBeverageReceiptTab } from '@/lib/hotel-beverage-receipt-navigation'
 import { formatBdt } from '@/lib/currency'
 import { HotelBeverageAllSalesDialog } from '@/components/erp/hotel/HotelBeverageAllSalesDialog'
+import { HotelBeverageAddItemDialog } from '@/components/erp/hotel/HotelBeverageAddItemDialog'
+import {
+  downloadBeverageMenuExcel,
+  downloadBeverageMenuPdf,
+} from '@/lib/hotel-beverage-menu-export'
 
 type BeverageCategory = {
   id: string
@@ -165,6 +173,8 @@ export function HotelBeverageSalesPage() {
   const [showNotes, setShowNotes] = useState(false)
   const [recentOpen, setRecentOpen] = useState(false)
   const [allSalesOpen, setAllSalesOpen] = useState(false)
+  const [addBeverageOpen, setAddBeverageOpen] = useState(false)
+  const [exportingMenu, setExportingMenu] = useState<'excel' | 'pdf' | null>(null)
 
   useEffect(() => {
     const id = window.setInterval(() => setNow(new Date()), 1000)
@@ -227,6 +237,58 @@ export function HotelBeverageSalesPage() {
       room.room_type.toLowerCase().includes(q)
     )
   }, [])
+
+  const itemsForExport = useMemo(() => {
+    if (selectedCategory === 'all') return beverageItems
+    return beverageItems.filter((item) => item.categoryId === selectedCategory)
+  }, [beverageItems, selectedCategory])
+
+  const menuCategoryLabel =
+    selectedCategory === 'all'
+      ? 'All beverages'
+      : categories.find((c) => c.id === selectedCategory)?.name ?? 'All beverages'
+
+  const buildMenuExportMeta = () => ({
+    categoryLabel: menuCategoryLabel,
+    exportedAt: new Date(),
+    generatedBy: user
+      ? { name: user.name, email: user.email, role: user.role }
+      : undefined,
+  })
+
+  const handleExportMenuExcel = async () => {
+    if (!itemsForExport.length) {
+      toast.error('No beverages to export')
+      return
+    }
+    setExportingMenu('excel')
+    const toastId = toast.loading('Preparing Excel export…')
+    try {
+      await downloadBeverageMenuExcel(itemsForExport, buildMenuExportMeta())
+      toast.success(`Exported ${itemsForExport.length} beverage(s) to Excel`, { id: toastId })
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Export failed', { id: toastId })
+    } finally {
+      setExportingMenu(null)
+    }
+  }
+
+  const handleExportMenuPdf = async () => {
+    if (!itemsForExport.length) {
+      toast.error('No beverages to export')
+      return
+    }
+    setExportingMenu('pdf')
+    const toastId = toast.loading('Preparing PDF export…')
+    try {
+      await downloadBeverageMenuPdf(itemsForExport, buildMenuExportMeta())
+      toast.success(`Exported ${itemsForExport.length} beverage(s) to PDF`, { id: toastId })
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Export failed', { id: toastId })
+    } finally {
+      setExportingMenu(null)
+    }
+  }
 
   const guardItemSelection = useCallback(() => {
     if (saleMode === 'ROOM' && !roomId) {
@@ -404,7 +466,7 @@ export function HotelBeverageSalesPage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5 shrink-0">
+          <div className="flex flex-wrap items-center justify-center gap-1.5 shrink-0">
             <Button
               type="button"
               variant="ghost"
@@ -424,6 +486,46 @@ export function HotelBeverageSalesPage() {
             >
               <List className="h-3.5 w-3.5" />
               All sales
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-8 gap-1.5 border border-slate-600 bg-slate-800/80 text-slate-100 hover:bg-slate-700 hover:text-white"
+              onClick={() => setAddBeverageOpen(true)}
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Add beverage
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-8 gap-1.5 border border-slate-600 bg-slate-800/80 text-slate-100 hover:bg-slate-700 hover:text-white"
+              disabled={exportingMenu !== null}
+              onClick={() => void handleExportMenuExcel()}
+            >
+              {exportingMenu === 'excel' ? (
+                <Download className="h-3.5 w-3.5 animate-pulse" />
+              ) : (
+                <FileSpreadsheet className="h-3.5 w-3.5" />
+              )}
+              Excel
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-8 gap-1.5 border border-slate-600 bg-slate-800/80 text-slate-100 hover:bg-slate-700 hover:text-white"
+              disabled={exportingMenu !== null}
+              onClick={() => void handleExportMenuPdf()}
+            >
+              {exportingMenu === 'pdf' ? (
+                <Download className="h-3.5 w-3.5 animate-pulse" />
+              ) : (
+                <FileText className="h-3.5 w-3.5" />
+              )}
+              PDF
             </Button>
           </div>
 
@@ -1012,6 +1114,11 @@ export function HotelBeverageSalesPage() {
       </Dialog>
 
       <HotelBeverageAllSalesDialog open={allSalesOpen} onOpenChange={setAllSalesOpen} />
+      <HotelBeverageAddItemDialog
+        open={addBeverageOpen}
+        onOpenChange={setAddBeverageOpen}
+        categories={categories}
+      />
     </div>
   )
 }

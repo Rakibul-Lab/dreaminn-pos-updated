@@ -48,6 +48,16 @@ export type PaperSummary = {
   checkIns: number
   checkOuts: number
   occupiedRooms: number
+  cashCollectedToday: number
+  cardCollectedToday: number
+  mBankingCollectedToday: number
+  cashSentToHeadOffice: number
+  cardSentToHeadOffice: number
+  mBankingSentToHeadOffice: number
+  cashOnHand: number
+  totalSentToHeadOffice: number
+  hotelBills: number
+  restaurantBills: number
 }
 
 export function formatPaperDate(businessDate: string, businessDateDisplay?: string): string {
@@ -87,6 +97,8 @@ export type PaperSalesInputLine = {
   companyBill?: number
   remark?: string | null
   total?: number
+  lineType?: 'charge' | 'payment'
+  source?: 'invoice' | 'restaurant' | 'beverage' | 'guest-restaurant-bill' | 'payment'
 }
 
 export type PaperSalesInput = {
@@ -109,33 +121,65 @@ export type PaperSalesInput = {
     discount?: number
   }
   totalDiscount?: number
+  cashReconciliation?: {
+    openingCash?: number
+    cashCollectedToday?: number
+    cardCollectedToday?: number
+    mBankingCollectedToday?: number
+    cashRemitted?: number
+    cardRemitted?: number
+    mBankingRemitted?: number
+    cashOnHand?: number
+    totalRemitted?: number
+  }
 }
 
 export function buildPaperSalesLines(lines: PaperSalesInputLine[] | undefined): PaperSalesLine[] {
   return (lines ?? []).map((line) => {
-    // For now: keep service charges as 0 in daily paper report.
-    // (User will update the logic later.)
-    const others = 0
+    // Others Service Sale column is intentionally left empty for now.
     const company = (line.companyBill ?? 0) > 0 ? line.companyBill! : null
-    const cash = (line.cash ?? 0) > 0 ? line.cash! : null
-    const card = (line.card ?? 0) > 0 ? line.card! : null
-    const mBanking = (line.mbanking ?? 0) > 0 ? line.mbanking! : null
-    // Paper format: VAT is only a label. Total is the sum of row columns.
-    const total =
-      others +
-      (cash ?? 0) +
-      (card ?? 0) +
-      (mBanking ?? 0) +
-      (company ?? 0)
-    const totalInclVat = total > 0 ? Number(total.toFixed(2)) : null
+    const cashRaw = line.cash ?? 0
+    const cardRaw = line.card ?? 0
+    const mBankingRaw = line.mbanking ?? 0
+    const cash = cashRaw !== 0 ? cashRaw : null
+    const card = cardRaw !== 0 ? cardRaw : null
+    const mBanking = mBankingRaw !== 0 ? mBankingRaw : null
+    const columnSum =
+      (cash ?? 0) + (card ?? 0) + (mBanking ?? 0) + (company ?? 0)
+    const lineTotal = line.total ?? 0
+    const totalInclVat =
+      line.lineType === 'charge' && lineTotal !== 0
+        ? Number(lineTotal.toFixed(2))
+        : columnSum !== 0
+          ? Number(columnSum.toFixed(2))
+          : lineTotal !== 0
+            ? Number(lineTotal.toFixed(2))
+            : null
+
+    let displayCash = cash
+    let displayCard = card
+    let displayMBanking = mBanking
+    if (
+      line.lineType === 'charge' &&
+      lineTotal > 0 &&
+      columnSum > 0 &&
+      Math.abs(columnSum - lineTotal) > 0.01
+    ) {
+      const methodCount = [cash, card, mBanking].filter((value) => (value ?? 0) !== 0).length
+      if (methodCount === 1) {
+        if ((cash ?? 0) !== 0) displayCash = lineTotal
+        else if ((card ?? 0) !== 0) displayCard = lineTotal
+        else displayMBanking = lineTotal
+      }
+    }
 
     return {
       roomNo: line.room ?? '',
       regNo: line.regNo ?? '',
-      othersServiceSale: 0,
-      cash,
-      card,
-      mBanking,
+      othersServiceSale: null,
+      cash: displayCash,
+      card: displayCard,
+      mBanking: displayMBanking,
       dueBill: company,
       remarks: line.remark ?? '',
       totalInclVat,
@@ -164,6 +208,28 @@ export function computePaperTotals(paperLines: PaperSalesLine[]): PaperSalesTota
   )
 }
 
+/** Charge totals by origin: hotel (invoices + beverage) vs restaurant (POS + guest bills). */
+export function computeBillBreakdown(
+  lines: PaperSalesInputLine[] | undefined
+): { hotelBills: number; restaurantBills: number } {
+  let hotelBills = 0
+  let restaurantBills = 0
+  for (const line of lines ?? []) {
+    if (line.lineType !== 'charge') continue
+    const total = line.total ?? 0
+    if (total <= 0) continue
+    if (line.source === 'invoice' || line.source === 'beverage') {
+      hotelBills += total
+    } else if (line.source === 'restaurant' || line.source === 'guest-restaurant-bill') {
+      restaurantBills += total
+    }
+  }
+  return {
+    hotelBills: Number(hotelBills.toFixed(2)),
+    restaurantBills: Number(restaurantBills.toFixed(2)),
+  }
+}
+
 export function buildPaperSummary(data: PaperSalesInput): PaperSummary {
   const paperLines = buildPaperSalesLines(data.lines)
   const totals = computePaperTotals(paperLines)
@@ -180,6 +246,22 @@ export function buildPaperSummary(data: PaperSalesInput): PaperSummary {
       ? data.totalDiscount
       : hotelDiscount + restaurantDiscount
 
+  const cashCollectedToday =
+    data.cashReconciliation?.cashCollectedToday ?? totals.cash
+  const cardCollectedToday =
+    data.cashReconciliation?.cardCollectedToday ?? totals.card
+  const mBankingCollectedToday =
+    data.cashReconciliation?.mBankingCollectedToday ?? totals.mBanking
+  const cashSentToHeadOffice = data.cashReconciliation?.cashRemitted ?? 0
+  const cardSentToHeadOffice = data.cashReconciliation?.cardRemitted ?? 0
+  const mBankingSentToHeadOffice = data.cashReconciliation?.mBankingRemitted ?? 0
+  const totalSentToHeadOffice = data.cashReconciliation?.totalRemitted ?? 0
+  const cashOnHand =
+    data.cashReconciliation?.cashOnHand ??
+    openingBalance + cashCollectedToday - cashSentToHeadOffice
+
+  const { hotelBills, restaurantBills } = computeBillBreakdown(data.lines)
+
   return {
     totalSale,
     openingBalance,
@@ -193,6 +275,16 @@ export function buildPaperSummary(data: PaperSalesInput): PaperSummary {
     checkIns: data.summary?.checkIns ?? 0,
     checkOuts: data.summary?.checkOuts ?? 0,
     occupiedRooms: data.summary?.occupiedRooms ?? 0,
+    cashCollectedToday,
+    cardCollectedToday,
+    mBankingCollectedToday,
+    cashSentToHeadOffice,
+    cardSentToHeadOffice,
+    mBankingSentToHeadOffice,
+    cashOnHand,
+    totalSentToHeadOffice,
+    hotelBills,
+    restaurantBills,
   }
 }
 
@@ -200,7 +292,7 @@ export function paperLineToRow(line: PaperSalesLine): string[] {
   return [
     line.roomNo,
     line.regNo,
-    formatPaperAmountAlways(line.othersServiceSale ?? 0),
+    formatPaperAmount(line.othersServiceSale),
     formatPaperAmount(line.cash),
     formatPaperAmount(line.card),
     formatPaperAmount(line.mBanking),

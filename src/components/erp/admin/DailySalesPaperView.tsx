@@ -15,7 +15,20 @@ import {
 import { HOTEL_NAME } from '@/lib/reservation-terms'
 
 type DailySalesPaperViewProps = {
-  data: PaperSalesInput & { businessDate: string; businessDateDisplay?: string }
+  data: PaperSalesInput & {
+    businessDate: string
+    businessDateDisplay?: string
+    cashReconciliation?: PaperSalesInput['cashReconciliation']
+    headOfficeRemittances?: Array<{
+      id: string
+      amount: number
+      method: string
+      reference?: string | null
+      notes?: string | null
+      sentBy?: string
+      at: string
+    }>
+  }
 }
 
 export function DailySalesPaperView({ data }: DailySalesPaperViewProps) {
@@ -125,6 +138,23 @@ export function DailySalesPaperView({ data }: DailySalesPaperViewProps) {
                   </td>
                 </tr>
                 <tr>
+                  <td colSpan={2} className="border border-black px-2 py-1 bg-neutral-100 font-semibold text-[11px]">
+                    Bill breakdown
+                  </td>
+                </tr>
+                <tr>
+                  <td className="border border-black px-2 py-1">Hotel bills (incl. beverage)</td>
+                  <td className="border border-black px-2 py-1 text-right">
+                    {formatPaperAmountAlways(summary.hotelBills)}
+                  </td>
+                </tr>
+                <tr>
+                  <td className="border border-black px-2 py-1">Restaurant bills</td>
+                  <td className="border border-black px-2 py-1 text-right">
+                    {formatPaperAmountAlways(summary.restaurantBills)}
+                  </td>
+                </tr>
+                <tr>
                   <td className="border border-black px-2 py-1">Hotel discount</td>
                   <td className="border border-black px-2 py-1 text-right text-red-600">
                     {formatPaperAmountAlways(summary.hotelDiscount)}
@@ -154,8 +184,86 @@ export function DailySalesPaperView({ data }: DailySalesPaperViewProps) {
                     {formatPaperAmountAlways(summary.closingBalance)}
                   </td>
                 </tr>
+                <tr>
+                  <td colSpan={2} className="border border-black px-2 py-1 bg-neutral-100 font-semibold text-[11px]">
+                    Cash reconciliation (matches Head Office)
+                  </td>
+                </tr>
+                <tr>
+                  <td className="border border-black px-2 py-1">Cash collected</td>
+                  <td className="border border-black px-2 py-1 text-right">
+                    {formatPaperAmountAlways(summary.cashCollectedToday)}
+                  </td>
+                </tr>
+                <tr>
+                  <td className="border border-black px-2 py-1">Card collected</td>
+                  <td className="border border-black px-2 py-1 text-right">
+                    {formatPaperAmountAlways(summary.cardCollectedToday)}
+                  </td>
+                </tr>
+                <tr>
+                  <td className="border border-black px-2 py-1">M. banking collected</td>
+                  <td className="border border-black px-2 py-1 text-right">
+                    {formatPaperAmountAlways(summary.mBankingCollectedToday)}
+                  </td>
+                </tr>
+                <tr>
+                  <td className="border border-black px-2 py-1">Sent to head office (cash)</td>
+                  <td className="border border-black px-2 py-1 text-right text-amber-700">
+                    {formatPaperAmountAlways(summary.cashSentToHeadOffice)}
+                  </td>
+                </tr>
+                <tr>
+                  <td className="border border-black px-2 py-1">Sent to head office (card)</td>
+                  <td className="border border-black px-2 py-1 text-right text-amber-700">
+                    {formatPaperAmountAlways(summary.cardSentToHeadOffice)}
+                  </td>
+                </tr>
+                <tr>
+                  <td className="border border-black px-2 py-1">Sent to head office (m. banking)</td>
+                  <td className="border border-black px-2 py-1 text-right text-amber-700">
+                    {formatPaperAmountAlways(summary.mBankingSentToHeadOffice)}
+                  </td>
+                </tr>
+                <tr>
+                  <td className="border border-black px-2 py-1 font-semibold">Cash on hand</td>
+                  <td className="border border-black px-2 py-1 text-right font-semibold text-sky-700">
+                    {formatPaperAmountAlways(summary.cashOnHand)}
+                  </td>
+                </tr>
+                <tr>
+                  <td className="border border-black px-2 py-1 text-[11px] text-muted-foreground" colSpan={2}>
+                    Opening cash + Cash column − cash sent to HO
+                  </td>
+                </tr>
               </tbody>
             </table>
+
+            {data.headOfficeRemittances?.length ? (
+              <table className="w-full border-collapse text-xs">
+                <thead>
+                  <tr className="bg-neutral-100">
+                    <th className="border border-black px-2 py-1 text-left">Sent to HO</th>
+                    <th className="border border-black px-2 py-1 text-right">Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.headOfficeRemittances.map((row) => (
+                    <tr key={row.id}>
+                      <td className="border border-black px-2 py-1">
+                        <span className="block">{row.method}</span>
+                        <span className="text-[10px] text-muted-foreground">
+                          {row.reference || row.notes || row.sentBy || '—'}
+                        </span>
+                      </td>
+                      <td className="border border-black px-2 py-1 text-right">
+                        {formatPaperAmountAlways(row.amount)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : null}
 
             <table className="w-full border-collapse text-xs">
               <tbody>

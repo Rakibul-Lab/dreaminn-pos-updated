@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { requireRole } from '@/lib/auth';
 import { successResponse, errorResponse, logActivity } from '@/lib/api-utils';
 import { RoleType } from '@prisma/client';
-import { isBeverageCategoryName } from '@/lib/hotel-beverage-sales';
+import { isHotelBeverageMenuCategory } from '@/lib/hotel-beverage-sales';
 
 export async function GET(request: NextRequest) {
   try {
@@ -17,12 +17,12 @@ export async function GET(request: NextRequest) {
 
     const categories = await db.menuCategory.findMany({
       where: { active: true },
-      select: { id: true, name: true, sortOrder: true },
+      select: { id: true, name: true, sortOrder: true, description: true },
       orderBy: { sortOrder: 'asc' },
     });
 
     const beverageCategoryIds = categories
-      .filter((c) => isBeverageCategoryName(c.name))
+      .filter((c) => isHotelBeverageMenuCategory(c))
       .map((c) => c.id);
 
     if (beverageCategoryIds.length === 0) {
@@ -93,7 +93,7 @@ export async function POST(request: NextRequest) {
     if (!category) {
       return errorResponse('Category not found');
     }
-    if (!isBeverageCategoryName(category.name)) {
+    if (!isHotelBeverageMenuCategory(category)) {
       return errorResponse('Selected category is not a beverage category');
     }
 

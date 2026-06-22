@@ -1,17 +1,38 @@
 import { PrismaClient } from '@prisma/client'
 import { getServerEnv } from '@/lib/env'
 
+/** Bump when Prisma schema changes so dev HMR picks up new fields without a full server restart. */
+const PRISMA_CLIENT_VERSION = '20250622120000_room_maintenance_purpose'
+
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined
+  prismaClientVersion?: string
 }
 
-export const db =
-  globalForPrisma.prisma ??
-  new PrismaClient({
+function createPrismaClient() {
+  return new PrismaClient({
     datasources: {
       db: { url: getServerEnv().DATABASE_URL },
     },
     log: process.env.NODE_ENV === 'development' ? ['query'] : [],
   })
+}
 
-if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = db
+if (
+  globalForPrisma.prisma &&
+  globalForPrisma.prismaClientVersion !== PRISMA_CLIENT_VERSION
+) {
+  void globalForPrisma.prisma.$disconnect()
+  globalForPrisma.prisma = undefined
+}
+
+export const db =
+  globalForPrisma.prisma ??
+  (() => {
+    const client = createPrismaClient()
+    if (process.env.NODE_ENV !== 'production') {
+      globalForPrisma.prisma = client
+      globalForPrisma.prismaClientVersion = PRISMA_CLIENT_VERSION
+    }
+    return client
+  })()

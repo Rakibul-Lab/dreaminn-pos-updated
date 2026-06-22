@@ -7,12 +7,16 @@ import {
 import { buildDailySalesDetailReport } from '@/lib/daily-sales-report'
 import { buildHotelDailyCollectionsReport } from '@/lib/hotel-pms-reports'
 import type { DailySalesBalances } from '@/lib/daily-sales-balance'
+import type { CashReconciliation } from '@/lib/hotel-cash-reconciliation'
 
 export type DayCloseSnapshot = {
   businessDate: string
   openedAt: string
   closedAt: string
   balances?: DailySalesBalances
+  cashReconciliation?: CashReconciliation
+  /** Physical cash left at hotel after HO remittance (= cash on hand). */
+  cashClosingBalance?: number
   hotel: {
     checkIns: number
     checkOuts: number
@@ -92,6 +96,8 @@ export async function buildDayCloseSnapshot(
     businessDate,
     openedAt: openedAt.toISOString(),
     closedAt: closedAt.toISOString(),
+    cashReconciliation: salesReport.cashReconciliation,
+    cashClosingBalance: salesReport.cashReconciliation.cashOnHand,
     hotel: {
       checkIns: salesReport.summary.checkIns,
       checkOuts: salesReport.summary.checkOuts,

@@ -11,13 +11,18 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { toast } from 'sonner'
-import { Camera, FileUp, Loader2, ScanLine, Scan, X } from 'lucide-react'
+import { Camera, FileUp, Loader2, ScanLine, Scan } from 'lucide-react'
 import { GuestIdTypeField } from '@/components/erp/hotel/GuestIdTypeField'
 import { mergeIdFields, hasMinimumScanData, type ExtractedIdFields, type IdDocumentType } from '@/lib/id-ocr'
 import { tryDecodeNidBarcode } from '@/lib/id-barcode'
 import {
-  isBangladeshNationality,
-} from '@/lib/id-type-label'
+  ID_DOCUMENT_ACCEPT,
+  ID_DOCUMENT_MAX_BYTES,
+  isAllowedIdDocumentFile,
+  isIdDocumentPdf,
+} from '@/lib/id-document-upload'
+import { IdDocumentThumbnail } from '@/components/erp/hotel/IdDocumentThumbnail'
+import { isBangladeshNationality } from '@/lib/id-type-label'
 
 export interface IdDocumentItem {
   path: string
@@ -75,6 +80,7 @@ export function IdDocumentScanner({
   )
 
   const prepareUploadFile = async (file: File): Promise<File> => {
+    if (isIdDocumentPdf(file.name) || file.type === 'application/pdf') return file
     if (file.size <= 2 * 1024 * 1024) return file
 
     const url = URL.createObjectURL(file)
@@ -169,21 +175,21 @@ export function IdDocumentScanner({
 
   const processFiles = useCallback(
     async (files: File[]) => {
-      const valid = files.filter((f) => f.type.startsWith('image/'))
+      const valid = files.filter(isAllowedIdDocumentFile)
       if (valid.length === 0) {
-        toast.error('Please choose image files (JPEG, PNG, or WebP)')
+        toast.error('Please choose image or PDF files (JPEG, PNG, WebP, or PDF)')
         return
       }
 
       const remaining = MAX_FILES - documents.length
       if (remaining <= 0) {
-        toast.error(`Maximum ${MAX_FILES} ID images allowed`)
+        toast.error(`Maximum ${MAX_FILES} ID documents allowed`)
         return
       }
 
       const batch = valid.slice(0, remaining)
-      if (batch.some((f) => f.size > 10 * 1024 * 1024)) {
-        toast.error('Each image must be under 10MB')
+      if (batch.some((f) => f.size > ID_DOCUMENT_MAX_BYTES)) {
+        toast.error('Each file must be under 10MB')
         return
       }
 
@@ -194,8 +200,9 @@ export function IdDocumentScanner({
       try {
         for (let i = 0; i < batch.length; i++) {
           const file = batch[i]!
+          const isPdf = isIdDocumentPdf(file.name) || file.type === 'application/pdf'
 
-          if (!scanEnabled) {
+          if (!scanEnabled || isPdf) {
             setScanMessage(`Uploading ${i + 1} of ${batch.length}…`)
             const uploaded = await uploadOnly(file)
             newDocs.push(uploaded)
@@ -226,7 +233,7 @@ export function IdDocumentScanner({
         emitResult(merged, newDocs.map((d) => d.path), newDocs)
 
         if (!scanEnabled) {
-          toast.success(`${batch.length} image(s) attached`, {
+          toast.success(`${batch.length} file(s) attached`, {
             description: 'Scan is off — files saved only. Enter name and ID manually below.',
           })
         } else {
@@ -250,7 +257,7 @@ export function IdDocumentScanner({
         }
       } catch (err) {
         console.error(err)
-        toast.error(err instanceof Error ? err.message : 'Failed to process images')
+        toast.error(err instanceof Error ? err.message : 'Failed to process documents')
       } finally {
         setScanning(false)
         setScanMessage('')
@@ -358,7 +365,7 @@ export function IdDocumentScanner({
       <input
         ref={scannerInputRef}
         type="file"
-        accept="image/*"
+        accept={ID_DOCUMENT_ACCEPT}
         multiple
         className="hidden"
         onChange={(e) => {
@@ -428,12 +435,13 @@ export function IdDocumentScanner({
         {scanEnabled ? (
           <>
             <strong>Scan on:</strong> reads <strong>name</strong> and <strong>ID number</strong> from
-            images (OCR). All images are stored on <strong>page 2</strong> of the confirmation.
+            images (OCR). PDF files are saved without OCR. All documents are stored on{' '}
+            <strong>page 2</strong> of the confirmation.
           </>
         ) : (
           <>
-            <strong>Scan off:</strong> only saves uploaded images — enter name and ID manually below.
-            Images appear on <strong>page 2</strong> of the confirmation.
+            <strong>Scan off:</strong> only saves uploaded images/PDFs — enter name and ID manually below.
+            Documents appear on <strong>page 2</strong> of the confirmation.
           </>
         )}
       </p>
@@ -441,23 +449,13 @@ export function IdDocumentScanner({
       {documents.length > 0 && (
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
           {documents.map((doc, index) => (
-            <div key={doc.path} className="relative rounded border bg-card p-1">
-              <button
-                type="button"
-                className="absolute -right-1 -top-1 z-10 rounded-full bg-red-600 p-0.5 text-white shadow"
-                onClick={() => removeDocument(index)}
-                aria-label="Remove image"
-              >
-                <X className="h-3 w-3" />
-              </button>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={doc.previewUrl}
-                alt={`ID ${index + 1}`}
-                className="h-24 w-full rounded object-contain"
-              />
-              <p className="text-[10px] text-center text-muted-foreground mt-1">Image {index + 1}</p>
-            </div>
+            <IdDocumentThumbnail
+              key={doc.path}
+              previewUrl={doc.previewUrl}
+              path={doc.path}
+              index={index}
+              onRemove={() => removeDocument(index)}
+            />
           ))}
         </div>
       )}

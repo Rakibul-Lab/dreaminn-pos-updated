@@ -15,6 +15,7 @@ import {
   buildHotelDailyCollectionsReport,
   buildHotelDailyDeparturesReport,
   buildHotelDailySalesReport,
+  resolveDateRangeReportWindow,
   resolveBusinessDayReportWindow,
 } from '@/lib/hotel-pms-reports';
 import { buildHotelDiscountReportForDateRange } from '@/lib/hotel-daily-discount-report';
@@ -86,13 +87,13 @@ export async function GET(request: NextRequest) {
       case 'order-status':
         return await handleOrderStatus(user, dateFilter);
       case 'hotel-daily-sales':
-        return await handleHotelDailySales(user, businessDate);
+        return await handleHotelDailySales(user, businessDate, dateFrom, dateTo);
       case 'hotel-daily-arrivals':
         return await handleHotelDailyArrivals(user, businessDate);
       case 'hotel-daily-departures':
         return await handleHotelDailyDepartures(user, businessDate);
       case 'hotel-daily-collections':
-        return await handleHotelDailyCollections(user, businessDate);
+        return await handleHotelDailyCollections(user, businessDate, dateFrom, dateTo);
       case 'hotel-daily-discounts':
         return await handleHotelDailyDiscounts(user, businessDate, dateFrom, dateTo);
       default:
@@ -648,11 +649,17 @@ async function handleOrderStatus(user: { role: string }, dateFilter: Record<stri
   });
 }
 
-async function handleHotelDailySales(user: { role: string }, businessDateParam: string | null) {
+async function handleHotelDailySales(
+  user: { role: string },
+  businessDateParam: string | null,
+  dateFromParam: string | null,
+  dateToParam: string | null
+) {
   if (!canAccessHotel(user.role as 'ADMIN' | 'HOTEL_STAFF' | 'RESTAURANT_STAFF')) {
     return errorResponse('Access denied. HOTEL_STAFF or ADMIN only.', 403);
   }
-  const window = await resolveBusinessDayReportWindow(businessDateParam);
+  const rangeWindow = resolveDateRangeReportWindow({ dateFrom: dateFromParam, dateTo: dateToParam });
+  const window = rangeWindow ?? await resolveBusinessDayReportWindow(businessDateParam);
   const report = await buildHotelDailySalesReport(window);
   return successResponse(report);
 }
@@ -675,11 +682,17 @@ async function handleHotelDailyDepartures(user: { role: string }, businessDatePa
   return successResponse(report);
 }
 
-async function handleHotelDailyCollections(user: { role: string }, businessDateParam: string | null) {
+async function handleHotelDailyCollections(
+  user: { role: string },
+  businessDateParam: string | null,
+  dateFromParam: string | null,
+  dateToParam: string | null
+) {
   if (!canAccessHotel(user.role as 'ADMIN' | 'HOTEL_STAFF' | 'RESTAURANT_STAFF')) {
     return errorResponse('Access denied. HOTEL_STAFF or ADMIN only.', 403);
   }
-  const window = await resolveBusinessDayReportWindow(businessDateParam);
+  const rangeWindow = resolveDateRangeReportWindow({ dateFrom: dateFromParam, dateTo: dateToParam });
+  const window = rangeWindow ?? await resolveBusinessDayReportWindow(businessDateParam);
   const report = await buildHotelDailyCollectionsReport(window);
   return successResponse(report);
 }

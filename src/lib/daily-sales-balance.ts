@@ -1,5 +1,6 @@
 import { db } from '@/lib/db'
 import type { DayCloseSnapshot } from '@/lib/day-close-snapshot'
+import type { CashReconciliation } from '@/lib/hotel-cash-reconciliation'
 
 export type DailySalesBalances = {
   openingBalance: number
@@ -31,6 +32,27 @@ export async function getStoredBalancesForDate(
   return readSnapshotBalances(closedDay.snapshot)
 }
 
+export function readSnapshotCashReconciliation(snapshot: unknown): CashReconciliation | null {
+  if (!snapshot || typeof snapshot !== 'object') return null
+  const recon = (snapshot as { cashReconciliation?: CashReconciliation }).cashReconciliation
+  if (!recon || typeof recon !== 'object') return null
+  return recon
+}
+
+/** Previous closed business day's cash on hand — becomes today's opening cash when not overridden. */
+export async function readCarriedOpeningCash(businessDate: string): Promise<number | null> {
+  const lastClose = await db.dayClose.findFirst({
+    where: { businessDate: { lt: businessDate } },
+    orderBy: { businessDate: 'desc' },
+    select: { snapshot: true },
+  })
+  if (!lastClose?.snapshot) return null
+
+  const recon = readSnapshotCashReconciliation(lastClose.snapshot)
+  if (!recon || !Number.isFinite(recon.cashOnHand)) return null
+  return Math.max(0, recon.cashOnHand)
+}
+
 export async function resolveOpeningBalance(businessDate: string): Promise<number> {
   const closedDay = await db.dayClose.findUnique({ where: { businessDate } })
   if (closedDay) {
@@ -38,21 +60,46 @@ export async function resolveOpeningBalance(businessDate: string): Promise<numbe
     if (stored) return stored.openingBalance
   }
 
-  return readDraftOpeningBalance(businessDate)
+  const draft = await readDraftOpeningBalance(businessDate)
+  if (draft !== null) return draft
+
+  const carried = await readCarriedOpeningCash(businessDate)
+  return carried ?? 0
+}
+
+export async function resolveSuggestedOpeningBalance(businessDate: string): Promise<{
+  openingBalance: number
+  carriedFromPreviousDay: number | null
+  hasDraftOverride: boolean
+}> {
+  const draft = await readDraftOpeningBalance(businessDate)
+  const carried = await readCarriedOpeningCash(businessDate)
+  if (draft !== null) {
+    return {
+      openingBalance: draft,
+      carriedFromPreviousDay: carried,
+      hasDraftOverride: true,
+    }
+  }
+  return {
+    openingBalance: carried ?? 0,
+    carriedFromPreviousDay: carried,
+    hasDraftOverride: false,
+  }
 }
 
 export function openingBalanceSettingKey(businessDate: string): string {
   return `opening_balance_${businessDate}`
 }
 
-/** Saved opening balance for an open business day (before day close). */
-export async function readDraftOpeningBalance(businessDate: string): Promise<number> {
+/** Saved opening balance for an open business day (before day close). Null if not set. */
+export async function readDraftOpeningBalance(businessDate: string): Promise<number | null> {
   const row = await db.setting.findUnique({
     where: { key: openingBalanceSettingKey(businessDate) },
   })
-  if (!row?.value) return 0
+  if (!row?.value) return null
   const amount = Number(row.value)
-  return Number.isFinite(amount) ? Math.max(0, amount) : 0
+  return Number.isFinite(amount) ? Math.max(0, amount) : null
 }
 
 export async function saveDraftOpeningBalance(

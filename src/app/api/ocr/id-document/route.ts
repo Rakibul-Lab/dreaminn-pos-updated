@@ -5,12 +5,15 @@ import { requireRole } from '@/lib/auth'
 import { successResponse, errorResponse } from '@/lib/api-utils'
 import { runServerIdOcr } from '@/lib/id-ocr-server'
 import type { IdDocumentType } from '@/lib/id-ocr'
+import {
+  ID_DOCUMENT_MAX_BYTES,
+  idDocumentFileExtension,
+  isAllowedIdDocumentFile,
+  isIdDocumentPdf,
+} from '@/lib/id-document-upload'
 import { RoleType } from '@prisma/client'
 
 export const maxDuration = 120
-
-const MAX_BYTES = 10 * 1024 * 1024
-const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg']
 
 export async function POST(request: NextRequest) {
   try {
@@ -25,11 +28,11 @@ export async function POST(request: NextRequest) {
       return errorResponse('No file uploaded')
     }
 
-    if (!ALLOWED_TYPES.includes(file.type)) {
-      return errorResponse('Only JPEG, PNG, or WebP images are allowed')
+    if (!isAllowedIdDocumentFile(file)) {
+      return errorResponse('Only JPEG, PNG, WebP images, or PDF files are allowed')
     }
 
-    if (file.size > MAX_BYTES) {
+    if (file.size > ID_DOCUMENT_MAX_BYTES) {
       return errorResponse('File must be under 10MB')
     }
 
@@ -40,13 +43,22 @@ export async function POST(request: NextRequest) {
     const bytes = await file.arrayBuffer()
     const buffer = Buffer.from(bytes)
 
-    const ext = file.type === 'image/png' ? 'png' : file.type === 'image/webp' ? 'webp' : 'jpg'
+    const ext = idDocumentFileExtension(file)
     const fileName = `id-${Date.now()}-${Math.random().toString(36).slice(2, 9)}.${ext}`
     const uploadDir = path.join(process.cwd(), 'public', 'uploads', 'id-docs')
     const filePath = path.join(uploadDir, fileName)
 
+    const isPdf = isIdDocumentPdf(file.name) || file.type === 'application/pdf'
+
     const [fields] = await Promise.all([
-      runServerIdOcr(buffer, idType),
+      isPdf
+        ? Promise.resolve({
+            name: undefined,
+            idNumber: undefined,
+            idType,
+            rawText: '',
+          })
+        : runServerIdOcr(buffer, idType),
       mkdir(uploadDir, { recursive: true }).then(() => writeFile(filePath, buffer)),
     ])
 
@@ -65,8 +77,9 @@ export async function POST(request: NextRequest) {
           hasName: Boolean(fields.name),
           hasIdNumber: Boolean(fields.idNumber),
         },
+        isPdf,
       },
-      'Document processed',
+      isPdf ? 'PDF document saved' : 'Document processed',
       201
     )
   } catch (error) {

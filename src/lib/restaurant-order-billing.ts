@@ -189,7 +189,8 @@ export function isGuestFolioRestaurantOrder(order: {
 }): boolean {
   if (order.status === 'CANCELLED') return false
   if (order.billingDisposition === 'PAID_DIRECT') return false
-  if (order.billingDisposition === 'HOTEL_BILL' || order.companyLedgerBill) return false
+  // CloudView ledger orders are billed to the company, not the guest folio.
+  if (order.companyLedgerBill) return false
   return true
 }
 

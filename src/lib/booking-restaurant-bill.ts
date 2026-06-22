@@ -1,18 +1,29 @@
 import { db } from '@/lib/db'
-import { getRestaurantVatPercent } from '@/lib/app-settings'
 import { stampCurrentBusinessDate } from '@/lib/business-date'
 import { generateRestaurantOrderNumber } from '@/lib/restaurant-order-number'
 import {
   parsePaymentMethod,
   type PaymentMethodValue,
 } from '@/lib/payment-method'
+import { applyBookingChargeToStoredDue } from '@/lib/booking-totals'
 import { formatBookingRestaurantBillNotes } from '@/lib/booking-restaurant-bill-notes'
+import {
+  computeGuestFolioRestaurantBillTotals,
+} from '@/lib/booking-restaurant-bill.shared'
+
+export {
+  computeGuestFolioRestaurantBillTotals,
+  GUEST_FOLIO_RESTAURANT_VAT_PERCENT,
+  isGuestFolioManualRestaurantBill,
+  type GuestFolioRestaurantBillTotals,
+} from '@/lib/booking-restaurant-bill.shared'
 
 export type BookingRestaurantBillInput = {
   billNo: string
   paymentMethod: PaymentMethodValue
   amount: number
   discount?: number
+  vatApplied?: boolean
   vatPercent?: number
   notes?: string
 }
@@ -22,6 +33,8 @@ export async function listBookingRestaurantBills(bookingId: string) {
     where: {
       bookingId,
       status: { not: 'CANCELLED' },
+      companyLedgerBill: { is: null },
+      billingDisposition: { not: 'PAID_DIRECT' },
     },
     orderBy: { createdAt: 'desc' },
     select: {
@@ -68,25 +81,21 @@ export async function createBookingRestaurantBill(
 
   const paymentMethod = parsePaymentMethod(input.paymentMethod, 'CASH')
 
-  const subtotal = Math.max(0, Number(input.amount) || 0)
-  if (subtotal <= 0) {
+  const inclusiveAmount = Math.max(0, Number(input.amount) || 0)
+  if (inclusiveAmount <= 0) {
     throw new Error('Amount must be greater than zero')
   }
 
   const discount = Math.max(0, Number(input.discount) || 0)
-  if (discount > subtotal) {
+  if (discount > inclusiveAmount) {
     throw new Error('Discount cannot exceed amount')
   }
 
-  const defaultVat = await getRestaurantVatPercent()
-  const vatRate =
-    input.vatPercent !== undefined && input.vatPercent !== null
-      ? Math.max(0, Number(input.vatPercent) || 0)
-      : defaultVat
-
-  const taxable = Math.max(0, subtotal - discount)
-  const vatAmount = (taxable * vatRate) / 100
-  const totalAmount = taxable + vatAmount
+  const { subtotal, vatPercent, vatAmount, totalAmount } = computeGuestFolioRestaurantBillTotals({
+    inclusiveAmount,
+    discount,
+    vatApplied: input.vatApplied !== false,
+  })
   const businessDate = await stampCurrentBusinessDate()
 
   const combinedNotes = formatBookingRestaurantBillNotes({
@@ -98,12 +107,12 @@ export async function createBookingRestaurantBill(
   const order = await db.$transaction(async (tx) => {
     const orderNumber = await generateRestaurantOrderNumber(tx)
 
-    return tx.restaurantOrder.create({
+    const newOrder = await tx.restaurantOrder.create({
       data: {
         orderNumber,
         orderType: 'ROOM_SERVICE',
         status: 'DELIVERED',
-        billingDisposition: 'HOTEL_BILL',
+        billingDisposition: 'PENDING',
         businessDate,
         bookingId: booking.id,
         roomId: booking.roomId,
@@ -111,7 +120,7 @@ export async function createBookingRestaurantBill(
         customerPhone: booking.customer.phone,
         subtotal,
         discount,
-        vatPercent: vatRate,
+        vatPercent,
         vatAmount,
         totalAmount,
         notes: combinedNotes,
@@ -131,6 +140,15 @@ export async function createBookingRestaurantBill(
         createdAt: true,
       },
     })
+
+    await tx.booking.update({
+      where: { id: booking.id },
+      data: {
+        dueAmount: applyBookingChargeToStoredDue(booking.dueAmount ?? 0, totalAmount),
+      },
+    })
+
+    return newOrder
   })
 
   return {

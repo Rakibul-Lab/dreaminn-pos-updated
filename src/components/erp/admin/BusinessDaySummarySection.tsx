@@ -32,6 +32,14 @@ type CollectionsSummary = {
   refunds?: number
   netCollected?: number
   depositTotal?: number
+  openingCash?: number
+  cashCollected?: number
+  cardCollected?: number
+  mBankingCollected?: number
+  cashRemitted?: number
+  cardRemitted?: number
+  mBankingRemitted?: number
+  cashOnHand?: number
 }
 
 type CollectionsByMethod = { method: string; amount: number }
@@ -292,9 +300,42 @@ export function BusinessDaySummarySection({
                   <span>৳{(collectionsSummary?.refunds ?? 0).toLocaleString()}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span>Deposits</span>
+                  <span>Sent to head office</span>
                   <span>৳{(collectionsSummary?.depositTotal ?? 0).toLocaleString()}</span>
                 </div>
+                <div className="flex justify-between text-muted-foreground">
+                  <span>Cash collected</span>
+                  <span>৳{(collectionsSummary?.cashCollected ?? 0).toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between text-muted-foreground">
+                  <span>Card collected</span>
+                  <span>৳{(collectionsSummary?.cardCollected ?? 0).toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between text-muted-foreground">
+                  <span>M. banking collected</span>
+                  <span>৳{(collectionsSummary?.mBankingCollected ?? 0).toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between text-muted-foreground">
+                  <span>Cash sent to HO</span>
+                  <span>৳{(collectionsSummary?.cashRemitted ?? 0).toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between text-muted-foreground">
+                  <span>Card sent to HO</span>
+                  <span>৳{(collectionsSummary?.cardRemitted ?? 0).toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between text-muted-foreground">
+                  <span>M. banking sent to HO</span>
+                  <span>৳{(collectionsSummary?.mBankingRemitted ?? 0).toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between font-medium text-amber-700">
+                  <span>Cash on hand</span>
+                  <span>৳{(collectionsSummary?.cashOnHand ?? 0).toLocaleString()}</span>
+                </div>
+                <p className="text-[11px] text-muted-foreground pt-1">
+                  Opening ৳{(collectionsSummary?.openingCash ?? 0).toLocaleString()} + sales Cash column ৳
+                  {(collectionsSummary?.cashCollected ?? 0).toLocaleString()} − cash sent to HO ৳
+                  {(collectionsSummary?.cashRemitted ?? 0).toLocaleString()}
+                </p>
                 <hr className="my-2" />
                 <div className="flex justify-between font-semibold">
                   <span>Net collected</span>

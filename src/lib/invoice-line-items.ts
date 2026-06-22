@@ -2,6 +2,7 @@ import type { Prisma } from '@prisma/client'
 import { countHotelStayNights } from '@/lib/hotel-times'
 import { filterGuestFolioRestaurantOrders } from '@/lib/restaurant-order-billing'
 import { computeOrderDue, computeOrderFolioBalance } from '@/lib/restaurant-order-dues'
+import { isGuestFolioManualRestaurantBill } from '@/lib/booking-restaurant-bill.shared'
 
 export type InvoiceLineItemInput = {
   itemType: string
@@ -204,6 +205,21 @@ function buildRestaurantLines(orders: RestaurantOrderRow[]): InvoiceLineItemInpu
         })
       }
     } else {
+      if (isGuestFolioManualRestaurantBill(order)) {
+        const label = order.notes?.trim()?.split('\n')[0]?.trim()
+        lines.push({
+          itemType: 'food_order',
+          referenceId: order.id,
+          description: label
+            ? `${label} (Order ${orderLabel})`
+            : `Restaurant order ${orderLabel}`,
+          quantity: 1,
+          unitPrice: order.totalAmount,
+          total: order.totalAmount,
+        })
+        continue
+      }
+
       const net = Math.max(0, order.subtotal - order.discount)
       if (net > 0) {
         const label = order.notes?.trim()?.split('\n')[0]?.trim()

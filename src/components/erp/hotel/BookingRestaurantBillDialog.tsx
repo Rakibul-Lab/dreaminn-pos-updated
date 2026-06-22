@@ -23,12 +23,17 @@ import {
 } from '@/components/ui/select'
 import { Card, CardContent } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
+import { Switch } from '@/components/ui/switch'
 import { toast } from 'sonner'
 import { Loader2, UtensilsCrossed } from 'lucide-react'
 import { formatBdt } from '@/lib/currency'
 import { format } from 'date-fns'
 import { PAYMENT_METHOD_OPTIONS_WITH_PAYMENT } from '@/lib/payment-method'
 import { parseBookingRestaurantBillNotes } from '@/lib/booking-restaurant-bill-notes'
+import {
+  GUEST_FOLIO_RESTAURANT_VAT_PERCENT,
+  computeGuestFolioRestaurantBillTotals,
+} from '@/lib/booking-restaurant-bill.shared'
 
 type RestaurantBillRow = {
   id: string
@@ -62,8 +67,17 @@ export function BookingRestaurantBillDialog({
   const [paymentMethod, setPaymentMethod] = useState('CASH')
   const [amount, setAmount] = useState('')
   const [discount, setDiscount] = useState('0')
-  const [vatPercent, setVatPercent] = useState('')
+  const [vatApplied, setVatApplied] = useState(true)
   const [notes, setNotes] = useState('')
+
+  const { data: bookingRes } = useQuery({
+    queryKey: ['booking-restaurant-bill-due', bookingId],
+    queryFn: () =>
+      api.get<{ success: boolean; data: { dueAmount: number } }>(`/bookings/${bookingId}`),
+    enabled: open && !!bookingId,
+  })
+
+  const guestDueAmount = Math.max(0, bookingRes?.data?.dueAmount ?? 0)
 
   const { data: billsRes, isLoading } = useQuery({
     queryKey: ['booking-restaurant-bills', bookingId],
@@ -74,15 +88,7 @@ export function BookingRestaurantBillDialog({
     enabled: open && !!bookingId,
   })
 
-  const { data: vatSettings } = useQuery({
-    queryKey: ['restaurant-vat-settings'],
-    queryFn: () =>
-      api.get<{ success: boolean; data: { vatPercent?: number } }>('/settings/restaurant'),
-    enabled: open,
-  })
-
   const bills = billsRes?.data ?? []
-  const defaultVat = vatSettings?.data?.vatPercent ?? 15
 
   useEffect(() => {
     if (!open) return
@@ -90,22 +96,18 @@ export function BookingRestaurantBillDialog({
     setPaymentMethod('CASH')
     setAmount('')
     setDiscount('0')
-    setVatPercent(String(defaultVat))
+    setVatApplied(true)
     setNotes('')
-  }, [open, bookingId, defaultVat])
-
-  useEffect(() => {
-    if (open && !vatPercent && defaultVat) {
-      setVatPercent(String(defaultVat))
-    }
-  }, [open, defaultVat, vatPercent])
+  }, [open, bookingId])
 
   const parsedAmount = Math.max(0, parseFloat(amount) || 0)
   const parsedDiscount = Math.max(0, parseFloat(discount) || 0)
-  const parsedVat = Math.max(0, parseFloat(vatPercent) || defaultVat)
-  const taxable = Math.max(0, parsedAmount - parsedDiscount)
-  const previewVat = (taxable * parsedVat) / 100
-  const previewTotal = taxable + previewVat
+  const billTotals = computeGuestFolioRestaurantBillTotals({
+    inclusiveAmount: parsedAmount,
+    discount: parsedDiscount,
+    vatApplied,
+  })
+  const projectedDue = guestDueAmount + billTotals.totalAmount
 
   const addMutation = useMutation({
     mutationFn: () =>
@@ -114,13 +116,14 @@ export function BookingRestaurantBillDialog({
         paymentMethod,
         amount: parsedAmount,
         discount: parsedDiscount,
-        vatPercent: parsedVat,
+        vatApplied,
         notes: notes.trim() || undefined,
       }),
     onSuccess: () => {
       toast.success('Restaurant bill added — it will appear on invoice restaurant section')
       queryClient.invalidateQueries({ queryKey: ['booking-restaurant-bills', bookingId] })
       queryClient.invalidateQueries({ queryKey: ['bookings'] })
+      queryClient.invalidateQueries({ queryKey: ['booking-restaurant-bill-due', bookingId] })
       setBillNo('')
       setPaymentMethod('CASH')
       setAmount('')
@@ -167,9 +170,21 @@ export function BookingRestaurantBillDialog({
 
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5 space-y-5">
           <Card className="border-orange-200/80 bg-orange-50/40">
-            <CardContent className="p-4 text-sm text-orange-950 leading-relaxed">
-              Bills added here are posted to the guest folio and appear under{' '}
-              <strong>Restaurant bills</strong> when you generate or print an invoice at checkout.
+            <CardContent className="p-4 text-sm text-orange-950 leading-relaxed space-y-2">
+              <p>
+                Enter the bill total as <strong>VAT-inclusive</strong> (5% VAT when enabled). No
+                service charge applies to guest folio restaurant bills.
+              </p>
+              <p className="text-xs tabular-nums">
+                Current guest due:{' '}
+                <strong>{formatBdt(guestDueAmount)}</strong>
+                {parsedAmount > 0 ? (
+                  <>
+                    {' '}
+                    · After this bill: <strong>{formatBdt(projectedDue)}</strong>
+                  </>
+                ) : null}
+              </p>
             </CardContent>
           </Card>
 
@@ -201,8 +216,8 @@ export function BookingRestaurantBillDialog({
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div className="space-y-2">
-                <Label>Amount (BDT) *</Label>
+              <div className="space-y-2 sm:col-span-2">
+                <Label>Amount (BDT, VAT inclusive) *</Label>
                 <Input
                   type="number"
                   min={0}
@@ -222,15 +237,16 @@ export function BookingRestaurantBillDialog({
                   onChange={(e) => setDiscount(e.target.value)}
                 />
               </div>
-              <div className="space-y-2">
-                <Label>VAT %</Label>
-                <Input
-                  type="number"
-                  min={0}
-                  step="0.1"
-                  value={vatPercent}
-                  onChange={(e) => setVatPercent(e.target.value)}
-                />
+            </div>
+
+            <div className="flex items-center justify-between rounded-lg border bg-muted/20 px-4 py-3">
+              <div>
+                <p className="text-sm font-medium">VAT {GUEST_FOLIO_RESTAURANT_VAT_PERCENT}% (inclusive)</p>
+                <p className="text-xs text-muted-foreground">Backed out from the amount above</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground">{vatApplied ? 'On' : 'Off'}</span>
+                <Switch checked={vatApplied} onCheckedChange={setVatApplied} />
               </div>
             </div>
 
@@ -247,18 +263,24 @@ export function BookingRestaurantBillDialog({
             {parsedAmount > 0 && (
               <div className="rounded-lg border bg-muted/30 px-4 py-3 grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
                 <div>
-                  <p className="text-xs text-muted-foreground">Net</p>
-                  <p className="font-medium tabular-nums">{formatBdt(taxable)}</p>
+                  <p className="text-xs text-muted-foreground">Net (excl. VAT)</p>
+                  <p className="font-medium tabular-nums">{formatBdt(billTotals.subtotal)}</p>
                 </div>
                 <div>
-                  <p className="text-xs text-muted-foreground">VAT</p>
-                  <p className="font-medium tabular-nums">{formatBdt(previewVat)}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">Total</p>
-                  <p className="font-semibold tabular-nums text-orange-700">
-                    {formatBdt(previewTotal)}
+                  <p className="text-xs text-muted-foreground">
+                    VAT ({vatApplied ? `${GUEST_FOLIO_RESTAURANT_VAT_PERCENT}%` : '0%'})
                   </p>
+                  <p className="font-medium tabular-nums">{formatBdt(billTotals.vatAmount)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Total (inclusive)</p>
+                  <p className="font-semibold tabular-nums text-orange-700">
+                    {formatBdt(billTotals.totalAmount)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Service charge</p>
+                  <p className="font-medium tabular-nums text-muted-foreground">None</p>
                 </div>
               </div>
             )}
@@ -303,6 +325,7 @@ export function BookingRestaurantBillDialog({
                         <p className="font-medium leading-snug font-mono">{parsed.billNo}</p>
                         <p className="text-xs text-muted-foreground font-mono mt-0.5">
                           {bill.orderNumber}
+                          {bill.vatPercent > 0 ? ` · VAT ${bill.vatPercent}% incl.` : ''}
                         </p>
                       </div>
                       <p className="text-xs text-muted-foreground pt-0.5">

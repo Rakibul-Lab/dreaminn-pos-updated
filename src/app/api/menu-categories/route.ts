@@ -3,11 +3,16 @@ import { db } from '@/lib/db';
 import { requireAuth, requireRole } from '@/lib/auth';
 import { successResponse, errorResponse, notFoundResponse, logActivity } from '@/lib/api-utils';
 
+import { isHotelBeverageMenuCategory } from '@/lib/hotel-beverage-sales';
+
 // GET /api/menu-categories - List all categories with item counts, sorted by sortOrder
 export async function GET(request: NextRequest) {
   try {
     const authResult = await requireAuth(request);
     if (authResult instanceof Response) return authResult;
+
+    const { searchParams } = new URL(request.url);
+    const excludeHotelBeverage = searchParams.get('excludeHotelBeverage') === 'true';
 
     const categories = await db.menuCategory.findMany({
       orderBy: { sortOrder: 'asc' },
@@ -18,7 +23,11 @@ export async function GET(request: NextRequest) {
       },
     });
 
-    const result = categories.map(({ _count, ...category }) => ({
+    const filtered = excludeHotelBeverage
+      ? categories.filter((category) => !isHotelBeverageMenuCategory(category))
+      : categories;
+
+    const result = filtered.map(({ _count, ...category }) => ({
       ...category,
       itemCount: _count.items,
     }));

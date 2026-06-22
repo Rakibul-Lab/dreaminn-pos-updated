@@ -12,10 +12,15 @@ import {
   isValidBusinessDateString,
   readCurrentBusinessDateString,
 } from '@/lib/business-date'
-import { sumBookingNetPaid } from '@/lib/booking-totals'
 import { formatPaymentMethod } from '@/lib/payment-method'
 import { buildDailySalesDetailReport } from '@/lib/daily-sales-report'
 import { buildHotelDailyDiscountReport } from '@/lib/hotel-daily-discount-report'
+import {
+  beverageSaleNumberFromPayment,
+  resolvePaymentReference,
+  resolvePaymentRoomNumber,
+  resolvePaymentSourceLabel,
+} from '@/lib/daily-payment-labels'
 
 export type { DailyDiscountReport, DailyDiscountLine } from '@/lib/hotel-daily-discount-report'
 export { buildHotelDailyDiscountReport }
@@ -32,45 +37,10 @@ export function formatCollectionPurposeLabel(
   purpose: string,
   roomNumber?: string | null
 ): string {
-  if (purpose === 'Booking' && roomNumber) {
-    return `Booking (Room ${roomNumber})`
+  if (roomNumber && !purpose.includes(`Room ${roomNumber}`)) {
+    return `${purpose} · Room ${roomNumber}`
   }
   return purpose
-}
-
-const BEVERAGE_SALE_NUMBER_RE = /BEV-\d{8}-\d+/
-
-function isBeverageWalkInPayment(payment: {
-  notes?: string | null
-  reference?: string | null
-}): boolean {
-  return (
-    payment.notes?.includes('Beverage walk-in sale') === true ||
-    payment.reference?.startsWith('BEV-') === true
-  )
-}
-
-function beverageSaleNumberFromPayment(payment: {
-  notes?: string | null
-  reference?: string | null
-}): string | null {
-  if (payment.reference?.startsWith('BEV-')) return payment.reference
-  const match = payment.notes?.match(BEVERAGE_SALE_NUMBER_RE)
-  return match?.[0] ?? null
-}
-
-function resolveCollectionPurpose(payment: {
-  notes?: string | null
-  reference?: string | null
-  invoice?: { invoiceNumber: string } | null
-  order?: { orderNumber: string } | null
-  booking?: { id: string } | null
-}): string {
-  if (payment.invoice?.invoiceNumber) return 'Invoice'
-  if (payment.order?.orderNumber) return 'Restaurant'
-  if (isBeverageWalkInPayment(payment)) return 'Hotel (Beverage)'
-  if (payment.booking?.id) return 'Booking'
-  return 'Other'
 }
 
 export async function resolveBusinessDayReportWindow(
@@ -106,6 +76,35 @@ export async function resolveBusinessDayReportWindow(
     businessDateDisplay: formatBusinessDateDisplay(businessDate),
     openedAt,
     closedAt,
+  }
+}
+
+export function resolveDateRangeReportWindow(input: {
+  dateFrom?: string | null
+  dateTo?: string | null
+}): BusinessDayWindow | null {
+  const dateFrom = (input.dateFrom ?? '').trim()
+  const dateTo = (input.dateTo ?? '').trim()
+  if (!dateFrom && !dateTo) return null
+
+  const from = dateFrom ? new Date(`${dateFrom}T00:00:00`) : null
+  const to = dateTo ? new Date(`${dateTo}T23:59:59.999`) : null
+  const openedAt = from && Number.isFinite(from.getTime()) ? from : null
+  const closedAt = to && Number.isFinite(to.getTime()) ? to : null
+  if (!openedAt && !closedAt) return null
+
+  const safeOpenedAt = openedAt ?? new Date(closedAt!.getTime())
+  const safeClosedAt = closedAt ?? new Date(safeOpenedAt.getTime())
+
+  const fromLabel = dateFrom ? formatBusinessDateDisplay(dateFrom) : '—'
+  const toLabel = dateTo ? formatBusinessDateDisplay(dateTo) : '—'
+  const businessDate = dateFrom || dateTo
+
+  return {
+    businessDate,
+    businessDateDisplay: `${fromLabel} → ${toLabel}`,
+    openedAt: safeOpenedAt,
+    closedAt: safeClosedAt,
   }
 }
 
@@ -230,7 +229,8 @@ export async function buildHotelDailyCollectionsReport(window: BusinessDayWindow
   const { businessDate, openedAt, closedAt } = window
   const windowWhere = buildBusinessDayWindowWhere(businessDate, openedAt, closedAt)
 
-  const [payments, deposits, beverageWalkInSales] = await Promise.all([
+  const [salesReport, payments, beverageWalkInSales] = await Promise.all([
+    buildDailySalesDetailReport(window),
     db.payment.findMany({
       where: {
         OR: [
@@ -246,15 +246,18 @@ export async function buildHotelDailyCollectionsReport(window: BusinessDayWindow
         ],
       },
       select: {
+        id: true,
         amount: true,
         method: true,
         paymentType: true,
         createdAt: true,
         notes: true,
         reference: true,
+        settlementSource: true,
         booking: {
           select: {
             id: true,
+            customer: { select: { name: true } },
             room: { select: { roomNumber: true } },
           },
         },
@@ -267,16 +270,27 @@ export async function buildHotelDailyCollectionsReport(window: BusinessDayWindow
         order: {
           select: {
             orderNumber: true,
+            orderType: true,
+            bookingId: true,
+            notes: true,
             room: { select: { roomNumber: true } },
+          },
+        },
+        reservationEntry: {
+          select: {
+            guestName: true,
+            registrationNumber: true,
+            lines: {
+              take: 1,
+              select: {
+                room: { select: { roomNumber: true } },
+              },
+            },
           },
         },
         receiver: { select: { name: true } },
       },
       orderBy: { createdAt: 'asc' },
-    }),
-    db.hotelDeposit.findMany({
-      where: windowWhere,
-      select: { amount: true, method: true, bankName: true, createdAt: true },
     }),
     db.hotelBeverageSale.findMany({
       where: {
@@ -302,11 +316,13 @@ export async function buildHotelDailyCollectionsReport(window: BusinessDayWindow
   }
 
   type CollectionPaymentRow = {
+    id: string
     amount: number
     method: string
     type: string
     purpose: string
     roomNumber: string | null
+    guestName: string | null
     at: string
     receivedBy: string
     reference: string | null
@@ -314,32 +330,22 @@ export async function buildHotelDailyCollectionsReport(window: BusinessDayWindow
   }
 
   const collectionPayments: CollectionPaymentRow[] = payments.map((p) => {
-    const bookingRoom =
-      p.booking?.room?.roomNumber ?? p.invoice?.booking?.room?.roomNumber ?? null
-    const restaurantRoom = p.order?.room?.roomNumber ?? null
-    const purpose = resolveCollectionPurpose(p)
-    const roomNumber =
-      purpose === 'Invoice' || purpose === 'Booking'
-        ? bookingRoom
-        : purpose === 'Restaurant'
-          ? restaurantRoom
-          : null
+    const purpose = resolvePaymentSourceLabel(p)
+    const roomNumber = resolvePaymentRoomNumber(p)
 
     return {
+      id: p.id,
       amount: p.amount,
       method: formatPaymentMethod(p.method),
       type: p.paymentType,
       paymentType: p.paymentType,
       purpose: formatCollectionPurposeLabel(purpose, roomNumber),
       roomNumber,
+      guestName:
+        p.booking?.customer?.name ?? p.reservationEntry?.guestName ?? null,
       at: p.createdAt.toISOString(),
       receivedBy: p.receiver.name,
-      reference:
-        p.reference ??
-        p.invoice?.invoiceNumber ??
-        p.order?.orderNumber ??
-        p.booking?.id?.slice(-6) ??
-        null,
+      reference: resolvePaymentReference(p),
     }
   })
 
@@ -348,12 +354,14 @@ export async function buildHotelDailyCollectionsReport(window: BusinessDayWindow
 
     const method = formatPaymentMethod(sale.paymentMethod ?? 'CASH')
     collectionPayments.push({
+      id: `beverage-sale-${sale.id}`,
       amount: sale.totalAmount,
       method,
       type: 'FINAL',
       paymentType: 'FINAL',
-      purpose: 'Hotel (Beverage)',
+      purpose: 'Hotel beverage (walk-in)',
       roomNumber: null,
+      guestName: null,
       at: sale.createdAt.toISOString(),
       receivedBy: sale.creator?.name ?? '—',
       reference: sale.saleNumber,
@@ -382,7 +390,7 @@ export async function buildHotelDailyCollectionsReport(window: BusinessDayWindow
     return sum + p.amount
   }, 0)
 
-  const depositTotal = deposits.reduce((s, d) => s + d.amount, 0)
+  const recon = salesReport.cashReconciliation
 
   return {
     reportType: 'hotel-daily-collections' as const,
@@ -394,19 +402,23 @@ export async function buildHotelDailyCollectionsReport(window: BusinessDayWindow
       refunds,
       netCollected,
       paymentCount: collectionPayments.filter((p) => p.paymentType !== 'REFUND').length,
-      depositTotal,
-      depositCount: deposits.length,
+      depositTotal: recon.totalRemitted,
+      depositCount: recon.remittanceCount,
+      openingCash: recon.openingCash,
+      cashCollected: recon.cashCollectedToday,
+      cardCollected: recon.cardCollectedToday,
+      mBankingCollected: recon.mBankingCollectedToday,
+      cashRemitted: recon.cashRemitted,
+      cardRemitted: recon.cardRemitted,
+      mBankingRemitted: recon.mBankingRemitted,
+      cashOnHand: recon.cashOnHand,
+      salesReportCashTotal: recon.cashCollectedToday,
     },
     byMethod: Array.from(byMethod.entries())
       .map(([method, amount]) => ({ method, amount }))
       .sort((a, b) => b.amount - a.amount),
     payments: collectionPayments.map(({ paymentType: _paymentType, ...p }) => p),
-    deposits: deposits.map((d) => ({
-      amount: d.amount,
-      method: d.method,
-      bank: d.bankName,
-      at: d.createdAt.toISOString(),
-    })),
+    deposits: salesReport.headOfficeRemittances,
   }
 }
 

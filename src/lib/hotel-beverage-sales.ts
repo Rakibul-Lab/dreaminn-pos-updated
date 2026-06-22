@@ -7,6 +7,14 @@ export type BeverageCartLine = {
   quantity: number
 }
 
+/** Stored in menu_categories.description — not shown in the UI. */
+export const HOTEL_BEVERAGE_CATEGORY_MARKER = 'HOTEL_BEVERAGE_POS'
+
+export type MenuCategoryLike = {
+  name: string
+  description?: string | null
+}
+
 export function computeBeverageCartTotals(lines: BeverageCartLine[]): {
   subtotal: number
   totalAmount: number
@@ -38,6 +46,15 @@ export async function generateHotelBeverageSaleNumber(db: Pick<PrismaClient, 'ho
   return `${prefix}${Date.now().toString().slice(-6)}`
 }
 
+/** Legacy: older categories were tagged by having "beverage" in the name. */
 export function isBeverageCategoryName(name: string): boolean {
   return name.trim().toLowerCase().includes('beverage')
+}
+
+/** Hotel beverage POS category (separate from CloudView restaurant menu). */
+export function isHotelBeverageMenuCategory(category: MenuCategoryLike): boolean {
+  if (category.description?.includes(HOTEL_BEVERAGE_CATEGORY_MARKER)) {
+    return true
+  }
+  return isBeverageCategoryName(category.name)
 }

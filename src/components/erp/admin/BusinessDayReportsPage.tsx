@@ -49,6 +49,7 @@ import {
   type SalesReportData,
 } from '@/lib/business-day-reports-export'
 import { DailySalesPaperView } from '@/components/erp/admin/DailySalesPaperView'
+import type { PaperSalesInput } from '@/lib/daily-sales-paper-format'
 import { BusinessDaySummarySection } from '@/components/erp/admin/BusinessDaySummarySection'
 import {
   BOOKING_DATE_PRESET_OPTIONS,
@@ -77,6 +78,7 @@ type ReportResponse = {
 }
 
 type BusinessDatePreset = 'today' | 'yesterday' | 'custom' | 'closed'
+type ReportDateMode = 'single' | 'range'
 
 const DATE_PRESET_OPTIONS: { value: BusinessDatePreset; label: string }[] = [
   { value: 'today', label: 'Business today' },
@@ -87,6 +89,13 @@ const DATE_PRESET_OPTIONS: { value: BusinessDatePreset; label: string }[] = [
 
 function buildReportUrl(type: string, businessDate: string): string {
   const params = new URLSearchParams({ type, businessDate })
+  return `/reports?${params.toString()}`
+}
+
+function buildReportRangeUrl(type: string, range: { dateFrom?: string; dateTo?: string }): string {
+  const params = new URLSearchParams({ type })
+  if (range.dateFrom) params.set('dateFrom', range.dateFrom)
+  if (range.dateTo) params.set('dateTo', range.dateTo)
   return `/reports?${params.toString()}`
 }
 
@@ -105,6 +114,9 @@ export default function BusinessDayReportsPage() {
   const [datePreset, setDatePreset] = useState<BusinessDatePreset>('today')
   const [customDate, setCustomDate] = useState('')
   const [closedDate, setClosedDate] = useState('')
+  const [dateMode, setDateMode] = useState<ReportDateMode>('single')
+  const [rangeDateFrom, setRangeDateFrom] = useState('')
+  const [rangeDateTo, setRangeDateTo] = useState('')
   const [activeTab, setActiveTab] = useState<BusinessDayReportTab>('summary')
   const [exportingExcel, setExportingExcel] = useState(false)
   const [exportingPdf, setExportingPdf] = useState(false)
@@ -139,6 +151,13 @@ export default function BusinessDayReportsPage() {
   }, [currentBusinessDate, datePreset, customDate, closedDate, closedDays])
 
   useEffect(() => {
+    if (!currentBusinessDate) return
+    if (!rangeDateFrom) setRangeDateFrom(currentBusinessDate)
+    if (!rangeDateTo) setRangeDateTo(currentBusinessDate)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentBusinessDate])
+
+  useEffect(() => {
     setDiscountSearchInput('')
     setDiscountSearchQuery('')
     setDiscountSourceFilter('all')
@@ -165,30 +184,43 @@ export default function BusinessDayReportsPage() {
     return true
   }, [discountDatePreset, discountCustomDateFrom, discountCustomDateTo, currentBusinessDate])
 
-  const reportEnabled = !!selectedBusinessDate
+  const reportEnabled =
+    dateMode === 'single'
+      ? !!selectedBusinessDate
+      : !!(rangeDateFrom || rangeDateTo)
 
   const { data: salesRes, isLoading: loadingSales, refetch: refetchSales, isFetching: fetchingSales } = useQuery({
-    queryKey: ['business-day-sales', selectedBusinessDate],
-    queryFn: () => api.get<ReportResponse>(buildReportUrl('hotel-daily-sales', selectedBusinessDate!)),
+    queryKey: ['business-day-sales', dateMode, selectedBusinessDate, rangeDateFrom, rangeDateTo],
+    queryFn: () =>
+      api.get<ReportResponse>(
+        dateMode === 'range'
+          ? buildReportRangeUrl('hotel-daily-sales', { dateFrom: rangeDateFrom, dateTo: rangeDateTo })
+          : buildReportUrl('hotel-daily-sales', selectedBusinessDate!)
+      ),
     enabled: reportEnabled,
   })
 
   const { data: collectionsRes, isLoading: loadingCollections, refetch: refetchCollections, isFetching: fetchingCollections } = useQuery({
-    queryKey: ['business-day-collections', selectedBusinessDate],
-    queryFn: () => api.get<ReportResponse>(buildReportUrl('hotel-daily-collections', selectedBusinessDate!)),
+    queryKey: ['business-day-collections', dateMode, selectedBusinessDate, rangeDateFrom, rangeDateTo],
+    queryFn: () =>
+      api.get<ReportResponse>(
+        dateMode === 'range'
+          ? buildReportRangeUrl('hotel-daily-collections', { dateFrom: rangeDateFrom, dateTo: rangeDateTo })
+          : buildReportUrl('hotel-daily-collections', selectedBusinessDate!)
+      ),
     enabled: reportEnabled,
   })
 
   const { data: arrivalsRes, isLoading: loadingArrivals, refetch: refetchArrivals, isFetching: fetchingArrivals } = useQuery({
     queryKey: ['business-day-arrivals', selectedBusinessDate],
     queryFn: () => api.get<ReportResponse>(buildReportUrl('hotel-daily-arrivals', selectedBusinessDate!)),
-    enabled: reportEnabled,
+    enabled: dateMode === 'single' && reportEnabled,
   })
 
   const { data: departuresRes, isLoading: loadingDepartures, refetch: refetchDepartures, isFetching: fetchingDepartures } = useQuery({
     queryKey: ['business-day-departures', selectedBusinessDate],
     queryFn: () => api.get<ReportResponse>(buildReportUrl('hotel-daily-departures', selectedBusinessDate!)),
-    enabled: reportEnabled,
+    enabled: dateMode === 'single' && reportEnabled,
   })
 
   const { data: discountsRes, isLoading: loadingDiscounts, refetch: refetchDiscounts, isFetching: fetchingDiscounts } = useQuery({
@@ -215,6 +247,7 @@ export default function BusinessDayReportsPage() {
   const dailySalesRestaurant = salesData?.restaurant
   const dailyCollectionsByMethod = collectionsData?.byMethod
   const dailyCollectionPayments = collectionsData?.payments
+  const dailyHeadOfficeRemittances = collectionsData?.deposits
   const dailyArrivalsGuests = arrivalsData?.guests as Array<Record<string, unknown>> | undefined
   const dailyDeparturesGuests = departuresData?.guests as Array<Record<string, unknown>> | undefined
 
@@ -307,7 +340,7 @@ export default function BusinessDayReportsPage() {
   }
 
   const handleExportExcel = async () => {
-    if (!selectedBusinessDate) return
+    if (dateMode === 'single' && !selectedBusinessDate) return
     setExportingExcel(true)
     const toastId = toast.loading('Preparing Excel export…')
     try {
@@ -336,7 +369,7 @@ export default function BusinessDayReportsPage() {
   }
 
   const handleExportPdf = async () => {
-    if (!selectedBusinessDate) return
+    if (dateMode === 'single' && !selectedBusinessDate) return
     setExportingPdf(true)
     const toastId = toast.loading('Preparing PDF export…')
     try {
@@ -386,10 +419,53 @@ export default function BusinessDayReportsPage() {
         <CardHeader className="pb-3">
           <CardTitle className="text-base flex items-center gap-2">
             <CalendarRange className="h-4 w-4" />
-            Select business date
+            Select business date / range
           </CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col sm:flex-row flex-wrap gap-4">
+          <div className="space-y-2 min-w-[200px]">
+            <Label>Report mode</Label>
+            <Select value={dateMode} onValueChange={(v) => setDateMode(v as ReportDateMode)}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="single">Single business date</SelectItem>
+                <SelectItem value="range">Date range</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {dateMode === 'range' ? (
+            <>
+              <div className="space-y-2">
+                <Label htmlFor="business-range-from">From</Label>
+                <Input
+                  id="business-range-from"
+                  type="date"
+                  value={rangeDateFrom}
+                  onChange={(e) => setRangeDateFrom(e.target.value)}
+                  className="w-[180px]"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="business-range-to">To</Label>
+                <Input
+                  id="business-range-to"
+                  type="date"
+                  value={rangeDateTo}
+                  onChange={(e) => setRangeDateTo(e.target.value)}
+                  className="w-[180px]"
+                />
+              </div>
+              <div className="flex items-end">
+                <p className="text-xs text-muted-foreground max-w-[260px]">
+                  Range mode applies to Sales & Collections. Arrivals/Departures stay single-date.
+                </p>
+              </div>
+            </>
+          ) : (
+            <>
           <div className="space-y-2 min-w-[200px]">
             <Label>Date option</Label>
             <Select
@@ -446,6 +522,8 @@ export default function BusinessDayReportsPage() {
                 </Select>
               )}
             </div>
+          )}
+            </>
           )}
 
           {selectedBusinessDate && (
@@ -585,6 +663,19 @@ export default function BusinessDayReportsPage() {
                   hotel: dailySalesHotel,
                   restaurant: dailySalesRestaurant,
                   totalDiscount: salesData.totalDiscount as number | undefined,
+                  cashReconciliation: (salesData as { cashReconciliation?: PaperSalesInput['cashReconciliation'] })
+                    .cashReconciliation,
+                  headOfficeRemittances: (salesData as {
+                    headOfficeRemittances?: Array<{
+                      id: string
+                      amount: number
+                      method: string
+                      reference?: string | null
+                      notes?: string | null
+                      sentBy?: string
+                      at: string
+                    }>
+                  }).headOfficeRemittances,
                 }}
               />
             ) : (
@@ -597,7 +688,7 @@ export default function BusinessDayReportsPage() {
           </TabsContent>
 
           <TabsContent value="collections" className="space-y-4 mt-4">
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <Card>
                 <CardContent className="p-4">
                   <p className="text-sm text-muted-foreground">Net collected</p>
@@ -608,21 +699,69 @@ export default function BusinessDayReportsPage() {
               </Card>
               <Card>
                 <CardContent className="p-4">
-                  <p className="text-sm text-muted-foreground">Gross collected</p>
-                  <p className="text-2xl font-bold text-emerald-700">
-                    ৳{(((collectionsData?.summary)?.grossCollected) || 0).toLocaleString()}
+                  <p className="text-sm text-muted-foreground">Sent to head office (total)</p>
+                  <p className="text-2xl font-bold text-amber-700">
+                    ৳{(((collectionsData?.summary)?.depositTotal) || 0).toLocaleString()}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {(collectionsData?.summary)?.depositCount ?? 0} transfer(s)
                   </p>
                 </CardContent>
               </Card>
               <Card>
                 <CardContent className="p-4">
-                  <p className="text-sm text-muted-foreground">Deposits</p>
-                  <p className="text-2xl font-bold text-amber-700">
-                    ৳{(((collectionsData?.summary)?.depositTotal) || 0).toLocaleString()}
+                  <p className="text-sm text-muted-foreground">Cash on hand</p>
+                  <p className="text-2xl font-bold text-sky-700">
+                    ৳{(((collectionsData?.summary)?.cashOnHand) || 0).toLocaleString()}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Opening ৳{(((collectionsData?.summary)?.openingCash) || 0).toLocaleString()} + Cash column ৳
+                    {(((collectionsData?.summary)?.cashCollected) || 0).toLocaleString()} − sent ৳
+                    {(((collectionsData?.summary)?.cashRemitted) || 0).toLocaleString()}
                   </p>
                 </CardContent>
               </Card>
             </div>
+
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Cash reconciliation (matches sales report &amp; Head Office)</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm">
+                  <div className="space-y-2">
+                    <p className="font-semibold text-muted-foreground">Collected (sales report columns)</p>
+                    <div className="flex justify-between">
+                      <span>Cash collected</span>
+                      <span className="font-medium">৳{(((collectionsData?.summary)?.cashCollected) || 0).toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Card collected</span>
+                      <span className="font-medium">৳{(((collectionsData?.summary)?.cardCollected) || 0).toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>M. banking collected</span>
+                      <span className="font-medium">৳{(((collectionsData?.summary)?.mBankingCollected) || 0).toLocaleString()}</span>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <p className="font-semibold text-muted-foreground">Sent to head office</p>
+                    <div className="flex justify-between">
+                      <span>Cash</span>
+                      <span className="font-medium text-amber-700">৳{(((collectionsData?.summary)?.cashRemitted) || 0).toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Card</span>
+                      <span className="font-medium text-amber-700">৳{(((collectionsData?.summary)?.cardRemitted) || 0).toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>M. banking</span>
+                      <span className="font-medium text-amber-700">৳{(((collectionsData?.summary)?.mBankingRemitted) || 0).toLocaleString()}</span>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <Card>
@@ -674,8 +813,8 @@ export default function BusinessDayReportsPage() {
                       <TableBody>
                         {loadingCollections ? (
                           <TableRow><TableCell colSpan={5}><Skeleton className="h-8 w-full" /></TableCell></TableRow>
-                        ) : dailyCollectionPayments?.length ? dailyCollectionPayments.map((p, i) => (
-                          <TableRow key={i}>
+                        ) : dailyCollectionPayments?.length ? dailyCollectionPayments.map((p) => (
+                          <TableRow key={String(p.id ?? p.at)}>
                             <TableCell className="text-xs">
                               {p.at ? format(parseISO(String(p.at)), 'dd MMM · HH:mm') : '—'}
                             </TableCell>
@@ -697,6 +836,52 @@ export default function BusinessDayReportsPage() {
                 </CardContent>
               </Card>
             </div>
+
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Sent to head office</CardTitle>
+              </CardHeader>
+              <CardContent className="p-0">
+                <div className="max-h-64 overflow-y-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Date & time</TableHead>
+                        <TableHead>Method</TableHead>
+                        <TableHead>Reference</TableHead>
+                        <TableHead>Sent by</TableHead>
+                        <TableHead className="text-right">Amount</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {loadingCollections ? (
+                        <TableRow><TableCell colSpan={5}><Skeleton className="h-8 w-full" /></TableCell></TableRow>
+                      ) : dailyHeadOfficeRemittances?.length ? dailyHeadOfficeRemittances.map((d) => (
+                        <TableRow key={String(d.id ?? d.at)}>
+                          <TableCell className="text-xs whitespace-nowrap">
+                            {d.at ? format(parseISO(String(d.at)), 'dd MMM yyyy · HH:mm') : '—'}
+                          </TableCell>
+                          <TableCell>{String(d.method)}</TableCell>
+                          <TableCell className="text-xs text-muted-foreground max-w-[140px] truncate">
+                            {String(d.reference || d.notes || '—')}
+                          </TableCell>
+                          <TableCell className="text-xs">{String(d.sentBy || '—')}</TableCell>
+                          <TableCell className="text-right font-medium text-amber-700">
+                            ৳{Number(d.amount || 0).toLocaleString()}
+                          </TableCell>
+                        </TableRow>
+                      )) : (
+                        <TableRow>
+                          <TableCell colSpan={5} className="text-center py-4 text-muted-foreground">
+                            No head office transfers for this period. Record under Billing → Head Office.
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </Card>
           </TabsContent>
 
           <TabsContent value="discounts" className="space-y-4 mt-4">

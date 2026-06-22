@@ -21,7 +21,10 @@ type DayCloseStatus = {
   businessDate: string
   openedAt: string
   suggestedOpeningBalance?: number
-  savedOpeningBalance?: number
+  carriedOpeningBalance?: number | null
+  hasOpeningOverride?: boolean
+  savedOpeningBalance?: number | null
+  cashClosingBalancePreview?: number | null
 }
 
 type ReportResponse = {
@@ -72,8 +75,15 @@ export default function DayClosePage() {
 
   useEffect(() => {
     if (!status || openingLoaded) return
-    const saved = status.savedOpeningBalance ?? 0
-    setOpeningBalance(saved > 0 ? String(saved) : '')
+    const saved = status.savedOpeningBalance
+    const suggested = status.suggestedOpeningBalance ?? status.carriedOpeningBalance ?? 0
+    if (saved !== null && saved !== undefined) {
+      setOpeningBalance(String(saved))
+    } else if (suggested > 0) {
+      setOpeningBalance(String(suggested))
+    } else {
+      setOpeningBalance('')
+    }
     setOpeningLoaded(true)
   }, [status, openingLoaded])
 
@@ -277,7 +287,7 @@ export default function DayClosePage() {
             Actual transaction timestamps are preserved for audit.
           </p>
           <div className="space-y-2 max-w-md">
-            <Label htmlFor="day-close-opening">Opening balance</Label>
+            <Label htmlFor="day-close-opening">Opening cash (drawer)</Label>
             <div className="flex gap-2">
               <Input
                 id="day-close-opening"
@@ -286,7 +296,11 @@ export default function DayClosePage() {
                 step="0.01"
                 value={openingBalance}
                 onChange={(e) => setOpeningBalance(e.target.value)}
-                placeholder="0"
+                placeholder={
+                  status?.carriedOpeningBalance
+                    ? String(status.carriedOpeningBalance)
+                    : '0'
+                }
                 className="flex-1"
               />
               <Button
@@ -299,9 +313,17 @@ export default function DayClosePage() {
               </Button>
             </div>
             <p className="text-xs text-muted-foreground">
-              Defaults to 0. Enter an amount and click Save, or leave at 0. It is stored as this
-              business day&apos;s opening balance when you close the day.
+              {status?.carriedOpeningBalance
+                ? `Carried from previous day close: ৳${status.carriedOpeningBalance.toLocaleString()} (cash on hand). Adjust after physical count if needed.`
+                : 'First day or no prior close — enter cash in drawer at shift start, then Save.'}
             </p>
+            {status?.cashClosingBalancePreview != null ? (
+              <p className="text-xs text-sky-700">
+                If you close now, cash on hand (tomorrow&apos;s opening) will be ৳
+                {status.cashClosingBalancePreview.toLocaleString()} — based on current opening,
+                collections, and head-office transfers.
+              </p>
+            ) : null}
           </div>
           {projectedBalances && (
             <div className="space-y-2">

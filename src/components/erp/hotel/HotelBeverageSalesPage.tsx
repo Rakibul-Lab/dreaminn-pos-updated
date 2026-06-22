@@ -48,6 +48,7 @@ import { openHotelBeverageReceiptTab } from '@/lib/hotel-beverage-receipt-naviga
 import { formatBdt } from '@/lib/currency'
 import { HotelBeverageAllSalesDialog } from '@/components/erp/hotel/HotelBeverageAllSalesDialog'
 import { HotelBeverageAddItemDialog } from '@/components/erp/hotel/HotelBeverageAddItemDialog'
+import { HotelBeverageAddCategoryDialog } from '@/components/erp/hotel/HotelBeverageAddCategoryDialog'
 import {
   downloadBeverageMenuExcel,
   downloadBeverageMenuPdf,
@@ -174,6 +175,7 @@ export function HotelBeverageSalesPage() {
   const [recentOpen, setRecentOpen] = useState(false)
   const [allSalesOpen, setAllSalesOpen] = useState(false)
   const [addBeverageOpen, setAddBeverageOpen] = useState(false)
+  const [addCategoryOpen, setAddCategoryOpen] = useState(false)
   const [exportingMenu, setExportingMenu] = useState<'excel' | 'pdf' | null>(null)
 
   useEffect(() => {
@@ -492,6 +494,16 @@ export function HotelBeverageSalesPage() {
               variant="ghost"
               size="sm"
               className="h-8 gap-1.5 border border-slate-600 bg-slate-800/80 text-slate-100 hover:bg-slate-700 hover:text-white"
+              onClick={() => setAddCategoryOpen(true)}
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Add category
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-8 gap-1.5 border border-slate-600 bg-slate-800/80 text-slate-100 hover:bg-slate-700 hover:text-white"
               onClick={() => setAddBeverageOpen(true)}
             >
               <Plus className="h-3.5 w-3.5" />
@@ -621,7 +633,7 @@ export function HotelBeverageSalesPage() {
             <div className="flex flex-col items-center justify-center h-64 text-muted-foreground">
               <Coffee className="w-12 h-12 mb-3 opacity-30" />
               <p className="text-sm">No beverage items found</p>
-              <p className="text-xs mt-1">Add items under a Beverages category in Menu Management</p>
+              <p className="text-xs mt-1">Use Add category on this screen to create beverage categories</p>
             </div>
           ) : (
             <div className="grid grid-cols-4 sm:grid-cols-6 lg:grid-cols-8 gap-2">
@@ -1119,6 +1131,7 @@ export function HotelBeverageSalesPage() {
         onOpenChange={setAddBeverageOpen}
         categories={categories}
       />
+      <HotelBeverageAddCategoryDialog open={addCategoryOpen} onOpenChange={setAddCategoryOpen} />
     </div>
   )
 }

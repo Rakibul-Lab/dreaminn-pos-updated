@@ -13,6 +13,7 @@ import { computeHotelDiscountAmount, parseBookingDiscountType } from '@/lib/book
 import { resolveInvoiceBooking } from '@/lib/invoice-booking-resolve';
 import { isStayDatetimeRangeValid } from '@/lib/hotel-times';
 import { stampCurrentBusinessDate } from '@/lib/business-date';
+import { filterGuestFolioRestaurantOrders } from '@/lib/restaurant-order-billing';
 
 function parseOptionalAmount(value: unknown): number | undefined {
   if (value === undefined || value === null || value === '') return undefined;
@@ -235,7 +236,7 @@ export async function POST(request: NextRequest) {
     const autoRoomCharges =
       individualRoomCharges > 0 ? individualRoomCharges : booking.totalRoomCharge;
 
-    const restaurantOrders = await db.restaurantOrder.findMany({
+    const allRestaurantOrders = await db.restaurantOrder.findMany({
       where: {
         bookingId,
         status: { not: 'CANCELLED' },
@@ -246,8 +247,11 @@ export async function POST(request: NextRequest) {
             menuItem: { select: { name: true } },
           },
         },
+        companyLedgerBill: { select: { id: true } },
       },
     });
+
+    const restaurantOrders = filterGuestFolioRestaurantOrders(allRestaurantOrders);
 
     const autoRestaurantNet = restaurantOrders.reduce(
       (sum, order) => sum + Math.max(0, order.subtotal - order.discount),

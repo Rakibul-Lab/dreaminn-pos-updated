@@ -9,6 +9,10 @@ import {
   formatDiscountLabel,
   type InvoiceChargeDisplayRow,
 } from '@/lib/invoice-display'
+import {
+  GUEST_FOLIO_RESTAURANT_VAT_PERCENT,
+  isGuestFolioManualRestaurantBill,
+} from '@/lib/booking-restaurant-bill.shared'
 
 const HOTEL_CHARGE_TYPES = new Set(['room_charge', 'extra_service', 'discount'])
 const RESTAURANT_CHARGE_TYPES = new Set(['food_order'])
@@ -29,6 +33,7 @@ type RestaurantOrder = {
   vatPercent: number
   vatAmount: number
   createdAt: string
+  notes?: string | null
 }
 
 type BuildRowsContext = {
@@ -55,6 +60,31 @@ type BuildRowsContext = {
   resolveItemDateTime: (type: string, referenceId?: string | null) => { date: string; time: string }
   resolveOrderVatPercent: (description: string) => number | null
   defaultRestaurantVatPercent: number | null
+}
+
+function resolveRestaurantRowServicePercent(
+  ctx: BuildRowsContext,
+  referenceId?: string | null,
+  description?: string
+): number {
+  const order = ctx.restaurantOrders?.find((o) => o.id === referenceId)
+  if (order && isGuestFolioManualRestaurantBill(order)) return 0
+  if (description?.includes('Bill No.')) return 0
+  return INVOICE_SERVICE_CHARGE_PERCENT
+}
+
+function resolveRestaurantRowVatPercent(
+  ctx: BuildRowsContext,
+  description: string,
+  referenceId?: string | null
+): number {
+  const order = ctx.restaurantOrders?.find((o) => o.id === referenceId)
+  if (order && isGuestFolioManualRestaurantBill(order)) {
+    return order.vatPercent && order.vatPercent > 0
+      ? order.vatPercent
+      : GUEST_FOLIO_RESTAURANT_VAT_PERCENT
+  }
+  return ctx.resolveOrderVatPercent(description) ?? INVOICE_VAT_PERCENT
 }
 
 function lineItemCategory(type: string) {
@@ -274,7 +304,12 @@ function buildRestaurantRowsFromLineItems(ctx: BuildRowsContext): InvoiceChargeD
         })
       }
 
-      const vatPercent = ctx.resolveOrderVatPercent(item.description) ?? INVOICE_VAT_PERCENT
+      const vatPercent = resolveRestaurantRowVatPercent(ctx, item.description, item.referenceId)
+      const servicePercent = resolveRestaurantRowServicePercent(
+        ctx,
+        item.referenceId,
+        item.description
+      )
 
       return buildInclusiveGrossChargeRow({
         id: item.id,
@@ -284,6 +319,7 @@ function buildRestaurantRowsFromLineItems(ctx: BuildRowsContext): InvoiceChargeD
         description: item.description,
         grossRent: gross,
         vatPercent,
+        servicePercent,
         discountLabel: INVOICE_ZERO_DISCOUNT_DISPLAY,
         discountAmount: 0,
       })
@@ -297,6 +333,16 @@ function buildFallbackRestaurantRows(ctx: BuildRowsContext): InvoiceChargeDispla
     ? { date: ctx.resolveItemDateTime('food_order', order.id).date, time: ctx.resolveItemDateTime('food_order', order.id).time }
     : ctx.invoiceDateTime
   const vatPercent = ctx.defaultRestaurantVatPercent ?? INVOICE_VAT_PERCENT
+  const servicePercent =
+    order && isGuestFolioManualRestaurantBill(order)
+      ? 0
+      : INVOICE_SERVICE_CHARGE_PERCENT
+  const resolvedVat =
+    order && isGuestFolioManualRestaurantBill(order)
+      ? order.vatPercent > 0
+        ? order.vatPercent
+        : GUEST_FOLIO_RESTAURANT_VAT_PERCENT
+      : vatPercent
 
   return [
     buildInclusiveGrossChargeRow({
@@ -306,7 +352,8 @@ function buildFallbackRestaurantRows(ctx: BuildRowsContext): InvoiceChargeDispla
       category: 'F&B',
       description: 'Restaurant charges',
       grossRent: ctx.restaurantBill,
-      vatPercent,
+      vatPercent: resolvedVat,
+      servicePercent,
       discountLabel: INVOICE_ZERO_DISCOUNT_DISPLAY,
       discountAmount: 0,
     }),
@@ -317,4 +364,32 @@ export function buildRestaurantInvoiceChargeRows(ctx: BuildRowsContext): Invoice
   const fromItems = buildRestaurantRowsFromLineItems(ctx)
   if (fromItems.length > 0) return fromItems
   return buildFallbackRestaurantRows(ctx)
+}
+
+/** Service % label for restaurant invoice table — guest folio manual bills have no service charge. */
+export function resolveRestaurantInvoiceServicePercentLabel(
+  restaurantOrders: Array<{ notes?: string | null; items?: unknown[] | null }>
+): number {
+  if (restaurantOrders.length === 0) return INVOICE_SERVICE_CHARGE_PERCENT
+  const allGuestFolioManual = restaurantOrders.every((order) =>
+    isGuestFolioManualRestaurantBill(order)
+  )
+  return allGuestFolioManual ? 0 : INVOICE_SERVICE_CHARGE_PERCENT
+}
+
+/** VAT % label for restaurant invoice table header when all lines are guest folio manual bills. */
+export function resolveRestaurantInvoiceVatPercentLabel(
+  restaurantOrders: Array<{ vatPercent?: number; notes?: string | null; items?: unknown[] | null }>
+): number {
+  if (restaurantOrders.length === 0) return INVOICE_VAT_PERCENT
+  const allGuestFolioManual = restaurantOrders.every((order) =>
+    isGuestFolioManualRestaurantBill(order)
+  )
+  if (!allGuestFolioManual) {
+    const rates = restaurantOrders.map((o) => o.vatPercent).filter((r) => r != null && r > 0)
+    return rates.length === 1 ? rates[0]! : INVOICE_VAT_PERCENT
+  }
+  const rates = restaurantOrders
+    .map((o) => (o.vatPercent && o.vatPercent > 0 ? o.vatPercent : GUEST_FOLIO_RESTAURANT_VAT_PERCENT))
+  return rates[0] ?? GUEST_FOLIO_RESTAURANT_VAT_PERCENT
 }

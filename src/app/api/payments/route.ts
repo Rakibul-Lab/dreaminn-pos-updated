@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { requireAuth, canAccessHotel, canAccessRestaurant } from '@/lib/auth';
 import { successResponse, errorResponse, paginatedResponse, logActivity } from '@/lib/api-utils';
-import { computeBookingRoomDue, resolveBookingDisplayDue, sumBookingNetPaid } from '@/lib/booking-totals';
+import { computeBookingRoomDue, resolveBookingDisplayDue, sumBookingNetPaid, applyBookingPaymentToStoredDue } from '@/lib/booking-totals';
 import { PaymentType, PaymentMethod, Prisma, InvoiceStatus } from '@prisma/client';
 import {
   parsePaymentMethod,
@@ -245,7 +245,8 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // Update booking dueAmount (VAT-inclusive room total minus all payments)
+    // Update booking dueAmount after payment
+    let updatedDueAmount: number | null = null;
     if (bookingId) {
       const booking = await db.booking.findUnique({
         where: { id: bookingId },
@@ -259,15 +260,21 @@ export async function POST(request: NextRequest) {
         },
       });
       if (booking) {
-        const paymentRows = await db.payment.findMany({
-          where: { bookingId },
-          select: { amount: true, paymentType: true },
-        });
-        const dueAmount = resolveBookingDisplayDue(
-          booking,
-          paymentRows,
-          booking.invoices[0] ?? null
-        );
+        let dueAmount: number;
+        if (booking.status === 'CHECKED_IN') {
+          dueAmount = applyBookingPaymentToStoredDue(booking.dueAmount ?? 0, amount);
+        } else {
+          const paymentRows = await db.payment.findMany({
+            where: { bookingId },
+            select: { amount: true, paymentType: true },
+          });
+          dueAmount = resolveBookingDisplayDue(
+            booking,
+            paymentRows,
+            booking.invoices[0] ?? null
+          );
+        }
+        updatedDueAmount = dueAmount;
         await db.booking.update({
           where: { id: bookingId },
           data: { dueAmount },
@@ -304,6 +311,9 @@ export async function POST(request: NextRequest) {
           where: { id: invoice.bookingId },
           data: { dueAmount },
         });
+        if (updatedDueAmount == null) {
+          updatedDueAmount = dueAmount;
+        }
       }
     }
 
@@ -322,7 +332,11 @@ export async function POST(request: NextRequest) {
       })
     );
 
-    return successResponse(payment, 'Payment recorded successfully', 201);
+    return successResponse(
+      { ...payment, updatedDueAmount },
+      'Payment recorded successfully',
+      201
+    );
   } catch (error) {
     console.error('Error creating payment:', error);
     return errorResponse('Failed to record payment', 500);

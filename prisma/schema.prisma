@@ -52,6 +52,7 @@ model Room {
   roomNumber           String             @unique
   floor                Int                @default(1)
   status               RoomStatus         @default(AVAILABLE)
+  maintenancePurpose   String?            @map("maintenance_purpose")
   typeId               String
   totalPrice           Float              @default(0) @map("total_price")
   createdAt            DateTime           @default(now())

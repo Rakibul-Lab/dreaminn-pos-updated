@@ -67,6 +67,7 @@ import {
   Search,
   Wallet,
 } from 'lucide-react'
+import { useBusinessDate } from '@/hooks/use-business-date'
 
 interface HotelDeposit {
   id: string
@@ -119,6 +120,32 @@ export default function DepositsPage() {
   const [showAddDialog, setShowAddDialog] = useState(false)
   const [form, setForm] = useState(defaultDepositForm)
 
+  const { data: businessDateRes } = useBusinessDate()
+  const businessDate = businessDateRes?.data?.businessDate
+
+  const { data: todayCollectionsRes } = useQuery({
+    queryKey: ['deposits-today-collections', businessDate],
+    enabled: Boolean(businessDate),
+    queryFn: () =>
+      api.get<{
+        success: boolean
+        data: {
+          summary?: {
+            cashCollected?: number
+            cardCollected?: number
+            mBankingCollected?: number
+            cashRemitted?: number
+            cardRemitted?: number
+            mBankingRemitted?: number
+            cashOnHand?: number
+            depositTotal?: number
+            openingCash?: number
+          }
+        }
+      }>(`/reports?type=hotel-daily-collections&businessDate=${encodeURIComponent(businessDate!)}`),
+  })
+  const todayCollections = todayCollectionsRes?.data?.summary
+
   const dateRange = useMemo(
     () => resolveBookingDateRange(datePreset, customDateFrom, customDateTo),
     [datePreset, customDateFrom, customDateTo]
@@ -170,6 +197,8 @@ export default function DepositsPage() {
     }) => api.post('/deposits', payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['deposits'] })
+      queryClient.invalidateQueries({ queryKey: ['deposits-today-collections'] })
+      queryClient.invalidateQueries({ queryKey: ['business-day-collections'] })
       toast({ title: 'Deposit recorded', description: 'Money deposit has been saved.' })
       setShowAddDialog(false)
       setForm(defaultDepositForm())
@@ -291,10 +320,11 @@ export default function DepositsPage() {
         <div>
           <h2 className="text-2xl font-bold tracking-tight flex items-center gap-2">
             <Landmark className="h-7 w-7 text-amber-600" />
-            Deposits
+            Head Office
           </h2>
           <p className="text-muted-foreground text-sm mt-1">
-            All money deposited by the hotel — bank, cash, bKash, and other methods — with date and time.
+            Record money sent from the hotel to head office — cash, bank, bKash, etc. — with date, time, and receipt reference.
+            Appears on the daily Collections report and Business Day reports.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -321,31 +351,134 @@ export default function DepositsPage() {
             onClick={() => setShowAddDialog(true)}
           >
             <Plus className="h-4 w-4 mr-2" />
-            Record deposit
+            Record transfer
           </Button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card>
           <CardContent className="pt-6 flex items-center gap-4">
-            <div className="h-10 w-10 rounded-lg bg-amber-100 flex items-center justify-center">
-              <Wallet className="h-5 w-5 text-amber-700" />
+            <div className="h-10 w-10 rounded-lg bg-emerald-100 flex items-center justify-center">
+              <Wallet className="h-5 w-5 text-emerald-700" />
             </div>
             <div>
-              <p className="text-sm text-muted-foreground">Total deposited (filtered)</p>
-              <p className="text-2xl font-bold text-amber-700">{formatBdt(sumAmount)}</p>
+              <p className="text-sm text-muted-foreground">Cash collected (sales report)</p>
+              <p className="text-2xl font-bold text-emerald-700">
+                {formatBdt(todayCollections?.cashCollected ?? 0)}
+              </p>
             </div>
           </CardContent>
         </Card>
+        <Card>
+          <CardContent className="pt-6 flex items-center gap-4">
+            <div className="h-10 w-10 rounded-lg bg-sky-100 flex items-center justify-center">
+              <Wallet className="h-5 w-5 text-sky-700" />
+            </div>
+            <div>
+              <p className="text-sm text-muted-foreground">Card collected (sales report)</p>
+              <p className="text-2xl font-bold text-sky-700">
+                {formatBdt(todayCollections?.cardCollected ?? 0)}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-6 flex items-center gap-4">
+            <div className="h-10 w-10 rounded-lg bg-indigo-100 flex items-center justify-center">
+              <Wallet className="h-5 w-5 text-indigo-700" />
+            </div>
+            <div>
+              <p className="text-sm text-muted-foreground">M. banking collected (sales report)</p>
+              <p className="text-2xl font-bold text-indigo-700">
+                {formatBdt(todayCollections?.mBankingCollected ?? 0)}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-6 flex items-center gap-4">
+            <div className="h-10 w-10 rounded-lg bg-sky-100 flex items-center justify-center">
+              <Wallet className="h-5 w-5 text-sky-700" />
+            </div>
+            <div>
+              <p className="text-sm text-muted-foreground">Cash on hand</p>
+              <p className="text-2xl font-bold text-sky-700">
+                {formatBdt(todayCollections?.cashOnHand ?? 0)}
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Opening + Cash column − cash sent
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <Card>
+          <CardContent className="pt-6 flex items-center gap-4">
+            <div className="h-10 w-10 rounded-lg bg-amber-100 flex items-center justify-center">
+              <Landmark className="h-5 w-5 text-amber-700" />
+            </div>
+            <div>
+              <p className="text-sm text-muted-foreground">Sent to HO today (total)</p>
+              <p className="text-2xl font-bold text-amber-700">
+                {formatBdt(todayCollections?.depositTotal ?? 0)}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-6 flex items-center gap-4">
+            <div className="h-10 w-10 rounded-lg bg-amber-100 flex items-center justify-center">
+              <Landmark className="h-5 w-5 text-amber-700" />
+            </div>
+            <div>
+              <p className="text-sm text-muted-foreground">Sent to HO (cash)</p>
+              <p className="text-2xl font-bold text-amber-700">
+                {formatBdt(todayCollections?.cashRemitted ?? 0)}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-6 flex items-center gap-4">
+            <div className="h-10 w-10 rounded-lg bg-amber-100 flex items-center justify-center">
+              <Landmark className="h-5 w-5 text-amber-700" />
+            </div>
+            <div>
+              <p className="text-sm text-muted-foreground">Sent to HO (card)</p>
+              <p className="text-2xl font-bold text-amber-700">
+                {formatBdt(todayCollections?.cardRemitted ?? 0)}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-6 flex items-center gap-4">
+            <div className="h-10 w-10 rounded-lg bg-amber-100 flex items-center justify-center">
+              <Landmark className="h-5 w-5 text-amber-700" />
+            </div>
+            <div>
+              <p className="text-sm text-muted-foreground">Sent to HO (m. banking)</p>
+              <p className="text-2xl font-bold text-amber-700">
+                {formatBdt(todayCollections?.mBankingRemitted ?? 0)}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <Card>
           <CardContent className="pt-6 flex items-center gap-4">
             <div className="h-10 w-10 rounded-lg bg-slate-100 flex items-center justify-center">
               <Landmark className="h-5 w-5 text-slate-700" />
             </div>
             <div>
-              <p className="text-sm text-muted-foreground">Records in view</p>
-              <p className="text-2xl font-bold">{total}</p>
+              <p className="text-sm text-muted-foreground">Total sent (filtered list)</p>
+              <p className="text-2xl font-bold">{formatBdt(sumAmount)}</p>
+              <p className="text-xs text-muted-foreground">{total} record(s)</p>
             </div>
           </CardContent>
         </Card>
@@ -580,7 +713,7 @@ export default function DepositsPage() {
       >
         <DialogContent className="max-w-md">
           <DialogHeader className="pb-2">
-            <DialogTitle>Record hotel deposit</DialogTitle>
+            <DialogTitle>Send to head office</DialogTitle>
           </DialogHeader>
           <div className="space-y-5 py-1">
             <div className="space-y-2">
@@ -600,7 +733,7 @@ export default function DepositsPage() {
             </div>
 
             <div className="space-y-2">
-              <Label className="text-sm font-medium">Deposit method</Label>
+              <Label className="text-sm font-medium">Transfer method</Label>
               <Select value={form.method} onValueChange={handleMethodChange}>
                 <SelectTrigger className="h-10">
                   <SelectValue />

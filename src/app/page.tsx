@@ -148,7 +148,7 @@ const navItems: NavItem[] = [
   // Billing
   { key: 'invoices', label: 'Invoices', icon: <FileText className="h-4 w-4" />, allowedRoles: ['ADMIN', 'HOTEL_STAFF', 'HOTEL_FD'], group: 'Billing' },
   { key: 'payments', label: 'Payments', icon: <CreditCard className="h-4 w-4" />, allowedRoles: ['ADMIN', 'HOTEL_STAFF', 'HOTEL_FD', 'RESTAURANT_STAFF'], group: 'Billing' },
-  { key: 'deposits', label: 'Deposits', icon: <Landmark className="h-4 w-4" />, allowedRoles: ['ADMIN', 'HOTEL_STAFF', 'HOTEL_FD'], group: 'Billing' },
+  { key: 'deposits', label: 'Head Office', icon: <Landmark className="h-4 w-4" />, allowedRoles: ['ADMIN', 'HOTEL_STAFF', 'HOTEL_FD'], group: 'Billing' },
   // Analytics
   { key: 'reports', label: 'Reports', icon: <BarChart3 className="h-4 w-4" />, allowedRoles: ['ADMIN', 'HOTEL_STAFF', 'HOTEL_FD', 'RESTAURANT_STAFF'], group: 'Analytics' },
   { key: 'day-close', label: 'Day Close', icon: <Lock className="h-4 w-4" />, allowedRoles: ['ADMIN', 'HOTEL_STAFF', 'HOTEL_FD'], group: 'Analytics' },
@@ -311,7 +311,7 @@ const pageTitles: Record<PageKey, string> = {
   'waiters': 'Waiter Management',
   'invoices': 'Invoices',
   'payments': 'Payments',
-  'deposits': 'Deposits',
+  'deposits': 'Head Office',
   'reports': 'Reports & Analytics',
   'day-close': 'Day Close',
   'business-day-reports': 'Business Day Reports',

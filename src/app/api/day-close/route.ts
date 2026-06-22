@@ -14,6 +14,7 @@ import {
   attachBalancesToSnapshot,
   computeDailySalesBalances,
   readDraftOpeningBalance,
+  resolveSuggestedOpeningBalance,
   saveDraftOpeningBalance,
 } from '@/lib/daily-sales-balance'
 
@@ -30,6 +31,7 @@ export async function GET(request: NextRequest) {
     const window = await getOpenBusinessDayWindow()
     const businessDate = window.businessDate
     const preview = await buildDayCloseSnapshot(businessDate, window.openedAt, new Date())
+    const openingInfo = await resolveSuggestedOpeningBalance(businessDate)
     const savedOpeningBalance = await readDraftOpeningBalance(businessDate)
 
     const [history, total] = await Promise.all([
@@ -48,8 +50,11 @@ export async function GET(request: NextRequest) {
       status: 'OPEN',
       businessDate,
       openedAt: window.openedAt.toISOString(),
-      suggestedOpeningBalance: 0,
+      suggestedOpeningBalance: openingInfo.openingBalance,
+      carriedOpeningBalance: openingInfo.carriedFromPreviousDay,
+      hasOpeningOverride: openingInfo.hasDraftOverride,
       savedOpeningBalance,
+      cashClosingBalancePreview: preview.cashClosingBalance ?? null,
       openPreview: preview,
       history,
       meta: {
@@ -106,8 +111,13 @@ export async function POST(request: NextRequest) {
       salesReport.balances.salesTotal,
       salesReport.balances.companyBillTotal
     )
-    const snapshot = attachBalancesToSnapshot(baseSnapshot, balances)
+    const snapshot = {
+      ...attachBalancesToSnapshot(baseSnapshot, balances),
+      cashReconciliation: salesReport.cashReconciliation,
+      cashClosingBalance: salesReport.cashReconciliation.cashOnHand,
+    }
     const nextDate = nextBusinessDateString(businessDate)
+    const nextDayOpeningCash = salesReport.cashReconciliation.cashOnHand
 
     await db.$transaction(async (tx) => {
       await tx.dayClose.create({
@@ -130,6 +140,8 @@ export async function POST(request: NextRequest) {
       })
     })
 
+    await saveDraftOpeningBalance(nextDate, nextDayOpeningCash)
+
     await logActivity(
       user.id,
       'DAY_CLOSE',
@@ -137,6 +149,7 @@ export async function POST(request: NextRequest) {
       JSON.stringify({
         closedBusinessDate: businessDate,
         nextBusinessDate: nextDate,
+        nextDayOpeningCash,
         snapshot,
       })
     )
@@ -145,9 +158,10 @@ export async function POST(request: NextRequest) {
       {
         closedBusinessDate: businessDate,
         nextBusinessDate: nextDate,
+        nextDayOpeningCash,
         snapshot,
       },
-      `Business day ${businessDate} closed. Now operating on ${nextDate}.`
+      `Business day ${businessDate} closed. Now operating on ${nextDate}. Tomorrow's opening cash: ৳${nextDayOpeningCash.toLocaleString()}.`
     )
   } catch (error) {
     console.error('Day close error:', error)

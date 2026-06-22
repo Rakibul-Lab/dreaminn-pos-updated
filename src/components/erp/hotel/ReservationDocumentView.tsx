@@ -25,6 +25,8 @@ import { formatBdt } from '@/lib/currency'
 import { INVOICE_SERVICE_CHARGE_PERCENT } from '@/lib/invoice-display'
 import { bookingVatOptions, computeBookingDisplayVat, computeRoomBookingTotals } from '@/lib/booking-totals'
 import { printReservationDocument } from '@/lib/print-reservation'
+import { isIdDocumentPdf } from '@/lib/id-document-upload'
+import { IdDocumentThumbnail } from '@/components/erp/hotel/IdDocumentThumbnail'
 import { toast } from 'sonner'
 import { Loader2 } from 'lucide-react'
 import {
@@ -682,20 +684,26 @@ export function ReservationDocumentView({
             {idAttachments.length > 0 ? (
               idAttachments.map((doc, index) => (
                 <figure key={doc.id} className="rd-id-attachment">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={doc.filePath}
-                    alt={`ID document ${index + 1}`}
-                    className="rd-id-attachment-img"
+                  <IdDocumentThumbnail
+                    previewUrl={doc.filePath}
+                    path={doc.filePath}
+                    index={index}
+                    showCaption={false}
+                    className="rd-id-attachment-preview"
+                    imageClassName="rd-id-attachment-img"
                   />
-                  <figcaption className="rd-id-attachment-caption">Image {index + 1}</figcaption>
+                  <figcaption className="rd-id-attachment-caption">
+                    {isIdDocumentPdf(doc.filePath) ? `PDF ${index + 1}` : `Image ${index + 1}`}
+                    {' · '}
+                    <span className="text-amber-800">Click to open</span>
+                  </figcaption>
                 </figure>
               ))
             ) : (
               <div className="rd-id-attachment rd-id-attachment--placeholder flex min-h-[180px] items-center justify-center border border-dashed border-amber-400 bg-amber-50 p-6 text-center text-sm text-amber-800 italic">
                 {RESERVATION_REQUIRED_PLACEHOLDER}
                 <br />
-                ID document image(s) not attached
+                ID document image(s) or PDF not attached
               </div>
             )}
           </section>

@@ -12,10 +12,33 @@ import {
   type DailySalesBalances,
 } from '@/lib/daily-sales-balance'
 import { resolveBookingRegistrationNumber } from '@/lib/booking-registration'
+import { filterGuestFolioRestaurantOrders } from '@/lib/restaurant-order-billing'
+import { isGuestFolioManualRestaurantBill } from '@/lib/booking-restaurant-bill.shared'
+import { parseBookingRestaurantBillNotes } from '@/lib/booking-restaurant-bill-notes'
+import { PAYMENT_METHOD_OPTIONS } from '@/lib/payment-method'
+import {
+  beverageSaleNumberFromPayment,
+  resolvePaymentGuestName,
+  resolvePaymentReference,
+  resolvePaymentRoomNumber,
+  resolvePaymentSourceLabel,
+} from '@/lib/daily-payment-labels'
+import {
+  computeCashReconciliation,
+  mapHeadOfficeRemittances,
+  type CashReconciliation,
+  type HeadOfficeRemittanceRow,
+} from '@/lib/hotel-cash-reconciliation'
 
 export type DailySalesLine = {
   id: string
-  source: 'invoice' | 'restaurant' | 'beverage'
+  lineType: 'charge' | 'payment'
+  source:
+    | 'invoice'
+    | 'restaurant'
+    | 'beverage'
+    | 'guest-restaurant-bill'
+    | 'payment'
   guestName: string | null
   room: string | null
   regNo: string | null
@@ -28,6 +51,7 @@ export type DailySalesLine = {
   remark: string | null
   total: number
   reference: string | null
+  sortAt: string
 }
 
 export type DailySalesReportSummary = {
@@ -71,6 +95,8 @@ export type DailySalesDetailReport = {
   totalDiscount: number
   grandTotal: number
   collections: number
+  cashReconciliation: CashReconciliation
+  headOfficeRemittances: HeadOfficeRemittanceRow[]
 }
 
 const MBANKING_METHODS = new Set(['MOBILE_BANKING', 'BKASH', 'NAGAD', 'UPAY', 'BANK'])
@@ -93,34 +119,207 @@ function invoiceWindowWhere(businessDate: string, openedAt: Date, closedAt: Date
   }
 }
 
-function allocatePaymentAmounts(
-  payments: Array<{ amount: number; method: string; paymentType: string }>
-) {
-  let cash = 0
-  let card = 0
-  let mbanking = 0
-  for (const payment of payments) {
-    if (payment.paymentType === 'REFUND') continue
-    const amount = payment.amount
-    if (payment.method === 'CASH') cash += amount
-    else if (payment.method === 'CARD') card += amount
-    else if (MBANKING_METHODS.has(payment.method)) mbanking += amount
+function paymentWindowWhere(businessDate: string, openedAt: Date, closedAt: Date) {
+  const windowWhere = buildBusinessDayWindowWhere(businessDate, openedAt, closedAt)
+  return {
+    OR: [
+      ...windowWhere.OR,
+      {
+        notes: { contains: 'Beverage walk-in sale' },
+        createdAt: { gte: openedAt, lte: closedAt },
+      },
+      {
+        reference: { startsWith: 'BEV-' },
+        createdAt: { gte: openedAt, lte: closedAt },
+      },
+    ],
   }
-  return { cash, card, mbanking }
 }
 
-function allocateBeveragePaymentAmounts(
-  method: string | null | undefined,
+function resolvePaymentMethodValueFromLabel(label: string | null | undefined): string | null {
+  if (!label?.trim()) return null
+  const normalized = label.trim().toLowerCase()
+  const match = PAYMENT_METHOD_OPTIONS.find(
+    (option) =>
+      option.label.toLowerCase() === normalized ||
+      option.value.toLowerCase() === normalized.replace(/\s+/g, '_')
+  )
+  return match?.value ?? null
+}
+
+/** Map Add Restaurant Bill payment method (stored in notes) to report columns. */
+function allocateFromRestaurantBillPaymentLabel(
+  paymentMethodLabel: string | null | undefined,
   amount: number
+) {
+  if (amount <= 0) return { cash: 0, card: 0, mbanking: 0 }
+
+  const method = resolvePaymentMethodValueFromLabel(paymentMethodLabel)
+  if (method === 'CASH') return { cash: amount, card: 0, mbanking: 0 }
+  if (method === 'CARD') return { cash: 0, card: amount, mbanking: 0 }
+  if (method && MBANKING_METHODS.has(method)) return { cash: 0, card: 0, mbanking: amount }
+
+  const normalized = paymentMethodLabel?.trim().toLowerCase() ?? ''
+  if (normalized === 'cash') return { cash: amount, card: 0, mbanking: 0 }
+  if (normalized === 'card') return { cash: 0, card: amount, mbanking: 0 }
+  if (
+    ['mobile banking', 'bkash', 'nagad', 'upay', 'bank'].includes(normalized)
+  ) {
+    return { cash: 0, card: 0, mbanking: amount }
+  }
+
+  return { cash: 0, card: 0, mbanking: 0 }
+}
+
+function sumGuestRestaurantBillPaymentAllocation(
+  bookingId: string,
+  restaurantOrders: Array<{
+    bookingId?: string | null
+    notes?: string | null
+    totalAmount: number
+  }>
 ) {
   let cash = 0
   let card = 0
   let mbanking = 0
-  if (method === 'CASH') cash = amount
-  else if (method === 'CARD') card = amount
-  else if (method && MBANKING_METHODS.has(method)) mbanking = amount
-  else cash = amount
-  return { cash, card, mbanking }
+  let billTotal = 0
+
+  for (const order of restaurantOrders) {
+    if (order.bookingId !== bookingId) continue
+    if (!isGuestFolioManualRestaurantBill(order)) continue
+
+    billTotal += order.totalAmount
+    const parsed = parseBookingRestaurantBillNotes(order.notes ?? null)
+    const allocation = allocateFromRestaurantBillPaymentLabel(
+      parsed.paymentMethod,
+      order.totalAmount
+    )
+    cash += allocation.cash
+    card += allocation.card
+    mbanking += allocation.mbanking
+  }
+
+  return { cash, card, mbanking, billTotal }
+}
+
+/** Scale guest bill payment columns to match checkout invoice food total. */
+function resolveCheckoutFoodPaymentAllocation(
+  bookingId: string,
+  restaurantOrders: Array<{
+    bookingId?: string | null
+    notes?: string | null
+    totalAmount: number
+  }>,
+  foodExtra: number
+) {
+  const { cash, card, mbanking, billTotal } = sumGuestRestaurantBillPaymentAllocation(
+    bookingId,
+    restaurantOrders
+  )
+
+  if (foodExtra <= 0 || billTotal <= 0) {
+    return { cash: 0, card: 0, mbanking: 0 }
+  }
+
+  const paymentTotal = cash + card + mbanking
+  if (paymentTotal <= 0) {
+    return { cash: 0, card: 0, mbanking: 0 }
+  }
+
+  if (Math.abs(billTotal - foodExtra) <= 0.01) {
+    return {
+      cash: Number(cash.toFixed(2)),
+      card: Number(card.toFixed(2)),
+      mbanking: Number(mbanking.toFixed(2)),
+    }
+  }
+
+  const scale = foodExtra / billTotal
+  let scaledCash = cash * scale
+  let scaledCard = card * scale
+  let scaledMbanking = mbanking * scale
+  const drift = foodExtra - (scaledCash + scaledCard + scaledMbanking)
+
+  if (Math.abs(drift) > 0.001) {
+    if (scaledCash > 0) scaledCash += drift
+    else if (scaledCard > 0) scaledCard += drift
+    else scaledMbanking += drift
+  }
+
+  return {
+    cash: Number(scaledCash.toFixed(2)),
+    card: Number(scaledCard.toFixed(2)),
+    mbanking: Number(scaledMbanking.toFixed(2)),
+  }
+}
+
+function allocateSinglePaymentAmounts(payment: { amount: number; method: string; paymentType: string }) {
+  if (payment.paymentType === 'REFUND') {
+    const amount = Math.abs(payment.amount)
+    if (payment.method === 'CASH') return { cash: -amount, card: 0, mbanking: 0 }
+    if (payment.method === 'CARD') return { cash: 0, card: -amount, mbanking: 0 }
+    if (MBANKING_METHODS.has(payment.method)) return { cash: 0, card: 0, mbanking: -amount }
+    return { cash: -amount, card: 0, mbanking: 0 }
+  }
+
+  const amount = payment.amount
+  if (payment.method === 'CASH') return { cash: amount, card: 0, mbanking: 0 }
+  if (payment.method === 'CARD') return { cash: 0, card: amount, mbanking: 0 }
+  if (MBANKING_METHODS.has(payment.method)) return { cash: 0, card: 0, mbanking: amount }
+  return { cash: amount, card: 0, mbanking: 0 }
+}
+
+function buildCheckoutInvoiceRoomRemark(invoiceNumber: string, extra?: string | null): string {
+  return [`Room sale · Checkout · ${invoiceNumber}`, extra].filter(Boolean).join(' · ')
+}
+
+function buildCheckoutInvoiceFoodRemark(
+  invoiceNumber: string,
+  extra?: string | null
+): string {
+  return [`Food & service sale · Checkout · ${invoiceNumber}`, extra]
+    .filter(Boolean)
+    .join(' · ')
+}
+
+function buildRestaurantSaleRemark(orderNumber: string, companyName?: string | null): string {
+  const base = `Restaurant sale · #${orderNumber}`
+  return companyName ? `${base} · ${companyName}` : base
+}
+
+function buildGuestRestaurantBillRemark(notes: string | null): string {
+  const parsed = parseBookingRestaurantBillNotes(notes)
+  const parts = ['Guest restaurant bill (Add restaurant bill)']
+  if (parsed.billNo !== '—') parts.push(`Bill ${parsed.billNo}`)
+  if (parsed.paymentMethod) parts.push(`Pay: ${parsed.paymentMethod}`)
+  return parts.join(' · ')
+}
+
+function buildCheckoutRestaurantBillRemark(
+  bookingId: string,
+  restaurantOrders: Array<{ bookingId?: string | null; notes?: string | null }>
+): string | null {
+  const bills = restaurantOrders.filter(
+    (order) => order.bookingId === bookingId && isGuestFolioManualRestaurantBill(order)
+  )
+  if (!bills.length) return null
+
+  const details = bills
+    .map((order) => {
+      const parsed = parseBookingRestaurantBillNotes(order.notes ?? null)
+      return parsed.paymentMethod
+        ? `${parsed.billNo} (${parsed.paymentMethod})`
+        : parsed.billNo
+    })
+    .join('; ')
+
+  return `Guest restaurant bills: ${details}`
+}
+
+function sortSalesLines(lines: DailySalesLine[]): DailySalesLine[] {
+  return [...lines].sort(
+    (a, b) => new Date(a.sortAt).getTime() - new Date(b.sortAt).getTime()
+  )
 }
 
 export async function buildDailySalesDetailReport(
@@ -139,13 +338,14 @@ export async function buildDailySalesDetailReport(
   const [
     invoices,
     restaurantOrders,
+    allPayments,
     beverageSales,
     companyBills,
-    payments,
     checkIns,
     checkOuts,
     occupiedRooms,
     totalRooms,
+    headOfficeDeposits,
   ] = await Promise.all([
     db.invoice.findMany({
       where: invoiceWindowWhere(businessDate, openedAt, closedAt),
@@ -157,15 +357,7 @@ export async function buildDailySalesDetailReport(
             companyLedger: { select: { name: true } },
             sourceReservationEntry: { select: { registrationNumber: true } },
             companyLedgerGuest: { select: { registrationNumber: true } },
-            payments: {
-              where: windowWhere,
-              select: { amount: true, method: true, paymentType: true },
-            },
           },
-        },
-        payments: {
-          where: windowWhere,
-          select: { amount: true, method: true, paymentType: true },
         },
       },
       orderBy: { createdAt: 'asc' },
@@ -174,12 +366,56 @@ export async function buildDailySalesDetailReport(
       where: orderWhere,
       include: {
         room: { select: { roomNumber: true } },
-        payments: {
-          where: windowWhere,
-          select: { amount: true, method: true, paymentType: true },
+        booking: {
+          include: {
+            customer: { select: { name: true, registrationNumber: true } },
+            sourceReservationEntry: { select: { registrationNumber: true } },
+            companyLedgerGuest: { select: { registrationNumber: true } },
+          },
         },
         companyLedgerBill: {
           include: { companyLedger: { select: { name: true } } },
+        },
+      },
+      orderBy: { createdAt: 'asc' },
+    }),
+    db.payment.findMany({
+      where: paymentWindowWhere(businessDate, openedAt, closedAt),
+      include: {
+        booking: {
+          include: {
+            customer: { select: { name: true, registrationNumber: true } },
+            room: { select: { roomNumber: true } },
+            sourceReservationEntry: { select: { registrationNumber: true } },
+            companyLedgerGuest: { select: { registrationNumber: true } },
+          },
+        },
+        invoice: {
+          select: {
+            invoiceNumber: true,
+            booking: { select: { room: { select: { roomNumber: true } } } },
+          },
+        },
+        order: {
+          select: {
+            orderNumber: true,
+            orderType: true,
+            bookingId: true,
+            notes: true,
+            room: { select: { roomNumber: true } },
+          },
+        },
+        reservationEntry: {
+          select: {
+            guestName: true,
+            registrationNumber: true,
+            lines: {
+              take: 1,
+              select: {
+                room: { select: { roomNumber: true } },
+              },
+            },
+          },
         },
       },
       orderBy: { createdAt: 'asc' },
@@ -204,28 +440,64 @@ export async function buildDailySalesDetailReport(
         companyLedger: { select: { name: true } },
       },
     }),
-    db.payment.findMany({
-      where: windowWhere,
-      select: { amount: true, paymentType: true },
-    }),
     db.booking.count({ where: buildCheckInsDuringWindowWhere(openedAt, closedAt) }),
     db.booking.count({ where: buildCheckOutsDuringWindowWhere(openedAt, closedAt) }),
     db.room.count({ where: { status: 'OCCUPIED' } }),
     db.room.count(),
+    db.hotelDeposit.findMany({
+      where: windowWhere,
+      select: {
+        id: true,
+        amount: true,
+        method: true,
+        bankName: true,
+        reference: true,
+        notes: true,
+        depositedAt: true,
+        depositor: { select: { name: true } },
+      },
+      orderBy: { depositedAt: 'asc' },
+    }),
   ])
 
   const lines: DailySalesLine[] = []
+  const checkoutBookingIds = new Set(invoices.map((invoice) => invoice.bookingId))
+  const coveredBeverageSaleNumbers = new Set<string>()
 
-  const bookingsWithFoodOnInvoice = new Set(
-    invoices.filter((invoice) => invoice.foodCharges > 0).map((invoice) => invoice.bookingId)
-  )
+  for (const payment of allPayments) {
+    const saleNumber = beverageSaleNumberFromPayment(payment)
+    if (saleNumber) coveredBeverageSaleNumbers.add(saleNumber)
+
+    const { cash, card, mbanking } = allocateSinglePaymentAmounts(payment)
+    const roomNumber = resolvePaymentRoomNumber(payment)
+    const guestName = resolvePaymentGuestName(payment)
+    const booking = payment.booking
+
+    lines.push({
+      id: payment.id,
+      lineType: 'payment',
+      source: 'payment',
+      guestName,
+      room: roomNumber,
+      regNo:
+        (booking ? resolveBookingRegistrationNumber(booking) : null) ??
+        payment.reservationEntry?.registrationNumber ??
+        null,
+      roomAmount: 0,
+      otherService: 0,
+      cash,
+      card,
+      mbanking,
+      companyBill: 0,
+      remark: resolvePaymentSourceLabel(payment),
+      total: payment.paymentType === 'REFUND' ? -Math.abs(payment.amount) : payment.amount,
+      reference: resolvePaymentReference(payment),
+      sortAt: payment.createdAt.toISOString(),
+    })
+  }
 
   for (const invoice of invoices) {
     const booking = invoice.booking
-    const hotelPayments = [...invoice.payments, ...booking.payments].filter(
-      (payment) => payment.paymentType !== 'RESTAURANT'
-    )
-    const { cash, card, mbanking } = allocatePaymentAmounts(hotelPayments)
 
     const ledgerBill = companyBills.find((b) => b.bookingId === booking.id)
     const onCompanyLedger = Boolean(booking.companyLedgerId || ledgerBill)
@@ -233,85 +505,217 @@ export async function buildDailySalesDetailReport(
       ? ledgerBill?.dueAmount ?? invoice.dueAmount
       : 0
 
-    const remark =
+    const companyRemark =
       booking.companyLedger?.name ??
       booking.company ??
       booking.customer.company ??
       ledgerBill?.companyLedger.name ??
       null
+    const restaurantBillRemark =
+      invoice.foodCharges > 0
+        ? buildCheckoutRestaurantBillRemark(booking.id, restaurantOrders)
+        : null
+
+    const sortAt = (invoice.issuedAt ?? invoice.createdAt).toISOString()
+    const foodExtra = invoice.foodCharges + invoice.extraCharges
+    const guestName = booking.customer.name
+    const room = booking.room.roomNumber
+    const regNo = resolveBookingRegistrationNumber(booking) || null
+
+    if (invoice.roomCharges > 0) {
+      lines.push({
+        id: `${invoice.id}-room`,
+        lineType: 'charge',
+        source: 'invoice',
+        guestName,
+        room,
+        regNo,
+        roomAmount: invoice.roomCharges,
+        otherService: 0,
+        cash: 0,
+        card: 0,
+        mbanking: 0,
+        companyBill: foodExtra > 0 ? 0 : companyBill,
+        remark: buildCheckoutInvoiceRoomRemark(invoice.invoiceNumber, companyRemark),
+        total: invoice.roomCharges,
+        reference: invoice.invoiceNumber,
+        sortAt,
+      })
+    }
+
+    if (foodExtra > 0) {
+      const billPayment = restaurantBillRemark
+        ? resolveCheckoutFoodPaymentAllocation(booking.id, restaurantOrders, foodExtra)
+        : { cash: 0, card: 0, mbanking: 0 }
+
+      lines.push({
+        id: `${invoice.id}-food`,
+        lineType: 'charge',
+        source: 'invoice',
+        guestName,
+        room,
+        regNo,
+        roomAmount: 0,
+        otherService: foodExtra,
+        cash: billPayment.cash,
+        card: billPayment.card,
+        mbanking: billPayment.mbanking,
+        companyBill: invoice.roomCharges > 0 ? 0 : companyBill,
+        remark: buildCheckoutInvoiceFoodRemark(invoice.invoiceNumber, restaurantBillRemark),
+        total: foodExtra,
+        reference: invoice.invoiceNumber,
+        sortAt,
+      })
+    }
+
+    if (invoice.roomCharges <= 0 && foodExtra <= 0 && invoice.totalAmount > 0) {
+      lines.push({
+        id: invoice.id,
+        lineType: 'charge',
+        source: 'invoice',
+        guestName,
+        room,
+        regNo,
+        roomAmount: 0,
+        otherService: invoice.totalAmount,
+        cash: 0,
+        card: 0,
+        mbanking: 0,
+        companyBill,
+        remark: buildCheckoutInvoiceRoomRemark(invoice.invoiceNumber, companyRemark),
+        total: invoice.totalAmount,
+        reference: invoice.invoiceNumber,
+        sortAt,
+      })
+    }
+  }
+
+  for (const order of restaurantOrders) {
+    if (!isGuestFolioManualRestaurantBill(order)) continue
+    if (order.bookingId && checkoutBookingIds.has(order.bookingId)) continue
+
+    const parsed = parseBookingRestaurantBillNotes(order.notes ?? null)
+    const booking = order.booking
+    const billPayment = allocateFromRestaurantBillPaymentLabel(
+      parsed.paymentMethod,
+      order.totalAmount
+    )
 
     lines.push({
-      id: invoice.id,
-      source: 'invoice',
-      guestName: booking.customer.name,
-      room: booking.room.roomNumber,
-      regNo: resolveBookingRegistrationNumber(booking) || null,
-      roomAmount: invoice.roomCharges,
-      otherService: invoice.foodCharges + invoice.extraCharges,
-      cash,
-      card,
-      mbanking,
-      companyBill,
-      remark,
-      total: invoice.totalAmount,
-      reference: invoice.invoiceNumber,
+      id: order.id,
+      lineType: 'charge',
+      source: 'guest-restaurant-bill',
+      guestName: order.customerName ?? booking?.customer.name ?? null,
+      room: order.room?.roomNumber ?? null,
+      regNo:
+        parsed.billNo !== '—'
+          ? parsed.billNo
+          : booking
+            ? resolveBookingRegistrationNumber(booking) || null
+            : null,
+      roomAmount: 0,
+      otherService: order.totalAmount,
+      cash: billPayment.cash,
+      card: billPayment.card,
+      mbanking: billPayment.mbanking,
+      companyBill: 0,
+      remark: buildGuestRestaurantBillRemark(order.notes ?? null),
+      total: order.totalAmount,
+      reference:
+        parsed.billNo !== '—'
+          ? parsed.billNo
+          : order.orderNumber
+            ? `#${order.orderNumber}`
+            : order.id.slice(-6),
+      sortAt: order.createdAt.toISOString(),
     })
   }
 
   for (const order of restaurantOrders) {
-    if (order.bookingId && bookingsWithFoodOnInvoice.has(order.bookingId)) {
-      continue
-    }
+    if (isGuestFolioManualRestaurantBill(order)) continue
+    if (filterGuestFolioRestaurantOrders([order]).length > 0) continue
 
-    const { cash, card, mbanking } = allocatePaymentAmounts(order.payments)
     const ledgerBill = order.companyLedgerBill
     const companyBill = ledgerBill?.dueAmount ?? 0
 
     lines.push({
       id: order.id,
+      lineType: 'charge',
       source: 'restaurant',
       guestName: order.customerName,
       room: order.room?.roomNumber ?? null,
       regNo: order.orderNumber ? `ORD-${order.orderNumber}` : null,
       roomAmount: 0,
       otherService: order.totalAmount,
-      cash,
-      card,
-      mbanking,
+      cash: 0,
+      card: 0,
+      mbanking: 0,
       companyBill,
-      remark: ledgerBill?.companyLedger.name ?? null,
+      remark: buildRestaurantSaleRemark(
+        order.orderNumber,
+        ledgerBill?.companyLedger.name ?? null
+      ),
       total: order.totalAmount,
       reference: order.orderNumber ? `#${order.orderNumber}` : order.id.slice(-6),
+      sortAt: order.createdAt.toISOString(),
     })
   }
 
   for (const sale of beverageSales) {
-    if (sale.saleType !== 'WALK_IN') continue
+    if (sale.saleType === 'WALK_IN') {
+      if (coveredBeverageSaleNumbers.has(sale.saleNumber)) continue
 
-    const { cash, card, mbanking } = allocateBeveragePaymentAmounts(
-      sale.paymentMethod,
-      sale.totalAmount
-    )
-    lines.push({
-      id: sale.id,
-      source: 'beverage',
-      guestName: sale.customerName,
-      room: null,
-      regNo: sale.saleNumber,
-      roomAmount: sale.totalAmount,
-      otherService: 0,
-      cash,
-      card,
-      mbanking,
-      companyBill: 0,
-      remark: 'Hotel beverage (walk-in)',
-      total: sale.totalAmount,
-      reference: sale.saleNumber,
-    })
+      lines.push({
+        id: sale.id,
+        lineType: 'charge',
+        source: 'beverage',
+        guestName: sale.customerName,
+        room: null,
+        regNo: sale.saleNumber,
+        roomAmount: sale.totalAmount,
+        otherService: 0,
+        cash: 0,
+        card: 0,
+        mbanking: 0,
+        companyBill: 0,
+        remark: `Hotel beverage sale (walk-in) · ${sale.saleNumber}`,
+        total: sale.totalAmount,
+        reference: sale.saleNumber,
+        sortAt: sale.createdAt.toISOString(),
+      })
+      continue
+    }
+
+    if (sale.saleType === 'ROOM') {
+      lines.push({
+        id: sale.id,
+        lineType: 'charge',
+        source: 'beverage',
+        guestName: sale.customerName ?? sale.booking?.customer.name ?? null,
+        room: sale.room?.roomNumber ?? null,
+        regNo: sale.saleNumber,
+        roomAmount: sale.totalAmount,
+        otherService: 0,
+        cash: 0,
+        card: 0,
+        mbanking: 0,
+        companyBill: 0,
+        remark: `Hotel beverage sale (room) · ${sale.saleNumber}`,
+        total: sale.totalAmount,
+        reference: sale.saleNumber,
+        sortAt: sale.createdAt.toISOString(),
+      })
+    }
   }
 
+  const sortedLines = sortSalesLines(lines)
+
   const roomSales = invoices.reduce((s, i) => s + i.roomCharges, 0)
-  const foodSales = invoices.reduce((s, i) => s + i.foodCharges, 0)
+  const guestManualFoodSales = sortedLines
+    .filter((line) => line.source === 'guest-restaurant-bill')
+    .reduce((sum, line) => sum + line.total, 0)
+  const foodSales =
+    invoices.reduce((s, i) => s + i.foodCharges, 0) + guestManualFoodSales
   const extraSales = invoices.reduce((s, i) => s + i.extraCharges, 0)
   const invoiceDiscount = invoices.reduce((s, i) => s + i.discount, 0)
   const invoiceVat = invoices.reduce((s, i) => s + i.vatAmount, 0)
@@ -333,15 +737,25 @@ export async function buildDailySalesDetailReport(
   const hotelSalesTotal = invoiceTotal + beverageWalkInSales
   const totalDiscount = invoiceDiscount + restaurantDiscount
 
-  const salesTotal = lines.reduce((s, line) => s + line.total, 0)
+  const chargeTotal = sortedLines
+    .filter((line) => line.lineType === 'charge')
+    .reduce((sum, line) => sum + line.total, 0)
   const companyBillTotal = companyBills.reduce((s, bill) => s + bill.dueAmount, 0)
   const balances =
     storedBalances ??
-    computeDailySalesBalances(openingBalance, salesTotal, companyBillTotal)
+    computeDailySalesBalances(openingBalance, chargeTotal, companyBillTotal)
 
-  const collections = payments
-    .filter((p) => p.paymentType !== 'REFUND')
-    .reduce((s, p) => s + p.amount, 0)
+  const collections = allPayments.reduce((sum, payment) => {
+    if (payment.paymentType === 'REFUND') return sum - Math.abs(payment.amount)
+    return sum + payment.amount
+  }, 0)
+
+  const cashReconciliation = computeCashReconciliation(
+    balances.openingBalance,
+    sortedLines,
+    headOfficeDeposits
+  )
+  const headOfficeRemittances = mapHeadOfficeRemittances(headOfficeDeposits)
 
   return {
     reportType: 'hotel-daily-sales',
@@ -349,7 +763,7 @@ export async function buildDailySalesDetailReport(
     businessDateDisplay: window.businessDateDisplay,
     window: { openedAt: openedAt.toISOString(), closedAt: closedAt.toISOString() },
     openingBalance: balances.openingBalance,
-    lines,
+    lines: sortedLines,
     balances,
     summary: {
       checkIns,
@@ -379,7 +793,9 @@ export async function buildDailySalesDetailReport(
       orderCount: restaurantOrders.length,
     },
     totalDiscount,
-    grandTotal: balances.grandTotal,
+    grandTotal: openingBalance + collections,
     collections,
+    cashReconciliation,
+    headOfficeRemittances,
   }
 }

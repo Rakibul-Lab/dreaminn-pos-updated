@@ -2,6 +2,12 @@ import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { requireAuth, requireHotelAccess, requireHotelManager } from '@/lib/auth';
 import { successResponse, errorResponse, notFoundResponse, logActivity } from '@/lib/api-utils';
+import { Prisma, RoomStatus } from '@prisma/client';
+import {
+  applyMaintenancePurposePatch,
+  readMaintenancePurpose,
+  type MaintenancePurposePatch,
+} from '@/lib/room-maintenance-purpose';
 
 function parseTotalPrice(body: Record<string, unknown>) {
   if (body.totalPrice === undefined && body.basePrice === undefined) {
@@ -78,7 +84,9 @@ export async function PUT(
       }
     }
 
-    const updateData: Record<string, unknown> = {};
+    const updateData: Prisma.RoomUpdateInput = {};
+    let maintenancePurposePatch: MaintenancePurposePatch = { action: 'none' };
+
     if (body.status !== undefined) {
       const nextStatus = String(body.status);
       if (nextStatus !== 'AVAILABLE' && nextStatus !== 'MAINTENANCE') {
@@ -96,7 +104,28 @@ export async function PUT(
       if (!isValidTransition) {
         return errorResponse('Invalid room status transition');
       }
-      updateData.status = nextStatus;
+      updateData.status = nextStatus as RoomStatus;
+      if (nextStatus === 'MAINTENANCE') {
+        const purpose =
+          body.maintenancePurpose !== undefined
+            ? String(body.maintenancePurpose).trim()
+            : (await readMaintenancePurpose(id)) ?? '';
+        if (!purpose) {
+          return errorResponse('Maintenance purpose is required when setting a room to Maintenance');
+        }
+        maintenancePurposePatch = { action: 'set', value: purpose };
+      } else if (existing.status === 'MAINTENANCE' && nextStatus === 'AVAILABLE') {
+        maintenancePurposePatch = { action: 'clear' };
+      }
+    } else if (
+      body.maintenancePurpose !== undefined &&
+      existing.status === 'MAINTENANCE'
+    ) {
+      const purpose = String(body.maintenancePurpose).trim();
+      if (!purpose) {
+        return errorResponse('Maintenance purpose cannot be empty');
+      }
+      maintenancePurposePatch = { action: 'set', value: purpose };
     }
     if (!isFrontDeskOnly) {
       if (body.floor !== undefined) updateData.floor = body.floor;
@@ -105,11 +134,33 @@ export async function PUT(
       Object.assign(updateData, parseTotalPrice(body));
     }
 
-    const room = await db.room.update({
-      where: { id },
-      data: updateData,
-      include: { type: true },
-    });
+    if (Object.keys(updateData).length === 0 && maintenancePurposePatch.action === 'none') {
+      return errorResponse('No changes to save');
+    }
+
+    let room =
+      Object.keys(updateData).length > 0
+        ? await db.room.update({
+            where: { id },
+            data: updateData,
+            include: { type: true },
+          })
+        : await db.room.findUnique({
+            where: { id },
+            include: { type: true },
+          });
+
+    if (!room) {
+      return notFoundResponse('Room');
+    }
+
+    await applyMaintenancePurposePatch(id, maintenancePurposePatch);
+
+    if (maintenancePurposePatch.action !== 'none') {
+      const maintenancePurpose =
+        maintenancePurposePatch.action === 'set' ? maintenancePurposePatch.value : null;
+      room = { ...room, maintenancePurpose };
+    }
 
     const statusChangedToCleaning =
       body.status !== undefined &&
@@ -144,6 +195,7 @@ export async function PUT(
       JSON.stringify({
         roomId: id,
         changes: updateData,
+        maintenancePurposePatch,
         housekeepingTaskAutoCreated: statusChangedToCleaning,
       })
     );

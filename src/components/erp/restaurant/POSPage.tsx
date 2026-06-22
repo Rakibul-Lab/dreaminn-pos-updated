@@ -287,7 +287,7 @@ export default function POSPage() {
   // Fetch menu categories
   const { data: categoriesData, isLoading: categoriesLoading } = useQuery({
     queryKey: ['menu-categories'],
-    queryFn: () => api.get<{ success: boolean; data: MenuCategory[] }>('/menu-categories'),
+    queryFn: () => api.get<{ success: boolean; data: MenuCategory[] }>('/menu-categories?excludeHotelBeverage=true'),
   })
   const categories = categoriesData?.data || []
 

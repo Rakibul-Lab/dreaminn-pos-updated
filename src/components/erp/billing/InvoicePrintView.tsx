@@ -46,6 +46,8 @@ import {
 import {
   buildHotelInvoiceChargeRows,
   buildRestaurantInvoiceChargeRows,
+  resolveRestaurantInvoiceServicePercentLabel,
+  resolveRestaurantInvoiceVatPercentLabel,
 } from '@/lib/invoice-charge-rows'
 import { formatInvoiceNumberDisplay } from '@/lib/invoice-number'
 import { INVOICE_GUEST_AGREEMENT } from '@/lib/reservation-terms'
@@ -141,6 +143,7 @@ export interface InvoicePrintData {
       vatAmount: number
       totalAmount: number
       createdAt: string
+      notes?: string | null
     }>
   }
   items: Array<{
@@ -215,9 +218,6 @@ export function InvoicePrintView({
   const hotelServiceChargePercent =
     invoice?.declaredServiceChargePercent ??
     resolveInvoiceHotelServicePercent(invoice?.booking)
-  const vatRates = Array.from(new Set(restaurantOrders.map((o) => Number(o.vatPercent || 0))))
-    .filter((v) => Number.isFinite(v))
-    .sort((a, b) => a - b)
 
   const handleDownloadPdf = async () => {
     if (!invoice || !documentRef.current) return
@@ -341,8 +341,9 @@ export function InvoicePrintView({
       return [label, Number(o.vatPercent || 0)]
     })
   )
-  const defaultRestaurantVatPercent =
-    vatRates.length === 1 ? vatRates[0] : vatRates.length > 0 ? vatRates[0] : INVOICE_VAT_PERCENT
+  const defaultRestaurantVatPercent = resolveRestaurantInvoiceVatPercentLabel(restaurantOrders)
+  const restaurantServiceChargePercent =
+    resolveRestaurantInvoiceServicePercentLabel(restaurantOrders)
   const invoiceDateTime = chargeDateTime(invoice.createdAt)
   const stayChargeDateTime = splitDisplayDateTime(displayCheckIn)
   const lineItems = invoice.items ?? []
@@ -406,7 +407,6 @@ export function InvoicePrintView({
     (sum, row) => sum + Math.max(0, row.discountAmount),
     0
   )
-  const invoiceDiscount = tableDiscountTotal > 0 ? tableDiscountTotal : invoice.discount
   const paymentSummary = buildInvoicePaymentSummary({
     payments: invoice.payments ?? [],
     paidAmount: invoice.paidAmount,
@@ -730,8 +730,8 @@ export function InvoicePrintView({
               'Restaurant',
               restaurantRows,
               restaurantPartTotal,
-              defaultRestaurantVatPercent ?? INVOICE_VAT_PERCENT,
-              INVOICE_SERVICE_CHARGE_PERCENT
+              defaultRestaurantVatPercent,
+              restaurantServiceChargePercent
             )}
           </div>
 
@@ -745,16 +745,6 @@ export function InvoicePrintView({
                       {formatBdt(combinedTotal)}
                     </td>
                   </tr>
-                  {invoiceDiscount > 0 ? (
-                    <tr>
-                      <td className="py-1 pr-2 whitespace-nowrap">
-                        {formatDiscountColumnHeading(discountMeta.type, discountMeta.value, true)}
-                      </td>
-                      <td className="py-1 text-right whitespace-nowrap">
-                        -{formatBdt(invoiceDiscount)}
-                      </td>
-                    </tr>
-                  ) : null}
                 </tbody>
               </table>
 

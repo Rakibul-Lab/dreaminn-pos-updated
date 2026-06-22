@@ -56,6 +56,8 @@ export type SalesReportData = {
     remark?: string | null
     total?: number
     reference?: string | null
+    lineType?: 'charge' | 'payment'
+    source?: 'invoice' | 'restaurant' | 'beverage' | 'guest-restaurant-bill' | 'payment'
   }>
   balances?: {
     openingBalance?: number
@@ -94,6 +96,27 @@ export type SalesReportData = {
   totalDiscount?: number
   grandTotal?: number
   collections?: number
+  cashReconciliation?: {
+    openingCash?: number
+    cashCollectedToday?: number
+    cardCollectedToday?: number
+    mBankingCollectedToday?: number
+    cashRemitted?: number
+    cardRemitted?: number
+    mBankingRemitted?: number
+    cashOnHand?: number
+    totalRemitted?: number
+  }
+  headOfficeRemittances?: Array<{
+    id: string
+    amount: number
+    method: string
+    bank?: string | null
+    reference?: string | null
+    notes?: string | null
+    sentBy: string
+    at?: string
+  }>
 }
 
 export type CollectionsReportData = {
@@ -106,6 +129,15 @@ export type CollectionsReportData = {
     paymentCount?: number
     depositTotal?: number
     depositCount?: number
+    openingCash?: number
+    cashCollected?: number
+    cardCollected?: number
+    mBankingCollected?: number
+    cashRemitted?: number
+    cardRemitted?: number
+    mBankingRemitted?: number
+    cashOnHand?: number
+    salesReportCashTotal?: number
   }
   byMethod?: Array<{ method: string; amount: number }>
   payments?: Array<{
@@ -119,9 +151,13 @@ export type CollectionsReportData = {
     reference?: string | null
   }>
   deposits?: Array<{
+    id?: string
     amount: number
     method: string
     bank?: string | null
+    reference?: string | null
+    notes?: string | null
+    sentBy?: string
     at: string
   }>
 }
@@ -350,11 +386,20 @@ async function writeDailySalesExcel(
   const rightBlock: Array<[string, number]> = [
     ['Opening balance', summary.openingBalance],
     ['Grand total', grandTotal],
+    ['Hotel bills (incl. beverage)', summary.hotelBills],
+    ['Restaurant bills', summary.restaurantBills],
     ['Hotel discount', summary.hotelDiscount],
     ['Restaurant discount', summary.restaurantDiscount],
     ['Total discount', summary.totalDiscount],
     ['Company bill total', summary.dueBill],
     ['Closing balance', summary.closingBalance],
+    ['Cash collected', summary.cashCollectedToday],
+    ['Card collected', summary.cardCollectedToday],
+    ['M. banking collected', summary.mBankingCollectedToday],
+    ['Sent to head office (cash)', summary.cashSentToHeadOffice],
+    ['Sent to head office (card)', summary.cardSentToHeadOffice],
+    ['Sent to head office (m. banking)', summary.mBankingSentToHeadOffice],
+    ['Cash on hand', summary.cashOnHand],
   ]
   rightBlock.forEach(([label, value], i) => {
     const r = rightBlockStartRow + i
@@ -367,6 +412,34 @@ async function writeDailySalesExcel(
     setExcelBorder(labelCell)
     setExcelBorder(valueCell)
   })
+
+  const hoRows = data.headOfficeRemittances ?? []
+  if (hoRows.length > 0) {
+    const hoHeaderRow = rightBlockStartRow + rightBlock.length + 1
+    const headerLabel = sheet.getCell(hoHeaderRow, rightLabelCol)
+    const headerValue = sheet.getCell(hoHeaderRow, rightValueCol)
+    headerLabel.value = 'Sent to HO'
+    headerValue.value = 'Amount'
+    headerLabel.font = { bold: true }
+    headerValue.font = { bold: true }
+    headerValue.alignment = { horizontal: 'right' }
+    setExcelBorder(headerLabel)
+    setExcelBorder(headerValue)
+
+    hoRows.forEach((hoRow, index) => {
+      const r = hoHeaderRow + 1 + index
+      const subtitle = hoRow.reference || hoRow.notes || hoRow.sentBy || '—'
+      const labelCell = sheet.getCell(r, rightLabelCol)
+      const valueCell = sheet.getCell(r, rightValueCol)
+      labelCell.value = `${hoRow.method}\n${subtitle}`
+      labelCell.alignment = { wrapText: true, vertical: 'top' }
+      valueCell.value = hoRow.amount
+      valueCell.numFmt = '#,##0.00'
+      valueCell.alignment = { horizontal: 'right', vertical: 'top' }
+      setExcelBorder(labelCell)
+      setExcelBorder(valueCell)
+    })
+  }
 
   row += 2
 
@@ -504,24 +577,34 @@ async function writeDailySalesPdf(
   const rightRows: Array<[string, string]> = [
     ['Opening balance', formatPaperAmountAlways(summary.openingBalance)],
     ['Grand total', formatPaperAmountAlways(grandTotal)],
+    ['Hotel bills (incl. beverage)', formatPaperAmountAlways(summary.hotelBills)],
+    ['Restaurant bills', formatPaperAmountAlways(summary.restaurantBills)],
     ['Hotel discount', formatPaperAmountAlways(summary.hotelDiscount)],
     ['Restaurant discount', formatPaperAmountAlways(summary.restaurantDiscount)],
     ['Total discount', formatPaperAmountAlways(summary.totalDiscount)],
     ['Company bill total', formatPaperAmountAlways(summary.dueBill)],
     ['Closing balance', formatPaperAmountAlways(summary.closingBalance)],
+    ['Cash collected', formatPaperAmountAlways(summary.cashCollectedToday)],
+    ['Card collected', formatPaperAmountAlways(summary.cardCollectedToday)],
+    ['M. banking collected', formatPaperAmountAlways(summary.mBankingCollectedToday)],
+    ['Sent to head office (cash)', formatPaperAmountAlways(summary.cashSentToHeadOffice)],
+    ['Sent to head office (card)', formatPaperAmountAlways(summary.cardSentToHeadOffice)],
+    ['Sent to head office (m. banking)', formatPaperAmountAlways(summary.mBankingSentToHeadOffice)],
+    ['Cash on hand', formatPaperAmountAlways(summary.cashOnHand)],
   ]
   const rightBlockHeight = rightRows.length * 4.5
   let blockY = y
+
+  const hoRows = data.headOfficeRemittances ?? []
+  const hoTableHeight = hoRows.length > 0 ? 5 + hoRows.length * 8 : 0
 
   const occupancyRows: Array<[string, string]> = [
     ['Todays Check In Room', `${summary.checkIns} Room`],
     ['Todays Check Out Room', `${summary.checkOuts} Room`],
     ['Occupied Room', `${summary.occupiedRooms} Room`],
   ]
-  // Ensure blocks don't overlap and don't go off-page.
-  // If needed, shift the right block upward so occupancy can fit below it.
   const occupancyHeight = occupancyRows.length * 6
-  const desiredEndY = blockY + rightBlockHeight + 4 + occupancyHeight
+  const desiredEndY = blockY + rightBlockHeight + 4 + hoTableHeight + 4 + occupancyHeight
   if (desiredEndY > pageHeight - 10) {
     const shiftUp = desiredEndY - (pageHeight - 10)
     blockY = Math.max(marginTop + 20, blockY - shiftUp)
@@ -532,11 +615,43 @@ async function writeDailySalesPdf(
     blockY += 4.5
   }
 
-  pdf.setFont('helvetica', 'bold')
-  pdf.setFontSize(7)
-  let noteY = blockY + 4
   const boxWidth = 70
   const boxX = mainStartX + mainTableWidth - boxWidth
+  let noteY = blockY + 4
+
+  if (hoRows.length > 0) {
+    pdf.setFillColor(217, 217, 217)
+    pdf.rect(boxX, noteY, boxWidth, 5, 'F')
+    pdf.setFont('helvetica', 'bold')
+    pdf.setFontSize(7)
+    pdf.text('Sent to HO', boxX + 2, noteY + 3.5)
+    pdf.text('Amount', boxX + boxWidth - 2, noteY + 3.5, { align: 'right' })
+    noteY += 5
+
+    const colSplit = boxWidth * 0.62
+    for (const hoRow of hoRows) {
+      const rowHeight = 8
+      pdf.rect(boxX, noteY, boxWidth, rowHeight)
+      pdf.line(boxX + colSplit, noteY, boxX + colSplit, noteY + rowHeight)
+      pdf.setFont('helvetica', 'normal')
+      pdf.setFontSize(7)
+      pdf.text(hoRow.method, boxX + 2, noteY + 3.5)
+      const subtitle = hoRow.reference || hoRow.notes || hoRow.sentBy || '—'
+      pdf.setFontSize(6)
+      pdf.setTextColor(100, 100, 100)
+      pdf.text(subtitle, boxX + 2, noteY + 6.5)
+      pdf.setTextColor(0, 0, 0)
+      pdf.setFontSize(7)
+      pdf.text(formatPaperAmountAlways(hoRow.amount), boxX + boxWidth - 2, noteY + 4.5, {
+        align: 'right',
+      })
+      noteY += rowHeight
+    }
+    noteY += 4
+  }
+
+  pdf.setFont('helvetica', 'bold')
+  pdf.setFontSize(7)
   for (const [label, value] of occupancyRows) {
     pdf.rect(boxX, noteY, boxWidth, 6)
     pdf.text(label, boxX + 2, noteY + 4)
@@ -797,8 +912,16 @@ export async function downloadBusinessDayCollectionsExcel(
         { Metric: 'Refunds', Amount: summary.refunds ?? 0 },
         { Metric: 'Net collected', Amount: summary.netCollected ?? 0 },
         { Metric: 'Payment count', Amount: summary.paymentCount ?? 0 },
-        { Metric: 'Deposits', Amount: summary.depositTotal ?? 0 },
+        { Metric: 'Sent to head office', Amount: summary.depositTotal ?? 0 },
         { Metric: 'Deposit count', Amount: summary.depositCount ?? 0 },
+        { Metric: 'Opening cash', Amount: summary.openingCash ?? 0 },
+        { Metric: 'Cash collected (sales report)', Amount: summary.cashCollected ?? 0 },
+        { Metric: 'Card collected (sales report)', Amount: summary.cardCollected ?? 0 },
+        { Metric: 'M. banking collected (sales report)', Amount: summary.mBankingCollected ?? 0 },
+        { Metric: 'Cash sent to head office', Amount: summary.cashRemitted ?? 0 },
+        { Metric: 'Card sent to head office', Amount: summary.cardRemitted ?? 0 },
+        { Metric: 'M. banking sent to head office', Amount: summary.mBankingRemitted ?? 0 },
+        { Metric: 'Cash on hand', Amount: summary.cashOnHand ?? 0 },
       ],
     },
     {
@@ -819,12 +942,15 @@ export async function downloadBusinessDayCollectionsExcel(
       })),
     },
     {
-      heading: 'Deposits',
+      heading: 'Sent to head office',
       rows: (data.deposits ?? []).map((d) => ({
         Time: formatIsoDateTime(d.at),
         Method: d.method,
         Bank: d.bank ?? '',
         Amount: d.amount,
+        Reference: d.reference ?? '',
+        'Sent by': d.sentBy ?? '',
+        Notes: d.notes ?? '',
       })),
     },
   ]
@@ -841,7 +967,15 @@ export async function downloadBusinessDayCollectionsPdf(
     { Metric: 'Refunds', Amount: formatBdtForPdf(summary.refunds ?? 0) },
     { Metric: 'Net collected', Amount: formatBdtForPdf(summary.netCollected ?? 0) },
     { Metric: 'Payment count', Amount: String(summary.paymentCount ?? 0) },
-    { Metric: 'Deposits', Amount: formatBdtForPdf(summary.depositTotal ?? 0) },
+    { Metric: 'Sent to head office', Amount: formatBdtForPdf(summary.depositTotal ?? 0) },
+    { Metric: 'Opening cash', Amount: formatBdtForPdf(summary.openingCash ?? 0) },
+    { Metric: 'Cash collected (sales report)', Amount: formatBdtForPdf(summary.cashCollected ?? 0) },
+    { Metric: 'Card collected (sales report)', Amount: formatBdtForPdf(summary.cardCollected ?? 0) },
+    { Metric: 'M. banking collected (sales report)', Amount: formatBdtForPdf(summary.mBankingCollected ?? 0) },
+    { Metric: 'Cash sent to head office', Amount: formatBdtForPdf(summary.cashRemitted ?? 0) },
+    { Metric: 'Card sent to head office', Amount: formatBdtForPdf(summary.cardRemitted ?? 0) },
+    { Metric: 'M. banking sent to head office', Amount: formatBdtForPdf(summary.mBankingRemitted ?? 0) },
+    { Metric: 'Cash on hand', Amount: formatBdtForPdf(summary.cashOnHand ?? 0) },
   ]
   const methodRows = (data.byMethod ?? []).map((r) => ({
     Method: r.method,
@@ -855,6 +989,13 @@ export async function downloadBusinessDayCollectionsPdf(
     Type: p.type,
     Amount: formatBdtForPdf(p.amount),
     'Received by': p.receivedBy,
+  }))
+  const depositRows = (data.deposits ?? []).map((d) => ({
+    Time: formatIsoDateTime(d.at),
+    Method: d.method,
+    Amount: formatBdtForPdf(d.amount),
+    Reference: String(d.reference ?? ''),
+    'Sent by': String(d.sentBy ?? ''),
   }))
 
   await writePdfTable(
@@ -888,6 +1029,17 @@ export async function downloadBusinessDayCollectionsPdf(
           { header: 'Received by', width: 20, value: (r) => String(r['Received by']) },
         ],
         rows: paymentRows,
+      },
+      {
+        heading: 'Sent to head office',
+        columns: [
+          { header: 'Time', width: 24, value: (r) => String(r.Time) },
+          { header: 'Method', width: 16, value: (r) => String(r.Method) },
+          { header: 'Amount', width: 18, value: (r) => String(r.Amount), align: 'right' },
+          { header: 'Reference', width: 20, value: (r) => String(r.Reference) },
+          { header: 'Sent by', width: 20, value: (r) => String(r['Sent by']) },
+        ],
+        rows: depositRows,
       },
     ],
     { ...meta, tab: 'collections' }

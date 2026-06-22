@@ -34,6 +34,7 @@ import {
   filterSellableRooms,
   ROOM_STATUSES_DATE_SCOPED_CANDIDATES,
 } from '@/lib/room-sellability';
+import { attachMaintenancePurposes } from '@/lib/room-maintenance-purpose';
 
 function parseTotalPrice(body: Record<string, unknown>) {
   if (body.totalPrice === undefined && body.basePrice === undefined) {
@@ -260,7 +261,8 @@ export async function GET(request: NextRequest) {
       }
       const inProgressRoomIds = new Set(inProgressTasks.map((task) => task.roomId));
 
-      const enrichedRooms = rooms.map((room) => {
+      const enrichedRooms = await attachMaintenancePurposes(
+        rooms.map((room) => {
         const roomBookings = bookingsByRoom.get(room.id) ?? [];
         const roomBookingsForDisplay = roomBookings.map((b) => ({
           id: b.id,
@@ -347,7 +349,8 @@ export async function GET(request: NextRequest) {
           housekeepingTask: housekeepingTaskByRoom.get(room.id) ?? null,
           pendingHousekeepingTask: housekeepingTaskByRoom.get(room.id) ?? null,
         };
-      });
+      })
+      );
 
       return paginatedResponse(enrichedRooms, total, page, limit, {
         categoryCapacity,

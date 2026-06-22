@@ -103,8 +103,8 @@ export function HotelBeverageAddItemDialog({
         </DialogHeader>
         {categories.length === 0 ? (
           <p className="text-sm text-muted-foreground py-4">
-            No beverage categories found. Add a menu category whose name includes
-            &quot;Beverage&quot; in Menu Management first.
+            No beverage categories yet. Use <strong>Add category</strong> on the beverage sales
+            screen first.
           </p>
         ) : (
           <div className="space-y-4 py-1">

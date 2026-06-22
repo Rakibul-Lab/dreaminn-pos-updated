@@ -691,6 +691,13 @@ export async function POST(
         await replaceInvoiceLineItems(tx, invoice.id, lineItems);
         generatedInvoiceId = invoice.id;
       }
+
+      if (generatedInvoiceId) {
+        await tx.payment.updateMany({
+          where: { bookingId: id, invoiceId: null },
+          data: { invoiceId: generatedInvoiceId },
+        });
+      }
     });
 
     if (isCompanyLedgerCheckout && booking.companyLedgerId) {

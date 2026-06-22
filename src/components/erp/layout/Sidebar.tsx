@@ -74,7 +74,7 @@ const allNavItems: NavItem[] = [
   { id: 'kitchen', label: 'Kitchen', icon: ChefHat, section: 'restaurant' },
   { id: 'invoices', label: 'Invoices', icon: Receipt, section: 'hotel' },
   { id: 'payments', label: 'Payments', icon: CreditCard, section: 'admin' },
-  { id: 'deposits', label: 'Deposits', icon: Landmark, section: 'hotel' },
+  { id: 'deposits', label: 'Head Office', icon: Landmark, section: 'hotel' },
   { id: 'reports', label: 'Reports', icon: BarChart3, section: 'admin' },
   { id: 'housekeeping', label: 'Housekeeping', icon: SprayCan, section: 'hotel' },
   { id: 'inventory', label: 'Inventory', icon: Package, section: 'admin' },

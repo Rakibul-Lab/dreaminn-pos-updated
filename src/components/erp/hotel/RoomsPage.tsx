@@ -17,7 +17,7 @@ import {
 import { StatusBadge } from '../shared/StatusBadge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from 'sonner';
-import { FileDown, Grid3X3, List, Loader2, LogIn, LogOut, Plus, Search, SprayCan, CalendarPlus, CreditCard, CheckCircle2, Play, Users, UtensilsCrossed, CalendarRange } from 'lucide-react';
+import { FileDown, Grid3X3, List, Loader2, LogIn, LogOut, Plus, Search, SprayCan, CalendarPlus, CreditCard, CheckCircle2, Play, Users, UtensilsCrossed, CalendarRange, Wrench } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuthStore, canManageRoomInventory, isHotelFrontDesk, isRoomsViewOnly, canPerformRoomCleaning, isHousekeeper } from '@/lib/auth-store';
 import { downloadRoomsPdf, type RoomExportRecord } from '@/lib/rooms-export';
@@ -37,6 +37,7 @@ import { useBusinessDate } from '@/hooks/use-business-date';
 import { formatBdt } from '@/lib/currency';
 import { PAYMENT_METHOD_OPTIONS_WITH_PAYMENT } from '@/lib/payment-method';
 import { Card, CardContent } from '@/components/ui/card';
+import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { RoomBookingGuestPanel } from './RoomBookingGuestPanel';
 import { ReservedEntryRoomsPanel } from './ReservedEntryRoomsPanel';
@@ -81,6 +82,12 @@ function manualRoomStatusOptions(currentStatus: string): ManualRoomStatus[] {
   return [];
 }
 
+function truncateMaintenancePurpose(text: string, max = 42): string {
+  const trimmed = text.trim();
+  if (trimmed.length <= max) return trimmed;
+  return `${trimmed.slice(0, max)}…`;
+}
+
 function chunkRooms<T>(items: T[], size: number): T[][] {
   const rows: T[][] = [];
   for (let i = 0; i < items.length; i += size) {
@@ -94,6 +101,7 @@ interface Room {
   roomNumber: string;
   floor: number;
   status: 'AVAILABLE' | 'RESERVED' | 'OCCUPIED' | 'CLEANING' | 'MAINTENANCE';
+  maintenancePurpose?: string | null;
   displayStatus?: 'AVAILABLE' | 'RESERVED' | 'OCCUPIED' | 'CLEANING' | 'MAINTENANCE' | 'IN_PROGRESS' | 'ENTRY_HELD';
   entryHold?: { entryId: string; guestName: string | null; checkIn: string; categoryPool?: boolean } | null;
   typeId: string;
@@ -181,7 +189,9 @@ export function RoomsPage() {
   const [formFloor, setFormFloor] = useState('8');
   const [formTypeId, setFormTypeId] = useState('');
   const [formStatus, setFormStatus] = useState('AVAILABLE');
+  const [formMaintenancePurpose, setFormMaintenancePurpose] = useState('');
   const [formTotalPrice, setFormTotalPrice] = useState('');
+  const [maintenanceDetailRoom, setMaintenanceDetailRoom] = useState<Room | null>(null);
   const [editDialogTab, setEditDialogTab] = useState<'room' | 'guest'>('room');
   const [pageMenuTab, setPageMenuTab] = useState<'rooms' | 'reserved_entry'>('rooms');
   const [viewDateScope, setViewDateScope] = useState<RoomsViewDateScope>('business_day');
@@ -340,13 +350,16 @@ export function RoomsPage() {
   });
 
   const updateMutation = useMutation({
-    mutationFn: (data: any) => api.put(`/rooms/${data.id}`, data),
+    mutationFn: (data: { id: string } & Record<string, unknown>) => {
+      const { id, ...body } = data;
+      return api.put(`/rooms/${id}`, body);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['rooms'] });
       toast.success('Room updated successfully');
       closeDialog();
     },
-    onError: () => toast.error('Failed to update room'),
+    onError: (err: Error) => toast.error(err.message || 'Failed to update room'),
   });
 
   const closeDialog = () => {
@@ -357,7 +370,36 @@ export function RoomsPage() {
     setFormFloor('8');
     setFormTypeId('');
     setFormStatus('AVAILABLE');
+    setFormMaintenancePurpose('');
     setFormTotalPrice('');
+  };
+
+  const openMaintenanceDetail = (room: Room, e?: React.MouseEvent | React.KeyboardEvent) => {
+    e?.stopPropagation();
+    e?.preventDefault();
+    setMaintenanceDetailRoom(room);
+  };
+
+  const openEditFromMaintenanceDetail = () => {
+    if (!maintenanceDetailRoom) return;
+    const room = maintenanceDetailRoom;
+    setMaintenanceDetailRoom(null);
+    openEditDialog(room);
+  };
+
+  const buildStatusUpdatePayload = (roomId: string, status: string) => {
+    const payload: Record<string, unknown> = { id: roomId, status };
+    if (status === 'MAINTENANCE') {
+      payload.maintenancePurpose = formMaintenancePurpose.trim();
+    }
+    return payload;
+  };
+
+  const validateMaintenancePurpose = (status: string): boolean => {
+    if (status !== 'MAINTENANCE') return true;
+    if (formMaintenancePurpose.trim()) return true;
+    toast.error('Please enter a maintenance purpose');
+    return false;
   };
 
   const openEditDialog = (room: Room) => {
@@ -372,6 +414,7 @@ export function RoomsPage() {
     setFormFloor(String(room.floor));
     setFormTypeId(room.typeId);
     setFormStatus(room.status);
+    setFormMaintenancePurpose(room.maintenancePurpose?.trim() ?? '');
     setFormTotalPrice(String(room.totalPrice ?? 0));
     setAddDialogOpen(true);
   };
@@ -382,7 +425,8 @@ export function RoomsPage() {
         toast.error('Status can only be changed when the room is Available or Maintenance');
         return;
       }
-      updateMutation.mutate({ id: editRoom.id, status: formStatus });
+      if (!validateMaintenancePurpose(formStatus)) return;
+      updateMutation.mutate(buildStatusUpdatePayload(editRoom.id, formStatus));
       return;
     }
 
@@ -400,7 +444,11 @@ export function RoomsPage() {
 
     if (editRoom) {
       if (canManuallyEditRoomStatus(editRoom.status)) {
+        if (!validateMaintenancePurpose(formStatus)) return;
         payload.status = formStatus;
+        if (formStatus === 'MAINTENANCE') {
+          payload.maintenancePurpose = formMaintenancePurpose.trim();
+        }
       }
       updateMutation.mutate({ id: editRoom.id, ...payload });
     } else {
@@ -784,6 +832,7 @@ export function RoomsPage() {
       room.activeBooking && shouldShowGuestPax(displayStatus)
         ? formatGuestPax(room.activeBooking.adults, room.activeBooking.children)
         : null;
+    const maintenancePurpose = room.status === 'MAINTENANCE' ? room.maintenancePurpose?.trim() : '';
 
     return (
       <div
@@ -839,6 +888,26 @@ export function RoomsPage() {
             ) : entryPoolHold ? (
               <p className="truncate opacity-90">Category pool (unassigned)</p>
             ) : null}
+            {maintenancePurpose ? (
+              <button
+                type="button"
+                className={cn(
+                  'mt-1 w-full rounded border px-2 py-1 text-left text-[11px] leading-snug underline-offset-2 hover:underline',
+                  isLightText
+                    ? 'border-yellow-800/30 bg-yellow-900/10 text-yellow-950'
+                    : 'border-white/25 bg-black/15 text-white'
+                )}
+                onClick={(e) => openMaintenanceDetail(room, e)}
+                title="Click to view maintenance details"
+              >
+                <span className="flex items-start gap-1">
+                  <Wrench className="mt-0.5 h-3 w-3 shrink-0 opacity-80" />
+                  <span className="line-clamp-2">{truncateMaintenancePurpose(maintenancePurpose)}</span>
+                </span>
+              </button>
+            ) : room.status === 'MAINTENANCE' ? (
+              <p className="text-[11px] italic opacity-80">No purpose recorded</p>
+            ) : null}
             <p>৳{getRoomNightlyTotal(room).toLocaleString()}/night</p>
         </div>
         </div>
@@ -889,12 +958,31 @@ export function RoomsPage() {
             ))}
           </SelectContent>
         </Select>
+        {formStatus === 'MAINTENANCE' ? (
+          <div className="space-y-2">
+            <Label htmlFor="maintenance-purpose">Maintenance purpose</Label>
+            <Textarea
+              id="maintenance-purpose"
+              value={formMaintenancePurpose}
+              onChange={(e) => setFormMaintenancePurpose(e.target.value)}
+              placeholder="e.g. AC repair, plumbing leak, deep renovation…"
+              rows={3}
+              maxLength={500}
+            />
+            <p className="text-xs text-muted-foreground">
+              Required when putting a room on maintenance. Shown on the room tile.
+            </p>
+          </div>
+        ) : null}
       </div>
     );
   };
 
   const canSubmitRoomStatus =
-    !editRoom || !isStatusOnly || canManuallyEditRoomStatus(editRoom.status);
+    !editRoom ||
+    !isStatusOnly ||
+    (canManuallyEditRoomStatus(editRoom.status) &&
+      (formStatus !== 'MAINTENANCE' || Boolean(formMaintenancePurpose.trim())));
 
   const renderRoomFormFields = () => (
     <>
@@ -1252,6 +1340,16 @@ export function RoomsPage() {
                     {guestPax ? (
                       <span className="ml-2 text-xs font-normal text-muted-foreground">({guestPax})</span>
                     ) : null}
+                    {room.status === 'MAINTENANCE' && room.maintenancePurpose?.trim() ? (
+                      <button
+                        type="button"
+                        className="mt-1 block max-w-[220px] truncate text-left text-xs font-normal text-red-700 underline-offset-2 hover:underline"
+                        onClick={(e) => openMaintenanceDetail(room, e)}
+                        title="View maintenance purpose"
+                      >
+                        {truncateMaintenancePurpose(room.maintenancePurpose, 36)}
+                      </button>
+                    ) : null}
                   </td>
                   <td className="p-3">{room.floor}</td>
                   <td className="p-3">{room.type?.name}</td>
@@ -1339,6 +1437,54 @@ export function RoomsPage() {
                 )}
               </>
             )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(maintenanceDetailRoom)}
+        onOpenChange={(open) => {
+          if (!open) setMaintenanceDetailRoom(null);
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Wrench className="h-5 w-5 text-red-600" />
+              Maintenance — Room {maintenanceDetailRoom?.roomNumber}
+            </DialogTitle>
+          </DialogHeader>
+          {maintenanceDetailRoom ? (
+            <div className="space-y-4 text-sm">
+              <div className="rounded-lg border bg-muted/40 p-3 space-y-1">
+                <p>
+                  <span className="text-muted-foreground">Type:</span>{' '}
+                  {maintenanceDetailRoom.type?.name ?? '—'}
+                </p>
+                <p>
+                  <span className="text-muted-foreground">Floor:</span> {maintenanceDetailRoom.floor}
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label>Purpose</Label>
+                <p className="rounded-lg border bg-background px-3 py-2 whitespace-pre-wrap">
+                  {maintenanceDetailRoom.maintenancePurpose?.trim() || 'No purpose recorded.'}
+                </p>
+              </div>
+            </div>
+          ) : null}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setMaintenanceDetailRoom(null)}>
+              Close
+            </Button>
+            {!isViewOnly ? (
+              <Button
+                className="bg-amber-600 hover:bg-amber-700 text-white"
+                onClick={openEditFromMaintenanceDetail}
+              >
+                Change status
+              </Button>
+            ) : null}
           </DialogFooter>
         </DialogContent>
       </Dialog>

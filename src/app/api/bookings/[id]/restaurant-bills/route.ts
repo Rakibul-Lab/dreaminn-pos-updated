@@ -50,6 +50,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
         amount: Number(body.amount),
         discount: body.discount !== undefined ? Number(body.discount) : 0,
         vatPercent: body.vatPercent !== undefined ? Number(body.vatPercent) : undefined,
+        vatApplied: body.vatApplied !== false,
         notes: body.notes ? String(body.notes) : undefined,
       },
       authResult.id

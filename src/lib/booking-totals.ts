@@ -211,6 +211,16 @@ export function resolveBookingDisplayDue(
   ).dueAmount
 }
 
+/** Reduce stored folio due when a guest payment is recorded while checked in. */
+export function applyBookingPaymentToStoredDue(storedDue: number, paymentAmount: number): number {
+  return Math.max(0, storedDue - Math.max(0, paymentAmount))
+}
+
+/** Increase stored folio due when a charge is posted to an in-house guest. */
+export function applyBookingChargeToStoredDue(storedDue: number, chargeAmount: number): number {
+  return Math.max(0, storedDue + Math.max(0, chargeAmount))
+}
+
 export type BookingPaymentRow = { amount: number; paymentType: string }
 
 /** Net amount collected on a booking (payments minus refunds). */

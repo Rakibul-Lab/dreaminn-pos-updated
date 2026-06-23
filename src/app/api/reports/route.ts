@@ -6,7 +6,7 @@ import {
   buildBusinessDayArrivalsWhere,
   buildBusinessDayDeparturesWhere,
   buildExpectedArrivalsOnBusinessDateWhere,
-  buildInHouseOnBusinessDateWhere,
+  buildInHouseOnBusinessDayWhere,
   getOpenBusinessDayWindow,
   readCurrentBusinessDateString,
 } from '@/lib/business-date';
@@ -358,7 +358,7 @@ async function handleHotelOccupancy(user: { role: string }, dateFilter: Record<s
   });
 
   const inHouseGuests = await db.booking.count({
-    where: { AND: [buildInHouseOnBusinessDateWhere(businessDate), { status: 'CHECKED_IN' }] },
+    where: buildInHouseOnBusinessDayWhere(businessDate, openedAt, now),
   });
 
   // Floor-wise occupancy

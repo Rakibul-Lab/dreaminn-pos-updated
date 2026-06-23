@@ -31,7 +31,7 @@ import { processAllOverdueStayExtensions } from '@/lib/auto-stay-extension';
 import { ensureCustomerRegistrationNumber, generateGuestRegistrationNumber } from '@/lib/guest-registration-number';
 import { getCorporateGuestMissingFields, getPhysicalIdMissingFields, isReservationGuestProfileComplete } from '@/lib/reservation-completion-fields';
 import { hasBookingCompany } from '@/lib/booking-company';
-import { buildGuestStayOverlapWhere } from '@/lib/guest-stay-date-filter';
+import { buildGuestStayFilterWhere } from '@/lib/business-date';
 import { assertRoomAvailableForBooking, listReservationEntries } from '@/lib/reservation-entry';
 
 const bookingListInclude = {
@@ -122,8 +122,8 @@ export async function GET(request: NextRequest) {
       ];
     }
 
-    // Date range: guests in-house during the period (not only created that day)
-    const stayOverlapFilter = buildGuestStayOverlapWhere(dateFrom, dateTo);
+    // Date range: guests visible on the business day (handles calendar lag before day close)
+    const stayOverlapFilter = await buildGuestStayFilterWhere(dateFrom, dateTo);
     if (stayOverlapFilter) {
       const existingAnd = where.AND
         ? Array.isArray(where.AND)

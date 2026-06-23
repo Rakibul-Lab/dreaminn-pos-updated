@@ -11,6 +11,34 @@ import {
   isValidPaymentAccountLastFour,
 } from '@/lib/payment-method';
 import { stampCurrentBusinessDate } from '@/lib/business-date';
+import { buildPaymentSearchWhere } from '@/lib/payment-search';
+import {
+  parseFullSlipSearch,
+  paymentMatchesSlipSearch,
+  utcDayRangeFromYyyyMmDd,
+} from '@/lib/booking-payment-slip';
+
+const paymentListInclude = {
+  booking: {
+    select: {
+      id: true,
+      confirmationNumber: true,
+      registrationNumber: true,
+      customer: { select: { id: true, name: true } },
+      room: { select: { id: true, roomNumber: true } },
+    },
+  },
+  order: {
+    select: {
+      id: true,
+      orderNumber: true,
+      orderType: true,
+    },
+  },
+  receiver: {
+    select: { id: true, name: true, role: true },
+  },
+} satisfies Prisma.PaymentInclude;
 
 // GET /api/payments - List payments with filters
 export async function GET(request: NextRequest) {
@@ -30,6 +58,7 @@ export async function GET(request: NextRequest) {
     const method = searchParams.get('method') as PaymentMethod | null;
     const startDate = searchParams.get('startDate') || searchParams.get('dateFrom');
     const endDate = searchParams.get('endDate') || searchParams.get('dateTo');
+    const search = searchParams.get('search')?.trim() || '';
 
     const skip = (page - 1) * limit;
 
@@ -68,8 +97,8 @@ export async function GET(request: NextRequest) {
       where.method = method;
     }
 
-    // Date range filter (inclusive days)
-    if (startDate || endDate) {
+    // Date range filter (inclusive days) — skipped when searching so old slips are findable
+    if (!search && (startDate || endDate)) {
       const createdAt: Record<string, unknown> = {};
       if (startDate) {
         const start = new Date(startDate);
@@ -90,28 +119,41 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    if (search) {
+      const fullSlip = parseFullSlipSearch(search);
+      const slipDay = fullSlip ? utcDayRangeFromYyyyMmDd(fullSlip.datePart) : null;
+      if (fullSlip && slipDay) {
+        const candidates = await db.payment.findMany({
+          where: {
+            ...where,
+            createdAt: { gte: slipDay.dateFrom, lte: slipDay.dateTo },
+          },
+          include: paymentListInclude,
+          orderBy: { createdAt: 'desc' },
+          take: 2500,
+        });
+        const filtered = candidates.filter((payment) => paymentMatchesSlipSearch(payment, fullSlip));
+        const total = filtered.length;
+        const pageRows = filtered.slice(skip, skip + limit);
+        const sumAmount = filtered.reduce((sum, payment) => sum + payment.amount, 0);
+        return paginatedResponse(pageRows, total, page, limit, { sumAmount });
+      }
+
+      const searchWhere = buildPaymentSearchWhere(search);
+      if (searchWhere) {
+        const existingAnd = where.AND
+          ? Array.isArray(where.AND)
+            ? where.AND
+            : [where.AND]
+          : [];
+        where.AND = [...existingAnd, searchWhere];
+      }
+    }
+
     const [payments, total, sumResult] = await Promise.all([
       db.payment.findMany({
         where,
-        include: {
-          booking: {
-            select: {
-              id: true,
-              customer: { select: { id: true, name: true } },
-              room: { select: { id: true, roomNumber: true } },
-            },
-          },
-          order: {
-            select: {
-              id: true,
-              orderNumber: true,
-              orderType: true,
-            },
-          },
-          receiver: {
-            select: { id: true, name: true, role: true },
-          },
-        },
+        include: paymentListInclude,
         orderBy: { createdAt: 'desc' },
         skip,
         take: limit,

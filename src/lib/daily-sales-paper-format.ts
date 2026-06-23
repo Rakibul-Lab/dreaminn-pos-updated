@@ -24,6 +24,7 @@ export type PaperSalesLine = {
   dueBill: number | null
   remarks: string
   totalInclVat: number | null
+  lineType?: 'charge' | 'payment'
 }
 
 export type PaperSalesTotals = {
@@ -121,6 +122,10 @@ export type PaperSalesInput = {
     discount?: number
   }
   totalDiscount?: number
+  billBreakdown?: {
+    hotelBills?: number
+    restaurantBills?: number
+  }
   cashReconciliation?: {
     openingCash?: number
     cashCollectedToday?: number
@@ -183,6 +188,7 @@ export function buildPaperSalesLines(lines: PaperSalesInputLine[] | undefined): 
       dueBill: company,
       remarks: line.remark ?? '',
       totalInclVat,
+      lineType: line.lineType,
     }
   })
 }
@@ -195,7 +201,9 @@ export function computePaperTotals(paperLines: PaperSalesLine[]): PaperSalesTota
       card: acc.card + (line.card ?? 0),
       mBanking: acc.mBanking + (line.mBanking ?? 0),
       dueBill: acc.dueBill + (line.dueBill ?? 0),
-      totalInclVat: acc.totalInclVat + (line.totalInclVat ?? 0),
+      totalInclVat:
+        acc.totalInclVat +
+        (line.lineType === 'payment' ? 0 : (line.totalInclVat ?? 0)),
     }),
     {
       othersServiceSale: 0,
@@ -236,7 +244,7 @@ export function buildPaperSummary(data: PaperSalesInput): PaperSummary {
   const balances = data.balances ?? {}
   const openingBalance = balances.openingBalance ?? data.openingBalance ?? 0
   const dueBill = balances.companyBillTotal ?? totals.dueBill
-  const totalSale = totals.totalInclVat
+  const totalSale = data.balances?.salesTotal ?? totals.totalInclVat
   const grandTotal = openingBalance + totalSale
   const closingBalance = balances.closingBalance ?? grandTotal - dueBill
   const hotelDiscount = data.hotel?.discount ?? 0
@@ -260,7 +268,9 @@ export function buildPaperSummary(data: PaperSalesInput): PaperSummary {
     data.cashReconciliation?.cashOnHand ??
     openingBalance + cashCollectedToday - cashSentToHeadOffice
 
-  const { hotelBills, restaurantBills } = computeBillBreakdown(data.lines)
+  const { hotelBills, restaurantBills } =
+    data.billBreakdown ??
+    computeBillBreakdown(data.lines)
 
   return {
     totalSale,
@@ -302,7 +312,11 @@ export function paperLineToRow(line: PaperSalesLine): string[] {
   ]
 }
 
-export function paperTotalsToRow(totals: PaperSalesTotals): string[] {
+export function paperTotalsToRow(
+  totals: PaperSalesTotals,
+  chargeSaleTotal?: number
+): string[] {
+  const saleTotal = chargeSaleTotal ?? totals.totalInclVat
   return [
     'Total Sale =',
     '',
@@ -312,6 +326,6 @@ export function paperTotalsToRow(totals: PaperSalesTotals): string[] {
     formatPaperAmount(totals.mBanking),
     formatPaperAmount(totals.dueBill),
     '',
-    formatPaperAmount(totals.totalInclVat),
+    formatPaperAmount(saleTotal),
   ]
 }

@@ -47,8 +47,9 @@ import { formatListBookingCheckIn, formatListBookingCheckOut } from '@/lib/hotel
 import { useHotelTimes } from '@/hooks/use-hotel-times';
 import { formatConfirmationNumber } from '@/lib/confirmation-number';
 import { formatInvoiceNumberDisplay } from '@/lib/invoice-number';
-import { formatPaymentMethod } from '@/lib/payment-method';
+import { formatPaymentMethod, formatPaymentTypeLabel } from '@/lib/payment-method';
 import { downloadGuestHistoryPdf } from '@/lib/guest-history-export';
+import { BookingPaymentSlipButton } from './BookingPaymentSlipButton';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
@@ -109,7 +110,7 @@ type GuestHistoryPayload = {
 type HistoryDateFilter = 'all' | 'custom';
 
 function formatPaymentType(type: string): string {
-  return type.replace(/_/g, ' ');
+  return formatPaymentTypeLabel(type);
 }
 
 interface GuestHistoryDialogProps {
@@ -489,6 +490,7 @@ export function GuestHistoryDialog({
                                           </th>
                                           <th className="py-2 px-2 font-medium">Reference</th>
                                           <th className="py-2 px-2 font-medium">Received by</th>
+                                          <th className="py-2 px-2 font-medium text-right">Slip</th>
                                         </tr>
                                       </thead>
                                       <tbody>
@@ -512,6 +514,13 @@ export function GuestHistoryDialog({
                                             <td className="py-2 px-2 text-muted-foreground">
                                               {p.receiver.name}
                                             </td>
+                                            <td className="py-2 px-2 text-right">
+                                              <BookingPaymentSlipButton
+                                                paymentId={p.id}
+                                                iconOnly
+                                                variant="ghost"
+                                              />
+                                            </td>
                                           </tr>
                                         ))}
                                       </tbody>
@@ -523,7 +532,7 @@ export function GuestHistoryDialog({
                                           <td className="py-2 px-2 text-right">
                                             {formatBdt(b.paidAmount)}
                                           </td>
-                                          <td colSpan={2} />
+                                          <td colSpan={3} />
                                         </tr>
                                       </tfoot>
                                     </table>

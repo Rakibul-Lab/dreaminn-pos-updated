@@ -8,9 +8,9 @@ import {
   buildCheckOutsDuringWindowWhere,
   formatBusinessDateDisplay,
   getCalendarDayBounds,
-  getLastDayClose,
   isValidBusinessDateString,
   readCurrentBusinessDateString,
+  resolveBusinessDayWindowForDate,
 } from '@/lib/business-date'
 import { formatPaymentMethod } from '@/lib/payment-method'
 import { buildDailySalesDetailReport } from '@/lib/daily-sales-report'
@@ -52,24 +52,7 @@ export async function resolveBusinessDayReportWindow(
       ? businessDateParam.trim()
       : current
 
-  const closedDay = await db.dayClose.findUnique({ where: { businessDate } })
-  if (closedDay) {
-    return {
-      businessDate,
-      businessDateDisplay: formatBusinessDateDisplay(businessDate),
-      openedAt: closedDay.openedAt,
-      closedAt: closedDay.closedAt,
-    }
-  }
-
-  const { start: calendarStart } = getCalendarDayBounds(businessDate)
-  const lastClose = await getLastDayClose()
-  const openedAt =
-    lastClose && lastClose.businessDate !== businessDate
-      ? lastClose.closedAt
-      : lastClose?.openedAt ?? calendarStart
-
-  const closedAt = businessDate === current ? new Date() : endOfDay(calendarStart)
+  const { openedAt, closedAt } = await resolveBusinessDayWindowForDate(businessDate)
 
   return {
     businessDate,

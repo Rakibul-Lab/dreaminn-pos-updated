@@ -7,9 +7,10 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { StatusBadge } from '../shared/StatusBadge'
 import { formatBdt } from '@/lib/currency'
 import { formatBookingDateOnly } from '@/lib/hotel-times'
-import { formatPaymentMethod } from '@/lib/payment-method'
+import { formatPaymentMethod, formatPaymentTypeLabel } from '@/lib/payment-method'
 import { sumBookingNetPaid } from '@/lib/booking-totals'
 import { resolveBookingRegistrationNumber } from '@/lib/booking-registration'
+import { BookingPaymentSlipButton } from './BookingPaymentSlipButton'
 
 type BookingCompanion = {
   sortOrder: number
@@ -67,7 +68,7 @@ type BookingGuestDetail = {
 }
 
 function formatPaymentType(type: string): string {
-  return type.replace(/_/g, ' ')
+  return formatPaymentTypeLabel(type)
 }
 
 function InfoRow({ label, value }: { label: string; value?: string | null }) {
@@ -258,6 +259,7 @@ export function RoomBookingGuestPanel({ bookingId }: { bookingId: string }) {
                   <th className="text-left p-2 font-medium">Type</th>
                   <th className="text-left p-2 font-medium">Method</th>
                   <th className="text-right p-2 font-medium">Amount</th>
+                  <th className="text-right p-2 font-medium">Slip</th>
                 </tr>
               </thead>
               <tbody>
@@ -279,6 +281,13 @@ export function RoomBookingGuestPanel({ bookingId }: { bookingId: string }) {
                       >
                         {payment.paymentType === 'REFUND' ? '-' : ''}
                         {formatBdt(Math.abs(payment.amount))}
+                      </td>
+                      <td className="p-2 text-right">
+                        <BookingPaymentSlipButton
+                          paymentId={payment.id}
+                          iconOnly
+                          variant="ghost"
+                        />
                       </td>
                     </tr>
                   ))}

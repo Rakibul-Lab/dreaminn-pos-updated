@@ -23,7 +23,8 @@ import { countHotelStayNights, applyHotelTimeToBookingInput } from '@/lib/hotel-
 import { formatConfirmationNumber, reservationPdfFileName } from '@/lib/confirmation-number'
 import { formatBdt } from '@/lib/currency'
 import { INVOICE_SERVICE_CHARGE_PERCENT } from '@/lib/invoice-display'
-import { bookingVatOptions, computeBookingDisplayVat, computeRoomBookingTotals } from '@/lib/booking-totals'
+import { bookingVatOptions, bookingDiscountInput, computeBookingDisplayVat, computeRoomBookingTotals } from '@/lib/booking-totals'
+import { formatBookingListDiscount } from '@/lib/booking-discount'
 import { printReservationDocument } from '@/lib/print-reservation'
 import { isIdDocumentPdf } from '@/lib/id-document-upload'
 import { IdDocumentThumbnail } from '@/components/erp/hotel/IdDocumentThumbnail'
@@ -52,6 +53,9 @@ export interface ReservationDocumentData {
   vatAmount?: number
   totalWithVat?: number
   serviceChargePercent?: number | null
+  discountEnabled?: boolean
+  discountType?: string | null
+  discountValue?: number
   notes?: string | null
   status: string
   isInitialReservation?: boolean
@@ -117,7 +121,7 @@ export function ReservationDocumentView({
   useEffect(() => {
     const link = document.createElement('link')
     link.rel = 'stylesheet'
-    link.href = '/reservation-a4.css?v=20250618'
+    link.href = '/reservation-a4.css?v=20250623'
     document.head.appendChild(link)
     return () => link.remove()
   }, [])
@@ -228,9 +232,14 @@ export function ReservationDocumentView({
   const vatTotals = computeRoomBookingTotals(
     reservation.totalRoomCharge,
     reservation.advancePayment,
-    bookingVatOptions(reservation)
+    bookingVatOptions(reservation),
+    bookingDiscountInput(reservation)
   )
   const vatDisplay = computeBookingDisplayVat(reservation)
+  const discountDisplay = formatBookingListDiscount({
+    ...reservation,
+    discountAmount: vatTotals.discountAmount,
+  })
   const vatPercent = reservation.vatPercent ?? vatDisplay.percent
   const vatAmount = vatDisplay.amount
   const totalWithVat = reservation.totalWithVat ?? vatTotals.totalWithVat
@@ -274,7 +283,7 @@ export function ReservationDocumentView({
       >
       <article
         id="reservation-document-article"
-        className={`reservation-a4-sheet box-border px-[14mm] pt-[12mm] pb-[16mm] shadow-md print:shadow-none print:px-[14mm] print:pt-[12mm] print:pb-[18mm]${isMultiGuest ? ' reservation-a4-sheet--multi-guest' : ''}`}
+        className={`reservation-a4-sheet box-border px-[14mm] pt-[12mm] pb-[16mm] shadow-md print:shadow-none print:p-0${isMultiGuest ? ' reservation-a4-sheet--multi-guest' : ''}`}
       >
         <header className="rd-header">
           <div className="rd-header-main">
@@ -439,6 +448,20 @@ export function ReservationDocumentView({
                     : reservationDocValue(reservation.customer.address, showMissingFields)}
                 </span>
               </p>
+              {!isCorporateGuest && !isMultiGuest && (
+                <p>
+                  <span className="rd-label">ID (Check-in):</span>{' '}
+                  <span
+                    className={`rd-muted ${showMissingFields && idLabel.includes(RESERVATION_REQUIRED_PLACEHOLDER) ? placeholderClass : ''}`}
+                  >
+                    {idLabel}
+                  </span>
+                </p>
+              )}
+              <p>
+                <span className="rd-label">Remarks:</span>{' '}
+                <span className="rd-muted">{reservation.notes || '—'}</span>
+              </p>
             </div>
             <div className="rd-details-col">
               <p>
@@ -460,6 +483,14 @@ export function ReservationDocumentView({
                 <span className="rd-label">Room rent:</span>{' '}
                 <span className="rd-muted">
                   {formatBdt(reservation.totalRoomCharge)} (total, {nights} night{nights > 1 ? 's' : ''})
+                </span>
+              </p>
+              <p>
+                <span className="rd-label">Discount:</span>{' '}
+                <span className="rd-muted">
+                  {discountDisplay.amount > 0
+                    ? `${formatBdt(discountDisplay.amount)}${discountDisplay.label ? ` (${discountDisplay.label})` : ''}`
+                    : 'N/A'}
                 </span>
               </p>
               <p>
@@ -488,20 +519,6 @@ export function ReservationDocumentView({
               <p>
                 <span className="rd-label">Form of Payment:</span>{' '}
                 <span className="rd-muted">{reservation.formOfPayment || 'Not paid at booking'}</span>
-              </p>
-              {!isCorporateGuest && !isMultiGuest && (
-              <p>
-                <span className="rd-label">ID (Check-in):</span>{' '}
-                <span
-                  className={`rd-muted ${showMissingFields && idLabel.includes(RESERVATION_REQUIRED_PLACEHOLDER) ? placeholderClass : ''}`}
-                >
-                  {idLabel}
-                </span>
-              </p>
-              )}
-              <p>
-                <span className="rd-label">Remarks:</span>{' '}
-                <span className="rd-muted">{reservation.notes || '—'}</span>
               </p>
             </div>
           </div>
@@ -627,7 +644,7 @@ export function ReservationDocumentView({
       {!isCorporateGuest && (idAttachments.length > 0 || showMissingFields) && (
         <article
           id="reservation-id-attachments"
-          className="reservation-a4-sheet reservation-a4-sheet--attachments box-border px-[14mm] pt-[12mm] pb-[16mm] shadow-md print:shadow-none print:px-[14mm] print:pt-[12mm] print:pb-[18mm]"
+          className="reservation-a4-sheet reservation-a4-sheet--attachments box-border px-[14mm] pt-[12mm] pb-[16mm] shadow-md print:shadow-none print:p-0"
         >
           <header className="rd-header">
             <div className="rd-header-main">

@@ -88,6 +88,7 @@ export function buildPaymentsExportQuery(
     method?: string
     dateFrom?: string
     dateTo?: string
+    search?: string
   },
   limit = 5000
 ): string {
@@ -102,8 +103,12 @@ export function buildPaymentsExportQuery(
   if (filters.method && filters.method !== 'all') {
     params.set('method', filters.method)
   }
-  if (filters.dateFrom) params.set('startDate', filters.dateFrom)
-  if (filters.dateTo) params.set('endDate', filters.dateTo)
+  if (filters.search?.trim()) {
+    params.set('search', filters.search.trim())
+  } else {
+    if (filters.dateFrom) params.set('startDate', filters.dateFrom)
+    if (filters.dateTo) params.set('endDate', filters.dateTo)
+  }
   return `/payments?${params.toString()}`
 }
 

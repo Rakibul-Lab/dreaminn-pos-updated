@@ -2,8 +2,8 @@ import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { requireRole } from '@/lib/auth';
 import { successResponse, errorResponse, notFoundResponse, logActivity } from '@/lib/api-utils';
+import { buildGuestStayFilterWhere } from '@/lib/business-date';
 import {
-  buildGuestStayOverlapWhere,
   guestStayOverlapsRange,
   parseStayDateRange,
   pickGuestStayBooking,
@@ -69,7 +69,7 @@ export async function GET(
       where.OR = orConditions;
     }
 
-    const stayOverlapFilter = buildGuestStayOverlapWhere(dateFrom, dateTo);
+    const stayOverlapFilter = await buildGuestStayFilterWhere(dateFrom, dateTo);
     if (stayOverlapFilter) {
       where.bookings = { some: stayOverlapFilter };
     }

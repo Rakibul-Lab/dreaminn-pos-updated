@@ -676,6 +676,9 @@ export default function BusinessDayReportsPage() {
                       at: string
                     }>
                   }).headOfficeRemittances,
+                  billBreakdown: (salesData as {
+                    billBreakdown?: PaperSalesInput['billBreakdown']
+                  }).billBreakdown,
                 }}
               />
             ) : (

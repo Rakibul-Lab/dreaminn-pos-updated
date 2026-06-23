@@ -105,5 +105,18 @@ export function formatPaymentLastFourDisplay(
   return formatPaymentAccountDetail(method, accountLastFour) || '—'
 }
 
+const PAYMENT_TYPE_LABELS: Record<string, string> = {
+  ADVANCE: 'Advance',
+  INITIAL: 'Check-in payment',
+  FINAL: 'Checkout payment',
+  PARTIAL: 'Partial payment',
+  RESTAURANT: 'Restaurant',
+  REFUND: 'Refund',
+}
+
+export function formatPaymentTypeLabel(type: string): string {
+  return PAYMENT_TYPE_LABELS[type] ?? type.replace(/_/g, ' ')
+}
+
 /** @deprecated Use formatPaymentAccountDetail */
 export const formatPaymentMethodDetail = formatPaymentAccountDetail

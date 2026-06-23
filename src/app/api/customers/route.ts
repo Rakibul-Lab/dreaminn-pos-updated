@@ -4,8 +4,8 @@ import { requireHotelAccess, requireRole } from '@/lib/auth';
 import { successResponse, paginatedResponse, errorResponse, logActivity } from '@/lib/api-utils';
 import { findCustomerByPhone } from '@/lib/customer-phone';
 import { normalizePhone, isValidPhone } from '@/lib/phone';
+import { buildGuestStayFilterWhere } from '@/lib/business-date';
 import {
-  buildGuestStayOverlapWhere,
   parseStayDateRange,
   pickGuestStayBooking,
 } from '@/lib/guest-stay-date-filter';
@@ -76,7 +76,7 @@ export async function GET(request: NextRequest) {
       where.OR = orConditions;
     }
 
-    const stayOverlapFilter = buildGuestStayOverlapWhere(dateFrom, dateTo);
+    const stayOverlapFilter = await buildGuestStayFilterWhere(dateFrom, dateTo);
     if (stayOverlapFilter && !search) {
       where.bookings = { some: stayOverlapFilter };
     }

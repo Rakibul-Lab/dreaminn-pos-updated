@@ -1,13 +1,13 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api-client'
 import { useAuthStore, canAccessHotel, canAccessRestaurant, canAccessAdmin } from '@/lib/auth-store'
 import { useToast } from '@/hooks/use-toast'
 import { format } from 'date-fns'
 import {
-  CreditCard, Plus, Filter, RefreshCw, Wallet, TrendingUp, Calendar, CalendarRange, FileDown, Loader2, Landmark, AlertCircle
+  CreditCard, Plus, Filter, RefreshCw, Wallet, TrendingUp, Calendar, CalendarRange, FileDown, Loader2, Landmark, AlertCircle, Search
 } from 'lucide-react'
 import {
   BOOKING_DATE_PRESET_OPTIONS,
@@ -48,8 +48,17 @@ import { getPaginationPages } from '@/lib/pagination-pages'
 import { cn } from '@/lib/utils'
 import { openCloudViewRestaurantLedgerTab } from '@/lib/company-ledger-navigation'
 import { formatRestaurantPaymentSourceLabel } from '@/lib/restaurant-order-settle'
+import { BookingPaymentSlipButton } from '@/components/erp/hotel/BookingPaymentSlipButton'
+import {
+  BookingPaymentSearchField,
+  type BookingPaymentSearchResult,
+} from '@/components/erp/hotel/BookingPaymentSearchField'
+import { formatPaymentSlipNumber } from '@/lib/booking-payment-receipt-navigation'
 
 type RestaurantSourceFilter = 'all' | 'HOTEL_DUE' | 'RESTAURANT_DIRECT'
+
+const PAYMENT_SEARCH_PLACEHOLDER =
+  'Search reg. no., slip no., room, guest, conf. no., reference…'
 
 interface Payment {
   id: string
@@ -64,6 +73,8 @@ interface Payment {
   createdAt: string
   booking: {
     id: string
+    confirmationNumber?: string | null
+    registrationNumber?: string | null
     customer: { id: string; name: string }
     room: { id: string; roomNumber: string }
   } | null
@@ -74,14 +85,6 @@ interface Payment {
   } | null
   receiver: { id: string; name: string; role?: string }
   settlementSource?: string | null
-}
-
-interface Booking {
-  id: string
-  checkIn: string
-  checkOut: string
-  customer: { id: string; name: string }
-  room: { id: string; roomNumber: string; type: { name: string } }
 }
 
 const paymentTypeColors: Record<string, string> = {
@@ -110,10 +113,13 @@ export default function PaymentsPage() {
   const [datePreset, setDatePreset] = useState<BookingDatePreset>('today')
   const [customDateFrom, setCustomDateFrom] = useState('')
   const [customDateTo, setCustomDateTo] = useState('')
+  const [searchInput, setSearchInput] = useState('')
+  const [searchQuery, setSearchQuery] = useState('')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
   const [exporting, setExporting] = useState(false)
   const [showNewPaymentDialog, setShowNewPaymentDialog] = useState(false)
+  const [selectedBookingLabel, setSelectedBookingLabel] = useState('')
   const [paymentForm, setPaymentForm] = useState({
     paymentType: 'PARTIAL',
     bookingId: '',
@@ -128,6 +134,14 @@ export default function PaymentsPage() {
   const showFormReference = paymentRequiresReference(paymentForm.method)
   const showFormLastFour = paymentRequiresLastFour(paymentForm.method)
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setSearchQuery(searchInput.trim())
+      setPage(1)
+    }, 300)
+    return () => window.clearTimeout(timer)
+  }, [searchInput])
+
   const resetPaymentEntryFields = () => {
     setPaymentForm((f) => ({
       ...f,
@@ -139,6 +153,7 @@ export default function PaymentsPage() {
   }
 
   const resetPaymentForm = () => {
+    setSelectedBookingLabel('')
     setPaymentForm({
       paymentType: 'PARTIAL',
       bookingId: '',
@@ -190,8 +205,11 @@ export default function PaymentsPage() {
       params.set('paymentType', paymentTypeFilter)
     }
     if (methodFilter !== 'all') params.set('method', methodFilter)
-    if (dateRange.dateFrom) params.set('startDate', dateRange.dateFrom)
-    if (dateRange.dateTo) params.set('endDate', dateRange.dateTo)
+    if (searchQuery) params.set('search', searchQuery)
+    else {
+      if (dateRange.dateFrom) params.set('startDate', dateRange.dateFrom)
+      if (dateRange.dateTo) params.set('endDate', dateRange.dateTo)
+    }
     return `/payments?${params.toString()}`
   }
 
@@ -215,6 +233,7 @@ export default function PaymentsPage() {
       datePreset,
       customDateFrom,
       customDateTo,
+      searchQuery,
       page,
       pageSize,
       isRestaurant,
@@ -266,16 +285,6 @@ export default function PaymentsPage() {
     select: (res) => res?.data?.meta,
   })
 
-  // Fetch bookings for payment dialog
-  const { data: bookingsData } = useQuery({
-    queryKey: ['bookings-for-payment'],
-    queryFn: async () => {
-      const res = await api.get<{ success: boolean; data: Booking[] }>('/bookings?limit=50&status=CHECKED_IN')
-      return res
-    },
-    enabled: showNewPaymentDialog && (isHotel || isAdmin),
-  })
-
   // Create payment mutation
   const createPaymentMutation = useMutation({
     mutationFn: async () => {
@@ -322,8 +331,9 @@ export default function PaymentsPage() {
         paymentType: isRestaurant ? undefined : paymentTypeFilter,
         settlementSource: isRestaurant ? restaurantSourceFilter : undefined,
         method: methodFilter,
-        dateFrom: dateRange.dateFrom,
-        dateTo: dateRange.dateTo,
+        dateFrom: searchQuery ? undefined : dateRange.dateFrom,
+        dateTo: searchQuery ? undefined : dateRange.dateTo,
+        search: searchQuery || undefined,
       })
       const res = await api.get<{ success: boolean; data: PaymentExportRecord[] }>(url)
       if (!res?.success || !res.data?.length) {
@@ -468,7 +478,22 @@ export default function PaymentsPage() {
 
       {/* Filters */}
       <Card>
-        <CardContent className="p-4">
+        <CardContent className="p-4 space-y-3">
+          <div className="relative w-full">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              placeholder={PAYMENT_SEARCH_PLACEHOLDER}
+              className="pl-9"
+              autoComplete="off"
+            />
+          </div>
+          {searchQuery ? (
+            <p className="text-xs text-muted-foreground">
+              Searching all dates for matching payments. Clear search to use the date filter again.
+            </p>
+          ) : null}
           <div className="flex flex-col sm:flex-row flex-wrap gap-3">
             <Select
               value={datePreset}
@@ -607,25 +632,27 @@ export default function PaymentsPage() {
                   <TableHead>{isRestaurant ? 'Source' : 'Type'}</TableHead>
                   <TableHead>Method</TableHead>
                   <TableHead className="text-right">Amount</TableHead>
+                  {!isRestaurant ? <TableHead>Slip No.</TableHead> : null}
                   <TableHead>Reference</TableHead>
                   <TableHead>Last 4</TableHead>
                   <TableHead>Notes</TableHead>
                   <TableHead>Room / Order</TableHead>
                   <TableHead>Received By</TableHead>
+                  {!isRestaurant ? <TableHead className="text-right">Slip</TableHead> : null}
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {isLoading ? (
                   Array.from({ length: 5 }).map((_, i) => (
                     <TableRow key={i}>
-                      {Array.from({ length: 9 }).map((_, j) => (
+                      {Array.from({ length: isRestaurant ? 9 : 11 }).map((_, j) => (
                         <TableCell key={j}><Skeleton className="h-4 w-20" /></TableCell>
                       ))}
                     </TableRow>
                   ))
                 ) : payments.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={isRestaurant ? 9 : 11} className="text-center py-8 text-muted-foreground">
                       No payments found
                     </TableCell>
                   </TableRow>
@@ -657,6 +684,13 @@ export default function PaymentsPage() {
                       <TableCell className="text-right font-semibold text-emerald-600">
                         ৳{payment.amount.toLocaleString()}
                       </TableCell>
+                      {!isRestaurant ? (
+                        <TableCell className="font-mono text-[10px] max-w-[120px] truncate">
+                          {payment.bookingId && payment.paymentType !== 'RESTAURANT'
+                            ? formatPaymentSlipNumber(payment)
+                            : '—'}
+                        </TableCell>
+                      ) : null}
                       <TableCell className="font-mono text-xs max-w-[140px] truncate">
                         {formatPaymentReferenceDisplay(payment.method, payment.reference)}
                       </TableCell>
@@ -680,6 +714,15 @@ export default function PaymentsPage() {
                         )}
                       </TableCell>
                       <TableCell className="text-sm">{payment.receiver?.name || 'N/A'}</TableCell>
+                      {!isRestaurant ? (
+                        <TableCell className="text-right">
+                          {payment.bookingId && payment.paymentType !== 'RESTAURANT' ? (
+                            <BookingPaymentSlipButton paymentId={payment.id} iconOnly variant="ghost" />
+                          ) : (
+                            <span className="text-muted-foreground text-xs">—</span>
+                          )}
+                        </TableCell>
+                      ) : null}
                     </TableRow>
                   ))
                 )}
@@ -801,19 +844,20 @@ export default function PaymentsPage() {
 
             {/* Show booking selector for hotel payments */}
             {(isHotel || isAdmin) && (
-              <div>
-                <Label>Select Booking (Hotel)</Label>
-                <Select value={paymentForm.bookingId} onValueChange={(v) => setPaymentForm((f) => ({ ...f, bookingId: v }))}>
-                  <SelectTrigger><SelectValue placeholder="Choose a booking" /></SelectTrigger>
-                  <SelectContent>
-                    {bookingsData?.data?.map((b) => (
-                      <SelectItem key={b.id} value={b.id}>
-                        {b.customer?.name} - Room {b.room?.roomNumber}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+              <BookingPaymentSearchField
+                selectedId={paymentForm.bookingId}
+                selectedLabel={selectedBookingLabel}
+                onSelect={(booking: BookingPaymentSearchResult) => {
+                  setPaymentForm((f) => ({ ...f, bookingId: booking.id }))
+                  setSelectedBookingLabel(
+                    `${booking.customer.name} · Room ${booking.room.roomNumber}`
+                  )
+                }}
+                onClear={() => {
+                  setPaymentForm((f) => ({ ...f, bookingId: '' }))
+                  setSelectedBookingLabel('')
+                }}
+              />
             )}
 
             <div>

@@ -289,6 +289,127 @@ export function buildCheckOutsDuringWindowWhere(
   }
 }
 
+/** Open/closed window for a business date (current open day or historical day close). */
+export async function resolveBusinessDayWindowForDate(
+  businessDate: string
+): Promise<{ businessDate: string; openedAt: Date; closedAt: Date }> {
+  const current = await readCurrentBusinessDateString()
+  const closedDay = await db.dayClose.findUnique({ where: { businessDate } })
+  if (closedDay) {
+    return {
+      businessDate,
+      openedAt: closedDay.openedAt,
+      closedAt: closedDay.closedAt,
+    }
+  }
+
+  const { start: calendarStart } = getCalendarDayBounds(businessDate)
+  const lastClose = await getLastDayClose()
+  const openedAt =
+    lastClose && lastClose.businessDate !== businessDate
+      ? lastClose.closedAt
+      : lastClose?.openedAt ?? calendarStart
+  const closedAt = businessDate === current ? new Date() : endOfDay(calendarStart)
+
+  return { businessDate, openedAt, closedAt }
+}
+
+/**
+ * Guests visible on a business day: expected arrivals, check-ins during the open
+ * window (even when calendar date is ahead), in-house stays, and departures.
+ */
+export function buildGuestStayOnBusinessDayWhere(
+  businessDate: string,
+  openedAt: Date,
+  closedAt: Date
+): Prisma.BookingWhereInput {
+  const { start, end } = getCalendarDayBounds(businessDate)
+  const scheduledInHouse = {
+    checkIn: { lte: end },
+    checkOut: { gte: start },
+  }
+
+  return {
+    status: { not: 'CANCELLED' },
+    OR: [
+      { status: 'RESERVED', checkIn: { gte: start, lte: end } },
+      { actualCheckIn: { gte: openedAt, lte: closedAt } },
+      {
+        status: 'CHECKED_IN',
+        OR: [
+          {
+            AND: [
+              { actualCheckIn: { not: null } },
+              { actualCheckIn: { lt: openedAt } },
+              { checkOut: { gte: start } },
+            ],
+          },
+          { AND: [{ actualCheckIn: null }, scheduledInHouse] },
+        ],
+      },
+      {
+        status: 'CHECKED_OUT',
+        AND: [
+          { actualCheckIn: { not: null } },
+          { actualCheckOut: { not: null } },
+          { actualCheckIn: { lte: end } },
+          { actualCheckOut: { gte: start } },
+        ],
+      },
+      {
+        status: 'CHECKED_OUT',
+        OR: [{ actualCheckIn: null }, { actualCheckOut: null }],
+        ...scheduledInHouse,
+      },
+    ],
+  }
+}
+
+/** Checked-in guests on a business day (includes check-ins during the open window). */
+export function buildInHouseOnBusinessDayWhere(
+  businessDate: string,
+  openedAt: Date,
+  closedAt: Date
+): Prisma.BookingWhereInput {
+  const { start, end } = getCalendarDayBounds(businessDate)
+  const scheduledInHouse = {
+    checkIn: { lte: end },
+    checkOut: { gte: start },
+  }
+
+  return {
+    status: 'CHECKED_IN',
+    OR: [
+      { actualCheckIn: { gte: openedAt, lte: closedAt } },
+      {
+        AND: [
+          { actualCheckIn: { not: null } },
+          { actualCheckIn: { lt: openedAt } },
+          { checkOut: { gte: start } },
+        ],
+      },
+      { AND: [{ actualCheckIn: null }, scheduledInHouse] },
+    ],
+  }
+}
+
+/** Resolve booking list / guest filters using business-day window for single-day filters. */
+export async function buildGuestStayFilterWhere(
+  dateFrom: string | null | undefined,
+  dateTo: string | null | undefined
+): Promise<Prisma.BookingWhereInput | null> {
+  const from = dateFrom?.trim() || null
+  const to = dateTo?.trim() || null
+  if (!from && !to) return null
+
+  if (from && to && from === to) {
+    const window = await resolveBusinessDayWindowForDate(from)
+    return buildGuestStayOnBusinessDayWhere(window.businessDate, window.openedAt, window.closedAt)
+  }
+
+  return buildGuestStayOverlapWhere(from, to)
+}
+
 /** Checked-in guests occupying the hotel on a business calendar day. */
 export function buildInHouseOnBusinessDateWhere(businessDate: string): Prisma.BookingWhereInput {
   return buildInHouseStayOverlapWhere(businessDate, businessDate) ?? { status: 'CANCELLED' }

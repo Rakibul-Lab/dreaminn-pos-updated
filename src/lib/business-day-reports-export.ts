@@ -117,6 +117,10 @@ export type SalesReportData = {
     sentBy: string
     at?: string
   }>
+  billBreakdown?: {
+    hotelBills?: number
+    restaurantBills?: number
+  }
 }
 
 export type CollectionsReportData = {
@@ -368,13 +372,13 @@ async function writeDailySalesExcel(
     row += 1
   }
 
-  const totalValues = paperTotalsToRow(totals)
+  const totalValues = paperTotalsToRow(totals, summary.totalSale)
   totalValues.forEach((value, index) => {
     const cell = sheet.getCell(row, index + 1)
     cell.value = value
     cell.font = { bold: true }
     if (index === 6 && totals.dueBill > 0) cell.font = { bold: true, color: EXCEL_RED }
-    if (index === 8 && totals.totalInclVat > 0) cell.font = { bold: true, color: EXCEL_BLUE }
+    if (index === 8 && summary.totalSale > 0) cell.font = { bold: true, color: EXCEL_BLUE }
     cell.alignment = { horizontal: index >= 2 ? 'right' : 'left' }
     setExcelBorder(cell)
   })
@@ -554,11 +558,11 @@ async function writeDailySalesPdf(
   }
 
   pdf.setFont('helvetica', 'bold')
-  const totalValues = paperTotalsToRow(totals)
+  const totalValues = paperTotalsToRow(totals, summary.totalSale)
   let x = mainStartX + 1
   totalValues.forEach((text, i) => {
     if (i === 6 && totals.dueBill > 0) pdf.setTextColor(204, 0, 0)
-    else if (i === 8 && totals.totalInclVat > 0) pdf.setTextColor(0, 0, 204)
+    else if (i === 8 && summary.totalSale > 0) pdf.setTextColor(0, 0, 204)
     else pdf.setTextColor(0, 0, 0)
     const clipped = pdf.splitTextToSize(text, mainColWidths[i]! - 2)[0] ?? text
     if (i >= 2) pdf.text(clipped, x + mainColWidths[i]! - 2, y, { align: 'right' })

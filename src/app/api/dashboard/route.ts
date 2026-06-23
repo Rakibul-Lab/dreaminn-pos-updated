@@ -8,7 +8,7 @@ import {
   buildBusinessDayWindowWhere,
   buildCurrentOpenDayActivityWhere,
   buildExpectedArrivalsOnBusinessDateWhere,
-  buildInHouseOnBusinessDateWhere,
+  buildInHouseOnBusinessDayWhere,
   getCalendarDayBounds,
   getOpenBusinessDayWindow,
   readCurrentBusinessDateString,
@@ -90,10 +90,10 @@ async function handleAdminDashboard() {
   // In-house guests on the current business day (multi-day stays included)
   const [inHouseGuestCount, inHouseGuests] = await Promise.all([
     db.booking.count({
-      where: { AND: [buildInHouseOnBusinessDateWhere(businessDate), { status: 'CHECKED_IN' }] },
+      where: buildInHouseOnBusinessDayWhere(businessDate, openedAt, now),
     }),
     db.booking.findMany({
-      where: { AND: [buildInHouseOnBusinessDateWhere(businessDate), { status: 'CHECKED_IN' }] },
+      where: buildInHouseOnBusinessDayWhere(businessDate, openedAt, now),
       include: {
         customer: { select: { id: true, name: true, phone: true } },
         room: { select: { id: true, roomNumber: true, type: { select: { name: true } } } },
@@ -297,10 +297,10 @@ async function handleHotelDashboard(role: 'HOTEL_STAFF' | 'HOTEL_FD') {
   // In-house guests on the current business day (multi-day stays included)
   const [inHouseGuestCount, inHouseGuests] = await Promise.all([
     db.booking.count({
-      where: { AND: [buildInHouseOnBusinessDateWhere(businessDate), { status: 'CHECKED_IN' }] },
+      where: buildInHouseOnBusinessDayWhere(businessDate, openedAt, now),
     }),
     db.booking.findMany({
-      where: { AND: [buildInHouseOnBusinessDateWhere(businessDate), { status: 'CHECKED_IN' }] },
+      where: buildInHouseOnBusinessDayWhere(businessDate, openedAt, now),
       include: {
         customer: { select: { id: true, name: true, phone: true } },
         room: { select: { id: true, roomNumber: true, type: { select: { name: true } } } },

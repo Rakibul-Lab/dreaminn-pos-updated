@@ -22,6 +22,8 @@ import { countHotelStayNights, applyHotelTimeToBookingInput } from '@/lib/hotel-
 import { formatReservationEntryConfirmationNumber, reservationEntryPdfFileName } from '@/lib/confirmation-number'
 import { formatBdt } from '@/lib/currency'
 import { INVOICE_SERVICE_CHARGE_PERCENT } from '@/lib/invoice-display'
+import { bookingDiscountInput, computeRoomBookingTotals } from '@/lib/booking-totals'
+import { formatBookingListDiscount } from '@/lib/booking-discount'
 import { printReservationDocument } from '@/lib/print-reservation'
 import { toast } from 'sonner'
 import { Loader2 } from 'lucide-react'
@@ -46,7 +48,7 @@ export function ReservationEntryDocumentView({
   useEffect(() => {
     const link = document.createElement('link')
     link.rel = 'stylesheet'
-    link.href = '/reservation-a4.css?v=20250618c'
+    link.href = '/reservation-a4.css?v=20250623'
     document.head.appendChild(link)
     return () => link.remove()
   }, [])
@@ -106,6 +108,16 @@ export function ReservationEntryDocumentView({
   const policies = reservationPoliciesWithTimes(times)
   const confirmationNo = formatReservationEntryConfirmationNumber(entry)
   const servicePercent = INVOICE_SERVICE_CHARGE_PERCENT
+  const chargeTotals = computeRoomBookingTotals(
+    entry.totalRoomCharge,
+    entry.advancePayment,
+    { vatApplied: entry.vatApplied, vatPercent: entry.vatPercent },
+    bookingDiscountInput(entry)
+  )
+  const discountDisplay = formatBookingListDiscount({
+    ...entry,
+    discountAmount: chargeTotals.discountAmount,
+  })
   const lineCount = entry.lines.length
   const isManyRooms = lineCount >= 4 || entry.totalRooms >= 6
   const showRoomLineTable = lineCount >= 2 || entry.totalRooms > 1
@@ -163,7 +175,7 @@ export function ReservationEntryDocumentView({
       >
         <article
           id="reservation-document-article"
-          className={`${sheetClassName} px-[14mm] pt-[12mm] pb-[16mm] print:px-[14mm] print:pt-[12mm] print:pb-[18mm]`}
+          className={`${sheetClassName} px-[14mm] pt-[12mm] pb-[16mm] print:p-0`}
         >
           <div className="rd-entry-main">
           <header className="rd-header">
@@ -256,6 +268,10 @@ export function ReservationEntryDocumentView({
                   <span className="rd-label">Address:</span>{' '}
                   <span className="rd-muted">{entry.guestAddress || '—'}</span>
                 </p>
+                <p>
+                  <span className="rd-label">Remarks:</span>{' '}
+                  <span className="rd-muted">{entry.notes || '—'}</span>
+                </p>
               </div>
               <div className="rd-details-col">
                 <p>
@@ -267,6 +283,14 @@ export function ReservationEntryDocumentView({
                   <span className="rd-muted">
                     {formatBdt(entry.totalRoomCharge)} (total, {nights} night
                     {nights > 1 ? 's' : ''})
+                  </span>
+                </p>
+                <p>
+                  <span className="rd-label">Discount:</span>{' '}
+                  <span className="rd-muted">
+                    {discountDisplay.amount > 0
+                      ? `${formatBdt(discountDisplay.amount)}${discountDisplay.label ? ` (${discountDisplay.label})` : ''}`
+                      : 'N/A'}
                   </span>
                 </p>
                 <p>
@@ -292,10 +316,6 @@ export function ReservationEntryDocumentView({
                 <p>
                   <span className="rd-label">Form of Payment:</span>{' '}
                   <span className="rd-muted">{entry.formOfPayment || 'Not paid at booking'}</span>
-                </p>
-                <p>
-                  <span className="rd-label">Remarks:</span>{' '}
-                  <span className="rd-muted">{entry.notes || '—'}</span>
                 </p>
               </div>
             </div>

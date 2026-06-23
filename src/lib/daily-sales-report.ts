@@ -97,6 +97,10 @@ export type DailySalesDetailReport = {
   collections: number
   cashReconciliation: CashReconciliation
   headOfficeRemittances: HeadOfficeRemittanceRow[]
+  billBreakdown: {
+    hotelBills: number
+    restaurantBills: number
+  }
 }
 
 const MBANKING_METHODS = new Set(['MOBILE_BANKING', 'BKASH', 'NAGAD', 'UPAY', 'BANK'])
@@ -322,6 +326,49 @@ function sortSalesLines(lines: DailySalesLine[]): DailySalesLine[] {
   )
 }
 
+function checkoutInvoiceIdsWithPayments(
+  payments: Array<{ invoiceId: string | null }>
+): Set<string> {
+  return new Set(
+    payments
+      .filter((payment) => payment.invoiceId)
+      .map((payment) => payment.invoiceId as string)
+  )
+}
+
+function suppressedCheckoutInvoiceChargeTotal(
+  invoices: Array<{ id: string; totalAmount: number }>,
+  invoiceIdsWithCheckoutPayments: Set<string>
+): number {
+  return invoices
+    .filter((invoice) => invoiceIdsWithCheckoutPayments.has(invoice.id))
+    .reduce((sum, invoice) => sum + invoice.totalAmount, 0)
+}
+
+function computeReportBillBreakdown(
+  lines: DailySalesLine[],
+  invoices: Array<{ id: string; totalAmount: number }>,
+  invoiceIdsWithCheckoutPayments: Set<string>
+): { hotelBills: number; restaurantBills: number } {
+  let hotelBills = 0
+  let restaurantBills = 0
+  for (const line of lines) {
+    if (line.lineType !== 'charge') continue
+    const total = line.total ?? 0
+    if (total <= 0 && (line.companyBill ?? 0) <= 0) continue
+    if (line.source === 'invoice' || line.source === 'beverage') {
+      hotelBills += total > 0 ? total : 0
+    } else if (line.source === 'restaurant' || line.source === 'guest-restaurant-bill') {
+      restaurantBills += total
+    }
+  }
+  hotelBills += suppressedCheckoutInvoiceChargeTotal(invoices, invoiceIdsWithCheckoutPayments)
+  return {
+    hotelBills: Number(hotelBills.toFixed(2)),
+    restaurantBills: Number(restaurantBills.toFixed(2)),
+  }
+}
+
 export async function buildDailySalesDetailReport(
   window: BusinessDayWindow
 ): Promise<DailySalesDetailReport> {
@@ -462,6 +509,7 @@ export async function buildDailySalesDetailReport(
 
   const lines: DailySalesLine[] = []
   const checkoutBookingIds = new Set(invoices.map((invoice) => invoice.bookingId))
+  const invoiceIdsWithCheckoutPayments = checkoutInvoiceIdsWithPayments(allPayments)
   const coveredBeverageSaleNumbers = new Set<string>()
 
   for (const payment of allPayments) {
@@ -521,6 +569,11 @@ export async function buildDailySalesDetailReport(
     const guestName = booking.customer.name
     const room = booking.room.roomNumber
     const regNo = resolveBookingRegistrationNumber(booking) || null
+
+    // Checkout payments already appear as collection rows — skip duplicate charge lines.
+    if (invoiceIdsWithCheckoutPayments.has(invoice.id)) {
+      continue
+    }
 
     if (invoice.roomCharges > 0) {
       lines.push({
@@ -737,9 +790,17 @@ export async function buildDailySalesDetailReport(
   const hotelSalesTotal = invoiceTotal + beverageWalkInSales
   const totalDiscount = invoiceDiscount + restaurantDiscount
 
-  const chargeTotal = sortedLines
+  const chargeTotalFromLines = sortedLines
     .filter((line) => line.lineType === 'charge')
     .reduce((sum, line) => sum + line.total, 0)
+  const chargeTotal =
+    chargeTotalFromLines +
+    suppressedCheckoutInvoiceChargeTotal(invoices, invoiceIdsWithCheckoutPayments)
+  const billBreakdown = computeReportBillBreakdown(
+    sortedLines,
+    invoices,
+    invoiceIdsWithCheckoutPayments
+  )
   const companyBillTotal = companyBills.reduce((s, bill) => s + bill.dueAmount, 0)
   const balances =
     storedBalances ??
@@ -797,5 +858,6 @@ export async function buildDailySalesDetailReport(
     collections,
     cashReconciliation,
     headOfficeRemittances,
+    billBreakdown,
   }
 }

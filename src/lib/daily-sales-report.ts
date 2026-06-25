@@ -336,6 +336,23 @@ function checkoutInvoiceIdsWithPayments(
   )
 }
 
+function shouldSkipInvoiceChargeLines(
+  invoice: {
+    id: string
+    dueAmount: number
+    paidAmount: number
+    totalAmount: number
+  },
+  invoiceIdsWithCheckoutPayments: Set<string>
+): boolean {
+  if (invoiceIdsWithCheckoutPayments.has(invoice.id)) return true
+  return (
+    invoice.totalAmount > 0 &&
+    invoice.dueAmount <= 0.01 &&
+    invoice.paidAmount >= invoice.totalAmount - 0.01
+  )
+}
+
 function suppressedCheckoutInvoiceChargeTotal(
   invoices: Array<{ id: string; totalAmount: number }>,
   invoiceIdsWithCheckoutPayments: Set<string>
@@ -343,6 +360,26 @@ function suppressedCheckoutInvoiceChargeTotal(
   return invoices
     .filter((invoice) => invoiceIdsWithCheckoutPayments.has(invoice.id))
     .reduce((sum, invoice) => sum + invoice.totalAmount, 0)
+}
+
+/** Booking advances, reservation payments, walk-in beverage, etc. — not already on charge lines. */
+function uncapturedPaymentSalesTotal(
+  payments: Array<{
+    amount: number
+    paymentType: string
+    invoiceId: string | null
+    orderId: string | null
+  }>
+): number {
+  return Number(
+    payments
+      .reduce((sum, payment) => {
+        if (payment.invoiceId || payment.orderId) return sum
+        if (payment.paymentType === 'REFUND') return sum - Math.abs(payment.amount)
+        return sum + payment.amount
+      }, 0)
+      .toFixed(2)
+  )
 }
 
 function computeReportBillBreakdown(
@@ -570,8 +607,9 @@ export async function buildDailySalesDetailReport(
     const room = booking.room.roomNumber
     const regNo = resolveBookingRegistrationNumber(booking) || null
 
-    // Checkout payments already appear as collection rows — skip duplicate charge lines.
-    if (invoiceIdsWithCheckoutPayments.has(invoice.id)) {
+    // Same-day checkout payments appear as collection rows; fully prepaid checkouts
+    // (advance on a prior day) omit invoice charge rows entirely.
+    if (shouldSkipInvoiceChargeLines(invoice, invoiceIdsWithCheckoutPayments)) {
       continue
     }
 
@@ -795,7 +833,8 @@ export async function buildDailySalesDetailReport(
     .reduce((sum, line) => sum + line.total, 0)
   const chargeTotal =
     chargeTotalFromLines +
-    suppressedCheckoutInvoiceChargeTotal(invoices, invoiceIdsWithCheckoutPayments)
+    suppressedCheckoutInvoiceChargeTotal(invoices, invoiceIdsWithCheckoutPayments) +
+    uncapturedPaymentSalesTotal(allPayments)
   const billBreakdown = computeReportBillBreakdown(
     sortedLines,
     invoices,

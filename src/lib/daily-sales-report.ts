@@ -29,6 +29,10 @@ import {
   type CashReconciliation,
   type HeadOfficeRemittanceRow,
 } from '@/lib/hotel-cash-reconciliation'
+import {
+  fetchInHouseBookingDiscountsForWindow,
+  sumInHouseBookingDiscounts,
+} from '@/lib/in-house-booking-discount'
 
 export type DailySalesLine = {
   id: string
@@ -430,6 +434,7 @@ export async function buildDailySalesDetailReport(
     occupiedRooms,
     totalRooms,
     headOfficeDeposits,
+    inHouseBookingDiscounts,
   ] = await Promise.all([
     db.invoice.findMany({
       where: invoiceWindowWhere(businessDate, openedAt, closedAt),
@@ -542,6 +547,7 @@ export async function buildDailySalesDetailReport(
       },
       orderBy: { depositedAt: 'asc' },
     }),
+    fetchInHouseBookingDiscountsForWindow(openedAt, closedAt),
   ])
 
   const lines: DailySalesLine[] = []
@@ -809,6 +815,8 @@ export async function buildDailySalesDetailReport(
     invoices.reduce((s, i) => s + i.foodCharges, 0) + guestManualFoodSales
   const extraSales = invoices.reduce((s, i) => s + i.extraCharges, 0)
   const invoiceDiscount = invoices.reduce((s, i) => s + i.discount, 0)
+  const inHouseBookingDiscount = sumInHouseBookingDiscounts(inHouseBookingDiscounts)
+  const hotelDiscount = invoiceDiscount + inHouseBookingDiscount
   const invoiceVat = invoices.reduce((s, i) => s + i.vatAmount, 0)
   const invoiceTotal = invoices.reduce((s, i) => s + i.totalAmount, 0)
   const invoicePaid = invoices.reduce((s, i) => s + i.paidAmount, 0)
@@ -826,7 +834,7 @@ export async function buildDailySalesDetailReport(
     .reduce((s, sale) => s + sale.totalAmount, 0)
   const beverageSalesTotal = beverageWalkInSales + beverageRoomSales
   const hotelSalesTotal = invoiceTotal + beverageWalkInSales
-  const totalDiscount = invoiceDiscount + restaurantDiscount
+  const totalDiscount = hotelDiscount + restaurantDiscount
 
   const chargeTotalFromLines = sortedLines
     .filter((line) => line.lineType === 'charge')
@@ -875,7 +883,7 @@ export async function buildDailySalesDetailReport(
       roomSales,
       foodSales,
       extraSales,
-      discount: invoiceDiscount,
+      discount: hotelDiscount,
       vat: invoiceVat,
       invoiceTotal,
       invoicePaid,

@@ -149,17 +149,34 @@ export function CompanyLedgerGuestHistoryView({
       reference?: string;
       notes?: string;
     }) => api.post(`/company-ledger/bills/${payload.billId}/payment`, payload),
-    onSuccess: (res: { success?: boolean; message?: string; error?: string }) => {
+    onSuccess: (res: {
+      success?: boolean;
+      message?: string;
+      error?: string;
+      data?: { billDueAmount?: number };
+    }, variables) => {
       if (!res?.success) {
         toast.error(res?.error || 'Failed to record payment');
         return;
       }
-      toast.success(res.message || 'Payment recorded');
-      setPayDialogOpen(false);
-      setPayBill(null);
-      setPayAmount('');
+      const newDue = res.data?.billDueAmount ?? 0;
+      toast.success(
+        newDue <= 0.009
+          ? res.message || 'Payment recorded — bill cleared'
+          : res.message || 'Payment recorded — enter another or close when done'
+      );
+      if (newDue <= 0.009) {
+        setPayDialogOpen(false);
+        setPayBill(null);
+      } else {
+        setPayBill((prev) =>
+          prev && prev.id === variables.billId ? { ...prev, dueAmount: newDue } : prev
+        );
+        setPayAmount(String(newDue));
+      }
       setPayReference('');
       setPayNotes('');
+      setPayMethod('CASH');
       queryClient.invalidateQueries({ queryKey: ['company-ledger-guest-history', guestId] });
       queryClient.invalidateQueries({ queryKey: ['company-ledger'] });
       queryClient.invalidateQueries({ queryKey: ['company-ledger-detail'] });

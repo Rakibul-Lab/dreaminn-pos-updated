@@ -8,6 +8,14 @@ import {
 import { resolveBookingDiscount } from '@/lib/booking-discount'
 import { formatOrderTypeLabel } from '@/lib/restaurant-order-dues'
 import { resolveBusinessDayReportWindow, type BusinessDayWindow } from '@/lib/hotel-pms-reports'
+import { resolveBookingRegistrationNumber } from '@/lib/booking-registration'
+import {
+  bookingDiscountAmount,
+  fetchAllInHouseBookingDiscounts,
+  fetchInHouseBookingDiscountsForWindow,
+  type InHouseBookingDiscountRecord,
+} from '@/lib/in-house-booking-discount'
+import { bookingVatOptions, computeRoomBookingTotals } from '@/lib/booking-totals'
 
 export type DailyDiscountLine = {
   id: string
@@ -152,9 +160,48 @@ type DiscountRestaurantOrderRecord = Awaited<
   ReturnType<typeof db.restaurantOrder.findMany<{ include: typeof restaurantOrderInclude }>>
 >[number]
 
+function buildInHouseBookingDiscountLines(
+  bookings: InHouseBookingDiscountRecord[]
+): DailyDiscountLine[] {
+  const lines: DailyDiscountLine[] = []
+
+  for (const booking of bookings) {
+    const discountAmount = bookingDiscountAmount(booking)
+    if (discountAmount <= 0) continue
+
+    const totals = computeRoomBookingTotals(
+      booking.totalRoomCharge,
+      0,
+      bookingVatOptions(booking),
+      booking
+    )
+    const at = (booking.actualCheckIn ?? booking.createdAt).toISOString()
+    const regNo = resolveBookingRegistrationNumber(booking)
+
+    lines.push({
+      id: `booking-${booking.id}`,
+      source: 'hotel',
+      purpose: booking.status === 'CHECKED_IN' ? 'In-house booking' : 'Reservation',
+      reference: regNo || booking.id.slice(-8),
+      guestName: booking.customer.name,
+      roomNumber: booking.room.roomNumber,
+      detail: formatHotelDiscountDetail(booking, []),
+      company: resolveBookingCompany(booking),
+      discountAmount,
+      grossAmount: booking.totalRoomCharge,
+      netAmount: totals.totalWithVat,
+      at,
+      createdBy: null,
+    })
+  }
+
+  return lines
+}
+
 function buildDiscountLinesFromRecords(
   invoices: DiscountInvoiceRecord[],
-  restaurantOrders: DiscountRestaurantOrderRecord[]
+  restaurantOrders: DiscountRestaurantOrderRecord[],
+  inHouseBookings: InHouseBookingDiscountRecord[] = []
 ): DailyDiscountLine[] {
   const lines: DailyDiscountLine[] = []
 
@@ -196,15 +243,13 @@ function buildDiscountLinesFromRecords(
     })
   }
 
+  lines.push(...buildInHouseBookingDiscountLines(inHouseBookings))
+
   lines.sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime())
   return lines
 }
 
-function summarizeDiscountLines(
-  lines: DailyDiscountLine[],
-  hotelCount: number,
-  restaurantCount: number
-): DailyDiscountReport['summary'] {
+function summarizeDiscountLines(lines: DailyDiscountLine[]): DailyDiscountReport['summary'] {
   const hotelDiscountTotal = lines
     .filter((line) => line.source === 'hotel')
     .reduce((sum, line) => sum + line.discountAmount, 0)
@@ -216,8 +261,8 @@ function summarizeDiscountLines(
     hotelDiscountTotal,
     restaurantDiscountTotal,
     totalDiscount: hotelDiscountTotal + restaurantDiscountTotal,
-    hotelCount,
-    restaurantCount,
+    hotelCount: lines.filter((line) => line.source === 'hotel').length,
+    restaurantCount: lines.filter((line) => line.source === 'restaurant').length,
     lineCount: lines.length,
   }
 }
@@ -250,6 +295,7 @@ async function fetchDiscountRecordsForWindow(window: BusinessDayWindow) {
       include: restaurantOrderInclude,
       orderBy: { createdAt: 'asc' },
     }),
+    fetchInHouseBookingDiscountsForWindow(openedAt, closedAt),
   ])
 }
 
@@ -265,6 +311,7 @@ async function fetchAllDiscountRecords() {
       include: restaurantOrderInclude,
       orderBy: { createdAt: 'asc' },
     }),
+    fetchAllInHouseBookingDiscounts(),
   ])
 }
 
@@ -274,15 +321,13 @@ function buildDiscountReportPayload(input: {
   openedAt: string
   closedAt: string
   lines: DailyDiscountLine[]
-  hotelCount: number
-  restaurantCount: number
 }): DailyDiscountReport {
   return {
     reportType: 'hotel-daily-discounts',
     businessDate: input.businessDate,
     businessDateDisplay: input.businessDateDisplay,
     window: { openedAt: input.openedAt, closedAt: input.closedAt },
-    summary: summarizeDiscountLines(input.lines, input.hotelCount, input.restaurantCount),
+    summary: summarizeDiscountLines(input.lines),
     lines: input.lines,
   }
 }
@@ -291,8 +336,9 @@ export async function buildHotelDailyDiscountReport(
   window: BusinessDayWindow
 ): Promise<DailyDiscountReport> {
   const { businessDate, businessDateDisplay, openedAt, closedAt } = window
-  const [invoices, restaurantOrders] = await fetchDiscountRecordsForWindow(window)
-  const lines = buildDiscountLinesFromRecords(invoices, restaurantOrders)
+  const [invoices, restaurantOrders, inHouseBookings] =
+    await fetchDiscountRecordsForWindow(window)
+  const lines = buildDiscountLinesFromRecords(invoices, restaurantOrders, inHouseBookings)
 
   return buildDiscountReportPayload({
     businessDate,
@@ -300,8 +346,6 @@ export async function buildHotelDailyDiscountReport(
     openedAt: openedAt.toISOString(),
     closedAt: closedAt.toISOString(),
     lines,
-    hotelCount: invoices.length,
-    restaurantCount: restaurantOrders.length,
   })
 }
 
@@ -310,8 +354,8 @@ export async function buildHotelDiscountReportForDateRange(
   dateTo?: string
 ): Promise<DailyDiscountReport> {
   if (!dateFrom && !dateTo) {
-    const [invoices, restaurantOrders] = await fetchAllDiscountRecords()
-    const lines = buildDiscountLinesFromRecords(invoices, restaurantOrders)
+    const [invoices, restaurantOrders, inHouseBookings] = await fetchAllDiscountRecords()
+    const lines = buildDiscountLinesFromRecords(invoices, restaurantOrders, inHouseBookings)
     const now = new Date().toISOString()
     return buildDiscountReportPayload({
       businessDate: '',
@@ -319,8 +363,6 @@ export async function buildHotelDiscountReportForDateRange(
       openedAt: now,
       closedAt: now,
       lines,
-      hotelCount: invoices.length,
-      restaurantCount: restaurantOrders.length,
     })
   }
 
@@ -337,17 +379,14 @@ export async function buildHotelDiscountReportForDateRange(
 
   const seenIds = new Set<string>()
   const mergedLines: DailyDiscountLine[] = []
-  let hotelCount = 0
-  let restaurantCount = 0
   let openedAt = new Date().toISOString()
   let closedAt = new Date(0).toISOString()
 
   let day = from
   while (day <= to) {
     const window = await resolveBusinessDayReportWindow(day)
-    const [invoices, restaurantOrders] = await fetchDiscountRecordsForWindow(window)
-    hotelCount += invoices.length
-    restaurantCount += restaurantOrders.length
+    const [invoices, restaurantOrders, inHouseBookings] =
+      await fetchDiscountRecordsForWindow(window)
     openedAt =
       new Date(window.openedAt).getTime() < new Date(openedAt).getTime()
         ? window.openedAt.toISOString()
@@ -357,7 +396,11 @@ export async function buildHotelDiscountReportForDateRange(
         ? window.closedAt.toISOString()
         : closedAt
 
-    for (const line of buildDiscountLinesFromRecords(invoices, restaurantOrders)) {
+    for (const line of buildDiscountLinesFromRecords(
+      invoices,
+      restaurantOrders,
+      inHouseBookings
+    )) {
       if (seenIds.has(line.id)) continue
       seenIds.add(line.id)
       mergedLines.push(line)
@@ -375,7 +418,5 @@ export async function buildHotelDiscountReportForDateRange(
     openedAt,
     closedAt,
     lines: mergedLines,
-    hotelCount,
-    restaurantCount,
   })
 }

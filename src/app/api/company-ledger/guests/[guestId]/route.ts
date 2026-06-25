@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { requireRole } from '@/lib/auth';
 import { successResponse, errorResponse, notFoundResponse, logActivity } from '@/lib/api-utils';
 import { resolveBookingRegistrationNumber } from '@/lib/booking-registration';
+import { bookingVatOptions, computeRoomBookingTotals, sumBookingNetPaid } from '@/lib/booking-totals';
 import { RoleType } from '@prisma/client';
 
 export async function GET(

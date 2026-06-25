@@ -26,6 +26,8 @@ import {
 import { Switch } from '@/components/ui/switch'
 import { useHotelTimes } from '@/hooks/use-hotel-times'
 import type { BookingDiscountType } from '@/lib/booking-discount'
+import { CompanyLedgerSearchField } from './CompanyLedgerSearchField'
+import { DEFAULT_GUEST_COMPANY } from '@/lib/reservation-terms'
 
 export interface CheckoutPreview {
   bookingId: string
@@ -123,6 +125,8 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
   const [debouncedDiscountValue, setDebouncedDiscountValue] = useState(0)
   const [roomCreditTransferEnabled, setRoomCreditTransferEnabled] = useState(false)
   const [billTransferTargetId, setBillTransferTargetId] = useState<string | null>(null)
+  const [checkoutCompanyLedgerId, setCheckoutCompanyLedgerId] = useState('')
+  const [checkoutCompanyLedgerLabel, setCheckoutCompanyLedgerLabel] = useState(DEFAULT_GUEST_COMPANY)
 
   const parsedDamageAmount = Math.max(0, parseFloat(damageChargeAmount) || 0)
   const parsedDiscountValue = Math.max(0, parseFloat(discountValue) || 0)
@@ -189,6 +193,7 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
         roomCreditTransferEnabled,
         billTransferTargetId,
         debouncedRoomCharge,
+        checkoutCompanyLedgerId,
       ],
       queryFn: () => {
         const params = new URLSearchParams()
@@ -212,6 +217,7 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
         if (debouncedRoomCharge != null) {
           params.set('roomCharge', String(debouncedRoomCharge))
         }
+        params.set('companyLedgerId', checkoutCompanyLedgerId)
         const qs = params.toString()
         return api.get<{ success: boolean; data: CheckoutPreview; error?: string }>(
           `/bookings/check-out/${bookingId}${qs ? `?${qs}` : ''}`
@@ -229,7 +235,7 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
   const reservationDiscountLocked = checkoutPreview?.reservationDiscountLocked === true
   const previewApiError =
     previewRes?.success === false ? previewRes.error || previewRes.message : undefined
-  const isCompanyLedgerCheckout = checkoutPreview?.billToCompanyLedger === true
+  const isCompanyLedgerCheckout = !!checkoutCompanyLedgerId
 
   useEffect(() => {
     if (!checkoutPreview?.roomCharges || roomChargeTouched) return
@@ -322,6 +328,7 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
         creditTransferBookingIds:
           roomCreditTransferEnabled && billTransferTargetId ? [billTransferTargetId] : [],
         roomCharge: debouncedRoomCharge ?? undefined,
+        companyLedgerId: checkoutCompanyLedgerId || null,
       }),
     onSuccess: (res: {
       success?: boolean
@@ -647,11 +654,37 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
         </CardContent>
       </Card>
 
-      {isCompanyLedgerCheckout && checkoutPreview?.companyLedgerName && (
-        <div className="rounded-lg border border-indigo-200 bg-indigo-50/60 px-4 py-3 text-sm text-indigo-950">
-          <strong>Company ledger checkout</strong> — unpaid balance will be billed to{' '}
-          <strong>{checkoutPreview.companyLedgerName}</strong>. Payment now is optional.
-        </div>
+      {!isBillTransferOut && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Company billing</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            <Label>Company</Label>
+            <CompanyLedgerSearchField
+              selectedLedgerId={checkoutCompanyLedgerId}
+              selectedLabel={checkoutCompanyLedgerLabel}
+              onSelect={(company) => {
+                setCheckoutCompanyLedgerId(company.id)
+                setCheckoutCompanyLedgerLabel(company.name)
+              }}
+              onClear={() => {
+                setCheckoutCompanyLedgerId('')
+                setCheckoutCompanyLedgerLabel(DEFAULT_GUEST_COMPANY)
+              }}
+            />
+            {checkoutCompanyLedgerId ? (
+              <p className="text-xs text-muted-foreground">
+                Unpaid balance will be billed to <strong>{checkoutCompanyLedgerLabel}</strong>.
+                Payment now is optional.
+              </p>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                Type to search and select a company ledger, or leave as walk-in guest.
+              </p>
+            )}
+          </CardContent>
+        </Card>
       )}
 
       <Card>

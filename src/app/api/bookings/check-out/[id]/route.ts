@@ -24,7 +24,8 @@ import {
   parseCreditTransferBookingIds,
   prepareCreditTransfers,
 } from '@/lib/room-credit-transfer';
-import { postCompanyLedgerBill } from '@/lib/company-ledger-billing';
+import { postCompanyLedgerBill, ensureCompanyLedgerGuestFromCustomer, resolveCompanyLedgerBooking } from '@/lib/company-ledger-billing';
+import { DEFAULT_GUEST_COMPANY } from '@/lib/reservation-terms';
 import { processAllOverdueStayExtensions, extendOverdueCheckedInBooking } from '@/lib/auto-stay-extension';
 import { resolveCheckoutDiscount } from '@/lib/checkout-discount';
 
@@ -50,6 +51,88 @@ function companyLedgerCheckoutFields(booking: {
     companyLedgerName: booking.companyLedger?.name ?? null,
     billToCompanyLedger,
   };
+}
+
+async function resolveCheckoutCompanyLedgerFields(
+  booking: {
+    companyLedgerId?: string | null;
+    companyLedger?: { id: string; name: string } | null;
+  },
+  companyLedgerIdOverride: string | null | undefined
+) {
+  if (companyLedgerIdOverride === undefined) {
+    return companyLedgerCheckoutFields(booking);
+  }
+  if (!companyLedgerIdOverride) {
+    return {
+      companyLedgerId: null,
+      companyLedgerName: null,
+      billToCompanyLedger: false,
+    };
+  }
+  if (companyLedgerIdOverride === booking.companyLedgerId) {
+    return companyLedgerCheckoutFields(booking);
+  }
+  const ledger = await db.companyLedger.findFirst({
+    where: { id: companyLedgerIdOverride, active: true },
+    select: { id: true, name: true },
+  });
+  if (!ledger) {
+    return {
+      companyLedgerId: null,
+      companyLedgerName: null,
+      billToCompanyLedger: false,
+    };
+  }
+  return {
+    companyLedgerId: ledger.id,
+    companyLedgerName: ledger.name,
+    billToCompanyLedger: true,
+  };
+}
+
+async function applyCheckoutCompanyLedgerChoice(
+  bookingId: string,
+  booking: NonNullable<Awaited<ReturnType<typeof loadCheckoutBooking>>>,
+  companyLedgerId: string | null
+) {
+  if (companyLedgerId) {
+    const ledgerResult = await resolveCompanyLedgerBooking(db, companyLedgerId, null);
+    if ('error' in ledgerResult) {
+      return { error: ledgerResult.error };
+    }
+    const companyLedgerGuestId = await ensureCompanyLedgerGuestFromCustomer(
+      db,
+      ledgerResult.companyLedgerId,
+      {
+        name: booking.customer.name,
+        phone: booking.customer.phone,
+        email: booking.customer.email,
+        nationality: booking.customer.nationality,
+        idNumber: booking.customer.idNumber,
+        idType: booking.customer.idType,
+      }
+    );
+    await db.booking.update({
+      where: { id: bookingId },
+      data: {
+        companyLedgerId: ledgerResult.companyLedgerId,
+        companyLedgerGuestId,
+        company: ledgerResult.companyName,
+      },
+    });
+    return { ok: true as const };
+  }
+
+  await db.booking.update({
+    where: { id: bookingId },
+    data: {
+      companyLedgerId: null,
+      companyLedgerGuestId: null,
+      company: DEFAULT_GUEST_COMPANY,
+    },
+  });
+  return { ok: true as const };
 }
 
 export async function GET(
@@ -89,6 +172,9 @@ export async function GET(
       roomChargeParam != null && roomChargeParam !== ''
         ? Math.max(0, Number(roomChargeParam))
         : null;
+    const companyLedgerIdParam = searchParams.has('companyLedgerId')
+      ? searchParams.get('companyLedgerId')?.trim() || null
+      : undefined;
 
     let booking = await loadCheckoutBooking(id);
     if (!booking) return notFoundResponse('Booking');
@@ -146,6 +232,10 @@ export async function GET(
       );
       if (error) return errorResponse(error);
       const target = targets[0];
+      const ledgerFields = await resolveCheckoutCompanyLedgerFields(
+        booking,
+        companyLedgerIdParam
+      );
       return successResponse({
         bookingId: id,
         customerName: booking.customer.name,
@@ -166,6 +256,7 @@ export async function GET(
         transferAmount: primarySettlement.dueBeforeSettlement,
         dueBeforeSettlement: 0,
         creditAmount: 0,
+        ...ledgerFields,
       });
     }
 
@@ -183,6 +274,11 @@ export async function GET(
         })
       : primarySettlement;
 
+    const ledgerFields = await resolveCheckoutCompanyLedgerFields(
+      booking,
+      companyLedgerIdParam
+    );
+
     return successResponse({
       bookingId: id,
       customerName: booking.customer.name,
@@ -194,7 +290,7 @@ export async function GET(
       checkoutAt: now,
       reservationDiscountLocked: checkoutDiscount.reservationDiscountLocked,
       ...settlement,
-      ...companyLedgerCheckoutFields(booking),
+      ...ledgerFields,
     });
   } catch (error) {
     console.error('Check-out preview error:', error);
@@ -294,6 +390,21 @@ export async function POST(
         discountType: checkoutDiscount.discountEnabled ? checkoutDiscount.discountType : null,
         discountValue: checkoutDiscount.discountEnabled ? checkoutDiscount.discountValue : 0,
       };
+    }
+
+    if (Object.prototype.hasOwnProperty.call(body ?? {}, 'companyLedgerId')) {
+      const rawLedgerId =
+        typeof body.companyLedgerId === 'string' ? body.companyLedgerId.trim() : '';
+      const applyResult = await applyCheckoutCompanyLedgerChoice(
+        id,
+        booking,
+        rawLedgerId || null
+      );
+      if ('error' in applyResult) {
+        return errorResponse(applyResult.error);
+      }
+      booking = await loadCheckoutBooking(id);
+      if (!booking) return notFoundResponse('Booking');
     }
 
     const now = new Date();

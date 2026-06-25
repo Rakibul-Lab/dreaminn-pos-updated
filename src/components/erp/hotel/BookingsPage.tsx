@@ -1088,7 +1088,7 @@ export function BookingsPage() {
                             title={
                               (booking.idDocumentCount ?? 0) > 0
                                 ? 'ID documents uploaded — update'
-                                : 'Upload ID documents (required before checkout)'
+                                : 'Upload ID documents (optional)'
                             }
                             onClick={() => {
                               setIdUploadBookingId(booking.id);
@@ -1124,29 +1124,15 @@ export function BookingsPage() {
                           >
                             <CreditCard className="w-3 h-3" />
                           </Button>
-                          <span
-                            className="inline-flex"
-                            title={
-                              !booking.isCorporateGuest &&
-                              (booking.idDocumentCount ?? 0) === 0
-                                ? 'Upload ID documents before checkout'
-                                : 'Check-out'
-                            }
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            className="h-7 w-7 shrink-0"
+                            title="Check-out"
+                            onClick={() => openCheckoutTab(booking.id)}
                           >
-                            <Button
-                              variant="outline"
-                              size="icon"
-                              className="h-7 w-7 shrink-0"
-                              title="Check-out"
-                              onClick={() => openCheckoutTab(booking.id)}
-                              disabled={
-                                !booking.isCorporateGuest &&
-                                (booking.idDocumentCount ?? 0) === 0
-                              }
-                            >
-                              <LogOut className="w-3 h-3" />
-                            </Button>
-                          </span>
+                            <LogOut className="w-3 h-3" />
+                          </Button>
                         </>
                       )}
                       {booking.status === 'RESERVED' && (

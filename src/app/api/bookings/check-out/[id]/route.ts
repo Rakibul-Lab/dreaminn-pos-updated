@@ -261,11 +261,6 @@ export async function POST(
     booking = await loadCheckoutBooking(id);
     if (!booking) return notFoundResponse('Booking');
 
-    const idDocCount = await db.bookingIdDocument.count({ where: { bookingId: id } });
-    if (!booking.isCorporateGuest && idDocCount === 0) {
-      return errorResponse('Upload ID documents before checkout');
-    }
-
     if (
       roomChargeOverride != null &&
       !Number.isNaN(roomChargeOverride) &&

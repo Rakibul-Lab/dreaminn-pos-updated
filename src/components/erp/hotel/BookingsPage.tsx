@@ -1009,12 +1009,12 @@ export function BookingsPage() {
                   </td>
                   <td className="col-actions">
                     <div className="bl-actions">
-                      {booking.status === 'RESERVED' && booking.isInitialReservation && (
+                      {(booking.status === 'RESERVED' || booking.status === 'CHECKED_IN') && (
                         <Button
                           variant="outline"
                           size="icon"
                           className="h-7 w-7 shrink-0 border-amber-500 text-amber-800 hover:bg-amber-50"
-                          title="Edit initial reservation"
+                          title="Edit booking"
                           onClick={() =>
                             window.open(
                               `/reservations/${booking.id}/edit`,

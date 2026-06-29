@@ -31,10 +31,10 @@ export default function EditReservationPage({
             <div className="min-w-0">
               <h1 className="text-lg font-bold text-foreground truncate flex items-center gap-2">
                 <FilePenLine className="h-5 w-5 text-amber-600 shrink-0" />
-                Edit Initial Reservation
+                Edit Booking
               </h1>
               <p className="text-xs text-muted-foreground truncate">
-                Complete guest ID details before check-in
+                Update guest, stay, and billing details until checkout
               </p>
             </div>
           </div>

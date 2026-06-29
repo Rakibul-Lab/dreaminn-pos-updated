@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { requireHotelAccess, requireRole } from '@/lib/auth';
 import { successResponse, errorResponse, notFoundResponse, logActivity } from '@/lib/api-utils';
 import { ensureConfirmationNumber } from '@/lib/confirmation-number.server';
-import { computeBookingRoomDue, resolveBookingDisplayDue, sumBookingNetPaid } from '@/lib/booking-totals';
+import { computeBookingRoomDue, resolveBookingDisplayDue } from '@/lib/booking-totals';
 import { formatFormOfPayment, getAdvancePaymentMethod } from '@/lib/payment-method';
 import { RoleType } from '@prisma/client';
 import { resolveBookingCheckInOut } from '@/lib/app-settings';
@@ -22,6 +22,8 @@ import { ensureCustomerRegistrationNumber } from '@/lib/guest-registration-numbe
 import { getRoomNightlyTotal } from '@/lib/room-pricing';
 import { getEmailValidationError } from '@/lib/email-validation';
 import { assertRoomAvailableForBooking } from '@/lib/reservation-entry';
+import { readCurrentBusinessDateString } from '@/lib/business-date';
+import { isArrivalOnOrBeforeBusinessDate } from '@/lib/room-effective-status';
 
 export async function GET(
   request: NextRequest,
@@ -144,12 +146,8 @@ export async function PUT(
       return successResponse(booking, 'ID documents updated');
     }
 
-    if (existing.status !== 'RESERVED') {
-      return errorResponse('Only reserved bookings can be edited');
-    }
-
-    if (!existing.isInitialReservation) {
-      return errorResponse('Only initial reservations can be edited. Create a new reservation to change a confirmed booking.');
+    if (existing.status !== 'RESERVED' && existing.status !== 'CHECKED_IN') {
+      return errorResponse('Only active bookings (reserved or checked-in) can be edited');
     }
 
     const updateData: Record<string, unknown> = {};
@@ -189,7 +187,13 @@ export async function PUT(
       if (!room) {
         return errorResponse('Room not found');
       }
-      if (['MAINTENANCE', 'CLEANING', 'OCCUPIED'].includes(room.status)) {
+      if (existing.status === 'CHECKED_IN') {
+        if (!['AVAILABLE', 'CLEANING'].includes(room.status)) {
+          return errorResponse(
+            `Room is not available for transfer (current status: ${room.status.toLowerCase().replace('_', ' ')})`
+          );
+        }
+      } else if (['MAINTENANCE', 'OCCUPIED'].includes(room.status)) {
         return errorResponse(
           `Room is not available for booking (current status: ${room.status.toLowerCase().replace('_', ' ')})`
         );
@@ -215,7 +219,17 @@ export async function PUT(
     const newCheckIn = (updateData.checkIn as Date) ?? existing.checkIn;
     const newCheckOut = (updateData.checkOut as Date) ?? existing.checkOut;
 
-    if (body.checkIn || body.checkOut || body.roomId) {
+    const chargeFieldsChanged =
+      body.checkIn !== undefined ||
+      body.checkOut !== undefined ||
+      body.roomId !== undefined ||
+      body.discountEnabled !== undefined ||
+      body.discountType !== undefined ||
+      body.discountValue !== undefined ||
+      body.vatPercent !== undefined ||
+      body.vatApplied !== undefined;
+
+    if (chargeFieldsChanged) {
       const overlappingBooking = await db.booking.findFirst({
         where: {
           id: { not: id },
@@ -229,21 +243,23 @@ export async function PUT(
         return errorResponse('Room already has an active booking in this date range');
       }
 
-      const roomForEntryCheck = await db.room.findUnique({
-        where: { id: roomId },
-        select: { id: true, typeId: true },
-      });
-      if (roomForEntryCheck) {
-        const entryBlockError = await assertRoomAvailableForBooking(
-          roomForEntryCheck.id,
-          roomForEntryCheck.typeId,
-          newCheckIn,
-          newCheckOut,
-          undefined,
-          id
-        );
-        if (entryBlockError) {
-          return errorResponse(entryBlockError);
+      if (body.checkIn || body.checkOut || body.roomId) {
+        const roomForEntryCheck = await db.room.findUnique({
+          where: { id: roomId },
+          select: { id: true, typeId: true },
+        });
+        if (roomForEntryCheck) {
+          const entryBlockError = await assertRoomAvailableForBooking(
+            roomForEntryCheck.id,
+            roomForEntryCheck.typeId,
+            newCheckIn,
+            newCheckOut,
+            undefined,
+            id
+          );
+          if (entryBlockError) {
+            return errorResponse(entryBlockError);
+          }
         }
       }
 
@@ -260,18 +276,30 @@ export async function PUT(
             where: { bookingId: id },
             select: { amount: true, paymentType: true },
           });
-          const totalPaid = sumBookingNetPaid(paymentRows);
-          const { dueAmount } = computeBookingRoomDue(
-            {
-              ...existing,
-              totalRoomCharge,
-              vatPercent:
-                (updateData.vatPercent as number | undefined) ?? existing.vatPercent,
-            },
-            paymentRows
-          );
+          const mergedBooking = {
+            ...existing,
+            ...updateData,
+            totalRoomCharge,
+            vatPercent:
+              (updateData.vatPercent as number | undefined) ?? existing.vatPercent,
+            vatApplied:
+              (updateData.vatApplied as boolean | undefined) ?? existing.vatApplied,
+            discountEnabled:
+              (updateData.discountEnabled as boolean | undefined) ?? existing.discountEnabled,
+            discountType:
+              (updateData.discountType as string | undefined) ?? existing.discountType,
+            discountValue:
+              (updateData.discountValue as number | undefined) ?? existing.discountValue,
+          };
+          const oldRoomDue = computeBookingRoomDue(existing, paymentRows).dueAmount;
+          const newRoomDue = computeBookingRoomDue(mergedBooking, paymentRows).dueAmount;
           updateData.totalRoomCharge = totalRoomCharge;
-          updateData.dueAmount = dueAmount;
+          if (existing.status === 'CHECKED_IN') {
+            const roomDueDelta = newRoomDue - oldRoomDue;
+            updateData.dueAmount = Math.max(0, (existing.dueAmount ?? 0) + roomDueDelta);
+          } else {
+            updateData.dueAmount = newRoomDue;
+          }
         }
       }
     }
@@ -476,6 +504,9 @@ export async function PUT(
       }
     }
 
+    const oldRoomId = existing.roomId;
+    const newRoomId = (updateData.roomId as string) || existing.roomId;
+
     const booking = await db.booking.update({
       where: { id },
       data: updateData,
@@ -486,6 +517,20 @@ export async function PUT(
         companions: { orderBy: { sortOrder: 'asc' } },
       },
     });
+
+    if (newRoomId !== oldRoomId) {
+      if (existing.status === 'CHECKED_IN') {
+        await db.room.update({ where: { id: oldRoomId }, data: { status: 'CLEANING' } });
+        await db.room.update({ where: { id: newRoomId }, data: { status: 'OCCUPIED' } });
+      } else {
+        await db.room.update({ where: { id: oldRoomId }, data: { status: 'AVAILABLE' } });
+        const businessDate = await readCurrentBusinessDateString();
+        const checkInForRoom = (updateData.checkIn as Date) ?? existing.checkIn;
+        if (isArrivalOnOrBeforeBusinessDate(checkInForRoom, businessDate)) {
+          await db.room.update({ where: { id: newRoomId }, data: { status: 'RESERVED' } });
+        }
+      }
+    }
 
     if (body.companions !== undefined) {
       await replaceBookingCompanions(

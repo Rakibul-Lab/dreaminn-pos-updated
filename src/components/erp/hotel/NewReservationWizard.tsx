@@ -38,7 +38,7 @@ import {
   computeRoomBookingTotals,
   DEFAULT_VAT_PERCENT,
 } from '@/lib/booking-totals'
-import { formatPaymentMethod, PAYMENT_METHOD_OPTIONS } from '@/lib/payment-method'
+import { formatPaymentMethod, parsePaymentMethod, PAYMENT_METHOD_OPTIONS } from '@/lib/payment-method'
 import {
   DEFAULT_GUEST_COMPANY,
   formatGuestCompany,
@@ -275,6 +275,7 @@ export function NewReservationWizard({
   const [flowMode, setFlowMode] = useState<'standard' | 'reservation_entry'>('standard')
   const [editDraftLoaded, setEditDraftLoaded] = useState(false)
   const [editFromReservationEntry, setEditFromReservationEntry] = useState(false)
+  const [editBookingStatus, setEditBookingStatus] = useState<'RESERVED' | 'CHECKED_IN' | ''>('')
   const [idEntryStarted, setIdEntryStarted] = useState(isEditMode)
   const [defaultVatPercent, setDefaultVatPercent] = useState(DEFAULT_VAT_PERCENT)
   const [defaultServicePercent, setDefaultServicePercent] = useState(INVOICE_SERVICE_CHARGE_PERCENT)
@@ -647,15 +648,29 @@ export function NewReservationWizard({
         },
       },
     })
-    const advancePaid = Number(booking.advancePayment) || 0
-    setPaymentLines(
-      advancePaid > 0
-        ? [{ id: 'edit-advance', amount: advancePaid, method: 'CASH' }]
-        : []
-    )
     const fromReservationEntry = Boolean(booking.sourceReservationEntryId)
+    const status = String(booking.status ?? '')
+    setEditBookingStatus(status === 'CHECKED_IN' ? 'CHECKED_IN' : status === 'RESERVED' ? 'RESERVED' : '')
     setEditFromReservationEntry(fromReservationEntry)
-    setIsInitialFlow(fromReservationEntry ? booking.nidPhysicallyReceived !== true : true)
+    setIsInitialFlow(status === 'RESERVED' && booking.isInitialReservation === true)
+    const paymentRows =
+      (booking.payments as Array<{ amount: number; method: string }> | undefined) ?? []
+    if (paymentRows.length > 0) {
+      setPaymentLines(
+        paymentRows.map((payment, index) => ({
+          id: `edit-payment-${index}`,
+          amount: Number(payment.amount) || 0,
+          method: parsePaymentMethod(payment.method),
+        }))
+      )
+    } else {
+      const advancePaid = Number(booking.advancePayment) || 0
+      setPaymentLines(
+        advancePaid > 0
+          ? [{ id: 'edit-advance', amount: advancePaid, method: 'CASH' }]
+          : []
+      )
+    }
     setGuestMode('existing')
     setIdEntryStarted(true)
     setEditDraftLoaded(true)
@@ -1158,7 +1173,7 @@ export function NewReservationWizard({
         idDocuments.length > 0 ? idDocuments.map((d) => d.path) : undefined
 
       if (isEditMode && editBookingId) {
-        const res = (await api.put(`/bookings/${editBookingId}`, {
+        const editPayload: Record<string, unknown> = {
           company: resolvedBookingCompany(),
           roomId: selectedRoomId,
           checkIn: checkInDate,
@@ -1174,7 +1189,6 @@ export function NewReservationWizard({
           discountEnabled,
           discountType,
           discountValue: discountEnabled ? parsedDiscountValue() : 0,
-          isInitialReservation: completeInitial ? false : true,
           isCorporateGuest,
           nidPhysicallyReceived: isCorporateGuest ? false : nidPhysicallyReceived,
           companions: companionsPayload,
@@ -1197,7 +1211,20 @@ export function NewReservationWizard({
                 visaExpiryDate: null,
                 idDocPath: idDocuments[0]?.path || null,
               },
-        })) as { success?: boolean; data?: { id: string }; error?: string; message?: string }
+        }
+
+        if (editBookingStatus === 'RESERVED' && isInitialFlow) {
+          editPayload.isInitialReservation = completeInitial ? false : true
+        } else if (completeInitial) {
+          editPayload.isInitialReservation = false
+        }
+
+        const res = (await api.put(`/bookings/${editBookingId}`, editPayload)) as {
+          success?: boolean
+          data?: { id: string }
+          error?: string
+          message?: string
+        }
 
         if (!res?.success) {
           toast.error(res?.error || res?.message || 'Failed to update reservation')
@@ -2584,11 +2611,22 @@ export function NewReservationWizard({
                       and complete guest details from bookings before check-in.
                     </>
                   ) : isEditMode ? (
-                    <>
-                      Use <strong>Save changes</strong> to keep as initial, or{' '}
-                      <strong>Complete reservation</strong> when all fields marked * are filled,
-                      including ID images.
-                    </>
+                    editBookingStatus === 'CHECKED_IN' ? (
+                      <>
+                        Use <strong>Save changes</strong> to update guest, stay, and billing for this
+                        in-house booking.
+                      </>
+                    ) : isInitialFlow ? (
+                      <>
+                        Use <strong>Save changes</strong> to keep as initial, or{' '}
+                        <strong>Complete reservation</strong> when all fields marked * are filled,
+                        including ID images.
+                      </>
+                    ) : (
+                      <>
+                        Use <strong>Save changes</strong> to update this reservation.
+                      </>
+                    )
                   ) : (
                     <>
                       Use <strong>Confirm reservation</strong> to save as reserved only, or{' '}
@@ -2628,13 +2666,15 @@ export function NewReservationWizard({
                     >
                       {isSubmitting ? 'Please wait...' : 'Save changes'}
                     </Button>
-                    <Button
-                      className="bg-amber-600 hover:bg-amber-700 text-white"
-                      disabled={isSubmitting}
-                      onClick={handleCompleteInitial}
-                    >
-                      {isSubmitting ? 'Please wait...' : 'Complete reservation'}
-                    </Button>
+                    {editBookingStatus !== 'CHECKED_IN' && isInitialFlow && (
+                      <Button
+                        className="bg-amber-600 hover:bg-amber-700 text-white"
+                        disabled={isSubmitting}
+                        onClick={handleCompleteInitial}
+                      >
+                        {isSubmitting ? 'Please wait...' : 'Complete reservation'}
+                      </Button>
+                    )}
                   </>
                 ) : isInitialFlow && !hasRequiredIdDocs ? (
                   <Button

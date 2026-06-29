@@ -17,7 +17,7 @@ import {
 import { StatusBadge } from '../shared/StatusBadge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from 'sonner';
-import { FileDown, Grid3X3, List, Loader2, LogIn, LogOut, Plus, Search, SprayCan, CalendarPlus, CreditCard, CheckCircle2, Play, Users, UtensilsCrossed, CalendarRange, Wrench } from 'lucide-react';
+import { FileDown, Grid3X3, List, Loader2, LogIn, LogOut, Plus, Search, SprayCan, CalendarPlus, CreditCard, CheckCircle2, Play, Users, UtensilsCrossed, CalendarRange, Wrench, FilePenLine } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuthStore, canManageRoomInventory, isHotelFrontDesk, isRoomsViewOnly, canPerformRoomCleaning, isHousekeeper } from '@/lib/auth-store';
 import { downloadRoomsPdf, type RoomExportRecord } from '@/lib/rooms-export';
@@ -1407,7 +1407,24 @@ export function RoomsPage() {
               <TabsContent value="room" className="mt-4 space-y-4">
                 {renderRoomFormFields()}
               </TabsContent>
-              <TabsContent value="guest" className="mt-4">
+              <TabsContent value="guest" className="mt-4 space-y-4">
+                <div className="flex justify-end">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="border-amber-500 text-amber-800 hover:bg-amber-50"
+                    onClick={() =>
+                      window.open(
+                        `/reservations/${editBookingId}/edit`,
+                        '_blank',
+                        'noopener,noreferrer'
+                      )
+                    }
+                  >
+                    <FilePenLine className="h-4 w-4 mr-2" />
+                    Edit booking
+                  </Button>
+                </div>
                 <RoomBookingGuestPanel bookingId={editBookingId} />
               </TabsContent>
             </Tabs>

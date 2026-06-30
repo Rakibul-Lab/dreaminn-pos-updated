@@ -27,7 +27,7 @@ import {
 import { postCompanyLedgerBill, ensureCompanyLedgerGuestFromCustomer, resolveCompanyLedgerBooking } from '@/lib/company-ledger-billing';
 import { DEFAULT_GUEST_COMPANY } from '@/lib/reservation-terms';
 import { processAllOverdueStayExtensions, extendOverdueCheckedInBooking } from '@/lib/auto-stay-extension';
-import { resolveCheckoutDiscount } from '@/lib/checkout-discount';
+import { bookingDiscountPrefill, resolveCheckoutDiscount } from '@/lib/checkout-discount';
 
 async function loadCheckoutBooking(id: string) {
   return db.booking.findUnique({
@@ -288,7 +288,7 @@ export async function GET(
       checkOut: booking.checkOut,
       actualCheckIn: booking.actualCheckIn,
       checkoutAt: now,
-      reservationDiscountLocked: checkoutDiscount.reservationDiscountLocked,
+      bookingDiscount: bookingDiscountPrefill(booking),
       ...settlement,
       ...ledgerFields,
     });
@@ -375,22 +375,20 @@ export async function POST(
       value: discountValue,
     });
 
-    if (!checkoutDiscount.reservationDiscountLocked) {
-      await db.booking.update({
-        where: { id },
-        data: {
-          discountEnabled: checkoutDiscount.discountEnabled,
-          discountType: checkoutDiscount.discountEnabled ? checkoutDiscount.discountType : null,
-          discountValue: checkoutDiscount.discountEnabled ? checkoutDiscount.discountValue : 0,
-        },
-      });
-      booking = {
-        ...booking,
+    await db.booking.update({
+      where: { id },
+      data: {
         discountEnabled: checkoutDiscount.discountEnabled,
         discountType: checkoutDiscount.discountEnabled ? checkoutDiscount.discountType : null,
         discountValue: checkoutDiscount.discountEnabled ? checkoutDiscount.discountValue : 0,
-      };
-    }
+      },
+    });
+    booking = {
+      ...booking,
+      discountEnabled: checkoutDiscount.discountEnabled,
+      discountType: checkoutDiscount.discountEnabled ? checkoutDiscount.discountType : null,
+      discountValue: checkoutDiscount.discountEnabled ? checkoutDiscount.discountValue : 0,
+    };
 
     if (Object.prototype.hasOwnProperty.call(body ?? {}, 'companyLedgerId')) {
       const rawLedgerId =

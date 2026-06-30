@@ -37,6 +37,8 @@ import {
   downloadBusinessDayCollectionsPdf,
   downloadBusinessDayDiscountsExcel,
   downloadBusinessDayDiscountsPdf,
+  downloadBusinessDayPoliceExcel,
+  downloadBusinessDayPolicePdf,
   downloadBusinessDaySalesExcel,
   downloadBusinessDaySalesPdf,
   downloadBusinessDaySummaryExcel,
@@ -46,16 +48,33 @@ import {
   type CheckInOutReportData,
   type CollectionsReportData,
   type DiscountReportData,
+  type PoliceReportData,
   type SalesReportData,
 } from '@/lib/business-day-reports-export'
 import { DailySalesPaperView } from '@/components/erp/admin/DailySalesPaperView'
 import type { PaperSalesInput } from '@/lib/daily-sales-paper-format'
 import { BusinessDaySummarySection } from '@/components/erp/admin/BusinessDaySummarySection'
 import {
+  ClosedBusinessDaySearchField,
+  type ClosedBusinessDayOption,
+} from '@/components/erp/admin/ClosedBusinessDaySearchField'
+import {
   BOOKING_DATE_PRESET_OPTIONS,
   resolveBookingDateRangeWithBusinessDate,
   type BookingDatePreset,
 } from '@/lib/booking-date-filter'
+import { formatBusinessDateDisplay } from '@/lib/business-date-format'
+
+function policeGuestRoleLabel(guest: {
+  guestRole?: string
+  isCompanion?: boolean
+}): string | null {
+  if (guest.guestRole === 'companion') return 'companion'
+  if (guest.guestRole === 'child') return 'child'
+  if (guest.guestRole === 'unregistered') return 'details pending'
+  if (guest.isCompanion) return 'companion'
+  return null
+}
 import { toast } from 'sonner'
 
 type DayCloseHistoryItem = {
@@ -106,6 +125,23 @@ function buildDiscountReportUrl(range: { dateFrom?: string; dateTo?: string }): 
   return `/reports?${params.toString()}`
 }
 
+async function fetchAllClosedBusinessDays(): Promise<ClosedBusinessDayOption[]> {
+  const rows: ClosedBusinessDayOption[] = []
+  let page = 1
+  let totalPages = 1
+  const limit = 50
+
+  while (page <= totalPages) {
+    const res = await api.get<DayCloseListResponse>(`/day-close?page=${page}&limit=${limit}`)
+    const batch = res.data?.history ?? []
+    rows.push(...batch)
+    totalPages = res.data?.meta?.totalPages ?? 1
+    page += 1
+  }
+
+  return rows
+}
+
 export default function BusinessDayReportsPage() {
   const { user } = useAuthStore()
   const { data: businessDateRes } = useBusinessDate()
@@ -132,12 +168,19 @@ export default function BusinessDayReportsPage() {
     return () => window.clearTimeout(timer)
   }, [discountSearchInput])
 
-  const { data: closedDaysRes, isLoading: loadingClosedDays } = useQuery({
-    queryKey: ['day-close-history-options'],
-    queryFn: () => api.get<DayCloseListResponse>('/day-close?page=1&limit=60'),
+  const { data: closedDays = [], isLoading: loadingClosedDays } = useQuery({
+    queryKey: ['day-close-history-options', 'all'],
+    queryFn: fetchAllClosedBusinessDays,
+    enabled: datePreset === 'closed',
+    staleTime: 60_000,
   })
 
-  const closedDays = closedDaysRes?.data?.history ?? []
+  useEffect(() => {
+    if (datePreset !== 'closed' || closedDays.length === 0) return
+    if (!closedDate || !closedDays.some((row) => row.businessDate === closedDate)) {
+      setClosedDate(closedDays[0].businessDate)
+    }
+  }, [datePreset, closedDays, closedDate])
 
   const selectedBusinessDate = useMemo(() => {
     if (!currentBusinessDate) return undefined
@@ -223,6 +266,17 @@ export default function BusinessDayReportsPage() {
     enabled: dateMode === 'single' && reportEnabled,
   })
 
+  const { data: policeRes, isLoading: loadingPolice, refetch: refetchPolice, isFetching: fetchingPolice } = useQuery({
+    queryKey: ['business-day-police', dateMode, selectedBusinessDate, rangeDateFrom, rangeDateTo],
+    queryFn: () =>
+      api.get<ReportResponse>(
+        dateMode === 'range'
+          ? buildReportRangeUrl('hotel-police-report', { dateFrom: rangeDateFrom, dateTo: rangeDateTo })
+          : buildReportUrl('hotel-police-report', selectedBusinessDate!)
+      ),
+    enabled: reportEnabled,
+  })
+
   const { data: discountsRes, isLoading: loadingDiscounts, refetch: refetchDiscounts, isFetching: fetchingDiscounts } = useQuery({
     queryKey: [
       'business-day-discounts',
@@ -242,6 +296,8 @@ export default function BusinessDayReportsPage() {
   const discountsData = discountsRes?.data as DiscountReportData | undefined
   const arrivalsData = arrivalsRes?.data
   const departuresData = departuresRes?.data
+  const policeData = policeRes?.data as PoliceReportData | undefined
+  const policeGuests = policeData?.guests ?? []
 
   const dailySalesHotel = salesData?.hotel
   const dailySalesRestaurant = salesData?.restaurant
@@ -287,22 +343,52 @@ export default function BusinessDayReportsPage() {
     (discountDatePreset === 'custom' && !!(discountCustomDateFrom || discountCustomDateTo))
 
   const businessDateDisplay =
+    (policeData?.businessDateDisplay as string | undefined) ||
     (salesData?.businessDateDisplay as string | undefined) ||
     (collectionsData?.businessDateDisplay as string | undefined) ||
     (discountsData?.businessDateDisplay as string | undefined) ||
     selectedBusinessDate
 
-  const isFetching =
-    fetchingSales || fetchingCollections || fetchingArrivals || fetchingDepartures || fetchingDiscounts
+  const isPoliceDateRange =
+    dateMode === 'range' ||
+    Boolean(
+      policeData?.dateFrom &&
+        policeData?.dateTo &&
+        policeData.dateFrom !== policeData.dateTo
+    )
+  const policeDateDisplay = policeData?.businessDateDisplay ?? businessDateDisplay
 
-  const buildExportMeta = () => ({
-    businessDate: selectedBusinessDate!,
-    businessDateDisplay,
-    exportedAt: new Date(),
-    generatedBy: user
-      ? { name: user.name, email: user.email, role: user.role }
-      : undefined,
-  })
+  const isFetching =
+    fetchingSales || fetchingCollections || fetchingArrivals || fetchingDepartures || fetchingDiscounts || fetchingPolice
+
+  const buildExportMeta = () => {
+    let exportBusinessDate = selectedBusinessDate!
+    let exportBusinessDateDisplay = businessDateDisplay
+
+    if (activeTab === 'police' && policeData) {
+      exportBusinessDateDisplay = policeData.businessDateDisplay ?? exportBusinessDateDisplay
+      if (
+        policeData.dateFrom &&
+        policeData.dateTo &&
+        policeData.dateFrom !== policeData.dateTo
+      ) {
+        exportBusinessDate = `${policeData.dateFrom}_to_${policeData.dateTo}`
+      } else {
+        exportBusinessDate = policeData.businessDate || exportBusinessDate
+      }
+    } else if (dateMode === 'range' && (rangeDateFrom || rangeDateTo)) {
+      exportBusinessDate = rangeDateTo || rangeDateFrom || exportBusinessDate
+    }
+
+    return {
+      businessDate: exportBusinessDate,
+      businessDateDisplay: exportBusinessDateDisplay,
+      exportedAt: new Date(),
+      generatedBy: user
+        ? { name: user.name, email: user.email, role: user.role }
+        : undefined,
+    }
+  }
 
   const isLoadingSummary =
     loadingSales || loadingCollections || loadingArrivals || loadingDepartures
@@ -336,10 +422,12 @@ export default function BusinessDayReportsPage() {
     refetchCollections()
     refetchArrivals()
     refetchDepartures()
+    refetchPolice()
     refetchDiscounts()
   }
 
   const handleExportExcel = async () => {
+    if (!reportEnabled) return
     if (dateMode === 'single' && !selectedBusinessDate) return
     setExportingExcel(true)
     const toastId = toast.loading('Preparing Excel export…')
@@ -358,6 +446,9 @@ export default function BusinessDayReportsPage() {
         await downloadBusinessDayDiscountsExcel(discountsData, meta)
       } else if (activeTab === 'checkin-checkout') {
         await downloadBusinessDayCheckInOutExcel(buildCheckInOutData(), meta)
+      } else if (activeTab === 'police') {
+        if (!policeData) throw new Error('No police report data for this business day')
+        await downloadBusinessDayPoliceExcel(policeData, meta)
       }
       toast.success('Excel export ready', { id: toastId })
     } catch (err) {
@@ -369,6 +460,7 @@ export default function BusinessDayReportsPage() {
   }
 
   const handleExportPdf = async () => {
+    if (!reportEnabled) return
     if (dateMode === 'single' && !selectedBusinessDate) return
     setExportingPdf(true)
     const toastId = toast.loading('Preparing PDF export…')
@@ -387,6 +479,9 @@ export default function BusinessDayReportsPage() {
         await downloadBusinessDayDiscountsPdf(discountsData, meta)
       } else if (activeTab === 'checkin-checkout') {
         await downloadBusinessDayCheckInOutPdf(buildCheckInOutData(), meta)
+      } else if (activeTab === 'police') {
+        if (!policeData) throw new Error('No police report data for this business day')
+        await downloadBusinessDayPolicePdf(policeData, meta)
       }
       toast.success('PDF export ready', { id: toastId })
     } catch (err) {
@@ -460,7 +555,7 @@ export default function BusinessDayReportsPage() {
               </div>
               <div className="flex items-end">
                 <p className="text-xs text-muted-foreground max-w-[260px]">
-                  Range mode applies to Sales & Collections. Arrivals/Departures stay single-date.
+                  Range mode applies to Sales, Collections, and Police report. Arrivals/Departures stay single-date.
                 </p>
               </div>
             </>
@@ -499,28 +594,25 @@ export default function BusinessDayReportsPage() {
           )}
 
           {datePreset === 'closed' && (
-            <div className="space-y-2 min-w-[220px]">
+            <div className="space-y-2 min-w-[280px]">
               <Label>Closed day</Label>
               {loadingClosedDays ? (
-                <Skeleton className="h-10 w-full" />
+                <Skeleton className="h-10 w-full min-w-[280px]" />
               ) : closedDays.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No closed business days yet.</p>
               ) : (
-                <Select value={closedDate || closedDays[0]?.businessDate} onValueChange={setClosedDate}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select closed day" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {closedDays.map((row) => (
-                      <SelectItem key={row.id} value={row.businessDate}>
-                        {row.businessDate}
-                        {' · '}
-                        {format(parseISO(row.closedAt), 'dd MMM · h:mm a')}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <ClosedBusinessDaySearchField
+                  value={closedDate || closedDays[0]?.businessDate || ''}
+                  options={closedDays}
+                  loading={loadingClosedDays}
+                  onChange={setClosedDate}
+                />
               )}
+              {!loadingClosedDays && closedDays.length > 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  {closedDays.length} closed day{closedDays.length === 1 ? '' : 's'} — search or scroll
+                </p>
+              ) : null}
             </div>
           )}
             </>
@@ -552,6 +644,7 @@ export default function BusinessDayReportsPage() {
               <TabsTrigger value="collections">Collections report</TabsTrigger>
               <TabsTrigger value="discounts">Discount report</TabsTrigger>
               <TabsTrigger value="checkin-checkout">Check-in / Check-out</TabsTrigger>
+              <TabsTrigger value="police">Police report</TabsTrigger>
             </TabsList>
             <div className="flex gap-2">
               <Button
@@ -1164,6 +1257,112 @@ export default function BusinessDayReportsPage() {
                 </CardContent>
               </Card>
             </div>
+          </TabsContent>
+
+          <TabsContent value="police" className="space-y-4 mt-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Card>
+                <CardContent className="p-4">
+                  <p className="text-sm text-muted-foreground">Checked-in</p>
+                  <p className="text-2xl font-bold text-slate-800">
+                    {policeData?.totalCheckIns ?? 0}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Actual check-ins during the selected period
+                  </p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="p-4">
+                  <p className="text-sm text-muted-foreground">Guests listed</p>
+                  <p className="text-2xl font-bold text-slate-800">
+                    {policeData?.guestCount ?? policeGuests.length}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Includes primary guests and adult companions
+                  </p>
+                </CardContent>
+              </Card>
+            </div>
+
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Police register — guests checked in</CardTitle>
+                <p className="text-sm text-muted-foreground font-normal">
+                  For law-enforcement reporting. Guests who checked in during{' '}
+                  <span className="font-medium text-foreground">{policeDateDisplay}</span>.
+                </p>
+              </CardHeader>
+              <CardContent className="p-0">
+                <div className="max-h-[560px] overflow-auto">
+                  <Table className="table-fixed min-w-[1100px]">
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-[160px]">Guest name</TableHead>
+                        <TableHead className="w-[120px]">Mobile</TableHead>
+                        <TableHead className="w-[180px] whitespace-normal">NID / Passport / License</TableHead>
+                        <TableHead className="w-[200px] whitespace-normal">Address</TableHead>
+                        <TableHead className="w-[120px]">Nationality</TableHead>
+                        <TableHead className="w-[72px]">Room</TableHead>
+                        {isPoliceDateRange ? (
+                          <TableHead className="w-[110px] whitespace-normal">Business date</TableHead>
+                        ) : null}
+                        <TableHead className="w-[160px] whitespace-normal">Checked-in date & time</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {loadingPolice ? (
+                        <TableRow>
+                          <TableCell colSpan={isPoliceDateRange ? 8 : 7}>
+                            <Skeleton className="h-8 w-full" />
+                          </TableCell>
+                        </TableRow>
+                      ) : policeGuests.length ? (
+                        policeGuests.map((guest) => {
+                          const roleLabel = policeGuestRoleLabel(guest)
+                          return (
+                          <TableRow key={guest.id}>
+                            <TableCell className="font-medium">
+                              {guest.guestName}
+                              {roleLabel ? (
+                                <span className="ml-1 text-xs font-normal text-muted-foreground">
+                                  ({roleLabel})
+                                </span>
+                              ) : null}
+                            </TableCell>
+                            <TableCell>{guest.mobile || '—'}</TableCell>
+                            <TableCell className="text-sm">{guest.idDocument || '—'}</TableCell>
+                            <TableCell className="text-sm whitespace-normal">{guest.address || '—'}</TableCell>
+                            <TableCell>{guest.nationality || '—'}</TableCell>
+                            <TableCell className="font-mono">{guest.roomNumber}</TableCell>
+                            {isPoliceDateRange ? (
+                              <TableCell className="text-sm whitespace-nowrap">
+                                {guest.businessDate
+                                  ? formatBusinessDateDisplay(guest.businessDate)
+                                  : '—'}
+                              </TableCell>
+                            ) : null}
+                            <TableCell className="text-sm whitespace-nowrap">
+                              {guest.checkInAtDisplay || '—'}
+                            </TableCell>
+                          </TableRow>
+                          )
+                        })
+                      ) : (
+                        <TableRow>
+                          <TableCell
+                            colSpan={isPoliceDateRange ? 8 : 7}
+                            className="text-center py-8 text-muted-foreground"
+                          >
+                            No check-ins recorded for the selected period
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </Card>
           </TabsContent>
         </Tabs>
       )}

@@ -1,6 +1,7 @@
 import { format, parseISO } from 'date-fns'
 import { jsPDF } from 'jspdf'
 import ExcelJS from 'exceljs'
+import { formatBusinessDateDisplay } from './business-date-format'
 import { HOTEL_NAME } from './reservation-terms'
 import { getLogoDataUrl } from './reservation-document-html'
 import { formatBdtForPdf } from './currency'
@@ -22,6 +23,36 @@ export type BusinessDayReportTab =
   | 'collections'
   | 'discounts'
   | 'checkin-checkout'
+  | 'police'
+
+export type PoliceReportData = {
+  businessDate: string
+  businessDateDisplay?: string
+  dateFrom?: string
+  dateTo?: string
+  totalCheckIns?: number
+  guestCount?: number
+  guests?: Array<{
+    id?: string
+    guestName?: string
+    mobile?: string | null
+    idDocument?: string
+    address?: string | null
+    nationality?: string | null
+    roomNumber?: string
+    checkInAt?: string | null
+    checkInAtDisplay?: string
+    businessDate?: string
+    isCompanion?: boolean
+    guestRole?: 'primary' | 'companion' | 'child' | 'unregistered'
+  }>
+}
+
+function isPoliceReportDateRange(data: PoliceReportData): boolean {
+  const from = data.dateFrom?.trim()
+  const to = data.dateTo?.trim()
+  return Boolean(from && to && from !== to)
+}
 
 export type BusinessDaySummaryData = {
   businessDate: string
@@ -218,7 +249,10 @@ const TAB_TITLES: Record<BusinessDayReportTab, string> = {
   collections: 'Daily Collections Report',
   discounts: 'Daily Discount Report',
   'checkin-checkout': 'Check-in / Check-out Report',
+  police: 'Police Report',
 }
+
+const IN_HOUSE_BOOKING_REPORT_TITLE = 'Booking Report (In-House)'
 
 function formatGeneratedBy(user?: BusinessDayExportMeta['generatedBy']): string {
   if (!user?.name) return '—'
@@ -228,6 +262,9 @@ function formatGeneratedBy(user?: BusinessDayExportMeta['generatedBy']): string 
 
 function fileName(tab: BusinessDayReportTab, businessDate: string, ext: 'xlsx' | 'pdf'): string {
   const stamp = format(new Date(), 'yyyyMMdd-HHmm')
+  if (tab === 'police') {
+    return `booking-in-house-${businessDate}-${stamp}.${ext}`
+  }
   return `business-day-${tab}-${businessDate}-${stamp}.${ext}`
 }
 
@@ -889,6 +926,319 @@ async function writePdfTable(
   pdf.save(fileName(meta.tab, meta.businessDate, 'pdf'))
 }
 
+function drawCenteredBrandHeaderPdf(
+  pdf: jsPDF,
+  pageWidth: number,
+  title: string,
+  logo: { dataUrl: string } | null,
+  logoSize = 12
+): number {
+  const top = 10
+  const gap = 3
+  const lineGap = 5.5
+
+  pdf.setFont('helvetica', 'bold')
+  pdf.setFontSize(14)
+  const hotelWidth = pdf.getTextWidth(HOTEL_NAME)
+  pdf.setFontSize(11)
+  const titleWidth = pdf.getTextWidth(title)
+  const textWidth = Math.max(hotelWidth, titleWidth)
+  const textBlockHeight = lineGap * 2
+
+  if (logo) {
+    const blockWidth = logoSize + gap + textWidth
+    const startX = (pageWidth - blockWidth) / 2
+    pdf.addImage(logo.dataUrl, 'PNG', startX, top, logoSize, logoSize)
+    const textX = startX + logoSize + gap
+    const textTop = top + (logoSize - textBlockHeight) / 2 + 3.8
+    pdf.setFont('helvetica', 'bold')
+    pdf.setFontSize(14)
+    pdf.text(HOTEL_NAME, textX, textTop)
+    pdf.setFontSize(11)
+    pdf.text(title, textX, textTop + lineGap)
+    return top + logoSize + 6
+  }
+
+  pdf.setFont('helvetica', 'bold')
+  pdf.setFontSize(14)
+  pdf.text(HOTEL_NAME, (pageWidth - hotelWidth) / 2, top + 5)
+  pdf.setFontSize(11)
+  pdf.text(title, (pageWidth - titleWidth) / 2, top + 10)
+  return top + 14
+}
+
+function getInHouseBrandExcelLayout(
+  sheet: ExcelJS.Worksheet,
+  columnCount: number,
+  options: { logoWidthChars?: number; textWidthChars?: number } = {}
+): { logoAnchorCol: number; logoCol: number; textCol: number } {
+  const logoWidthChars = options.logoWidthChars ?? 7
+  const textWidthChars =
+    options.textWidthChars ?? Math.max(HOTEL_NAME.length, IN_HOUSE_BOOKING_REPORT_TITLE.length) + 2
+  const blockWidthChars = logoWidthChars + textWidthChars
+
+  let totalChars = 0
+  for (let col = 1; col <= columnCount; col += 1) {
+    totalChars += sheet.getColumn(col).width ?? 18
+  }
+
+  const blockStartChars = Math.max(0, (totalChars - blockWidthChars) / 2)
+  let accumulated = 0
+  let logoAnchorCol = 0
+
+  for (let col = 1; col <= columnCount; col += 1) {
+    const width = sheet.getColumn(col).width ?? 18
+    if (accumulated + width >= blockStartChars || col === columnCount) {
+      const offset = blockStartChars - accumulated
+      logoAnchorCol = col - 1 + Math.max(0, Math.min(1, offset / width))
+      break
+    }
+    accumulated += width
+  }
+
+  const logoCol = Math.min(columnCount, Math.floor(logoAnchorCol) + 1)
+  const textCol = Math.min(columnCount, logoCol + 1)
+
+  return { logoAnchorCol, logoCol, textCol }
+}
+
+function drawCenteredPdfMetaLine(pdf: jsPDF, pageWidth: number, y: number, text: string): number {
+  pdf.setFont('helvetica', 'normal')
+  pdf.setFontSize(8)
+  const width = pdf.getTextWidth(text)
+  pdf.text(text, (pageWidth - width) / 2, y)
+  return y + 4
+}
+
+async function writeInHouseBookingExcelWorkbook(
+  sections: Array<{ heading: string; rows: Array<Record<string, string | number>> }>,
+  meta: Omit<BusinessDayExportMeta, 'tab'>
+): Promise<void> {
+  const title = IN_HOUSE_BOOKING_REPORT_TITLE
+  const workbook = new ExcelJS.Workbook()
+  const sheet = workbook.addWorksheet('Report')
+  const exportedAt = meta.exportedAt ?? new Date()
+  const logo = await loadExportLogo()
+
+  const columnCount = sections.reduce((max, section) => {
+    if (!section.rows.length) return max
+    return Math.max(max, Object.keys(section.rows[0]).length)
+  }, 7)
+
+  for (let col = 1; col <= columnCount; col++) {
+    sheet.getColumn(col).width = 18
+  }
+
+  for (let col = 1; col <= columnCount; col++) {
+    sheet.getColumn(col).width = 18
+  }
+
+  const { logoAnchorCol, logoCol, textCol } = getInHouseBrandExcelLayout(sheet, columnCount)
+
+  sheet.getRow(1).height = 24
+  sheet.getRow(2).height = 24
+  sheet.getRow(3).height = 6
+
+  const logoSize = 40
+
+  if (logo) {
+    const imageId = workbook.addImage({ base64: logo.base64, extension: 'png' })
+    sheet.addImage(imageId, {
+      tl: { col: logoAnchorCol + 0.05, row: 0.12 },
+      ext: { width: logoSize, height: logoSize },
+    })
+  }
+
+  const hotelCell = sheet.getCell(1, textCol)
+  hotelCell.value = HOTEL_NAME
+  hotelCell.font = { bold: true, size: 14 }
+  hotelCell.alignment = { vertical: 'bottom', horizontal: 'left' }
+
+  const titleCell = sheet.getCell(2, textCol)
+  titleCell.value = title
+  titleCell.font = { bold: true, size: 12 }
+  titleCell.alignment = { vertical: 'top', horizontal: 'left' }
+
+  // Keep logo column clear of stray values while the image is anchored there.
+  sheet.getCell(1, logoCol).value = null
+  sheet.getCell(2, logoCol).value = null
+
+  let row = 4
+  const info: [string, string][] = [
+    ['Business date', meta.businessDateDisplay ?? meta.businessDate],
+    ['Exported', format(exportedAt, 'dd MMM yyyy, HH:mm')],
+    ['Generated by', formatGeneratedBy(meta.generatedBy)],
+  ]
+  for (const [label, value] of info) {
+    sheet.mergeCells(row, 1, row, columnCount)
+    const cell = sheet.getCell(row, 1)
+    cell.value = `${label}: ${value}`
+    cell.alignment = { horizontal: 'center', vertical: 'middle' }
+    row += 1
+  }
+  row += 1
+
+  for (const section of sections) {
+    if (!section.rows.length) continue
+    sheet.mergeCells(row, 1, row, columnCount)
+    const headingCell = sheet.getCell(row, 1)
+    headingCell.value = section.heading
+    headingCell.font = { bold: true, size: 11 }
+    headingCell.alignment = { horizontal: 'center' }
+    row += 1
+
+    const headers = Object.keys(section.rows[0])
+    headers.forEach((header, index) => {
+      const cell = sheet.getCell(row, index + 1)
+      cell.value = header
+      cell.font = { bold: true }
+      cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }
+    })
+    row += 1
+
+    for (const dataRow of section.rows) {
+      headers.forEach((header, index) => {
+        const cell = sheet.getCell(row, index + 1)
+        cell.value = dataRow[header] ?? ''
+        cell.alignment = { vertical: 'top', wrapText: true }
+      })
+      row += 1
+    }
+    row += 1
+  }
+
+  const buffer = await workbook.xlsx.writeBuffer()
+  triggerBrowserDownload(
+    new Blob([buffer], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    }),
+    fileName('police', meta.businessDate, 'xlsx')
+  )
+}
+
+async function writeInHouseBookingPdf(
+  sections: Array<{ heading: string; columns: PdfColumn[]; rows: Record<string, string | number>[] }>,
+  meta: Omit<BusinessDayExportMeta, 'tab'>
+): Promise<void> {
+  const title = IN_HOUSE_BOOKING_REPORT_TITLE
+  const logo = await loadExportLogo()
+  const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'landscape', compress: true })
+  const pageWidth = pdf.internal.pageSize.getWidth()
+  const pageHeight = pdf.internal.pageSize.getHeight()
+  const marginX = 10
+  let y = drawCenteredBrandHeaderPdf(pdf, pageWidth, title, logo)
+
+  const exportedAt = meta.exportedAt ?? new Date()
+  y = drawCenteredPdfMetaLine(
+    pdf,
+    pageWidth,
+    y,
+    `Business date: ${meta.businessDateDisplay ?? meta.businessDate}`
+  )
+  y = drawCenteredPdfMetaLine(pdf, pageWidth, y, `Exported: ${format(exportedAt, 'dd MMM yyyy, HH:mm')}`)
+  y = drawCenteredPdfMetaLine(
+    pdf,
+    pageWidth,
+    y,
+    `Generated by: ${formatGeneratedBy(meta.generatedBy)}`
+  )
+  y += 4
+
+  const tableLeft = marginX
+  const tableWidth = pageWidth - marginX * 2
+  const cellPad = 1.5
+  const headerFontSize = 8.5
+  const bodyFontSize = 8.5
+  const headerRowHeight = 9
+  const minRowHeight = 7
+  const lineHeight = 3.4
+  const marginBottom = 12
+
+  const drawSection = (heading: string, columns: PdfColumn[], rows: Record<string, string | number>[]) => {
+    if (!rows.length) return
+    if (y > pageHeight - 24) {
+      pdf.addPage()
+      y = 10
+    }
+    pdf.setFont('helvetica', 'bold')
+    pdf.setFontSize(10)
+    const headingWidth = pdf.getTextWidth(heading)
+    pdf.text(heading, (pageWidth - headingWidth) / 2, y)
+    y += 5
+
+    const totalWidth = columns.reduce((s, c) => s + c.width, 0)
+    const colWidths = columns.map((c) => (c.width / totalWidth) * tableWidth)
+
+    const drawTableHeader = () => {
+      pdf.setDrawColor(120)
+      pdf.setLineWidth(0.2)
+      let x = tableLeft
+      columns.forEach((col, i) => {
+        pdf.setFillColor(235, 235, 235)
+        pdf.rect(x, y, colWidths[i]!, headerRowHeight, 'F')
+        pdf.rect(x, y, colWidths[i]!, headerRowHeight, 'S')
+        x += colWidths[i]!
+      })
+      x = tableLeft
+      pdf.setTextColor(0, 0, 0)
+      pdf.setFont('helvetica', 'bold')
+      pdf.setFontSize(headerFontSize)
+      columns.forEach((col, i) => {
+        const lines = pdf.splitTextToSize(col.header, colWidths[i]! - cellPad * 2)
+        pdf.text(lines, x + cellPad, y + 3.6)
+        x += colWidths[i]!
+      })
+      y += headerRowHeight
+    }
+
+    drawTableHeader()
+
+    pdf.setFont('helvetica', 'normal')
+    pdf.setFontSize(bodyFontSize)
+    pdf.setTextColor(0, 0, 0)
+
+    for (const row of rows) {
+      const cellLines = columns.map((col, i) =>
+        pdf.splitTextToSize(String(col.value(row)), colWidths[i]! - cellPad * 2)
+      )
+      const maxLines = Math.max(...cellLines.map((lines) => lines.length), 1)
+      const rowHeight = Math.max(minRowHeight, maxLines * lineHeight + cellPad * 2)
+
+      if (y + rowHeight > pageHeight - marginBottom) {
+        pdf.addPage()
+        y = 10
+        drawTableHeader()
+        pdf.setFont('helvetica', 'normal')
+        pdf.setFontSize(bodyFontSize)
+      }
+
+      let x = tableLeft
+      columns.forEach((col, i) => {
+        pdf.setDrawColor(120)
+        pdf.rect(x, y, colWidths[i]!, rowHeight)
+        const lines = cellLines[i]!
+        lines.forEach((line, lineIndex) => {
+          const textY = y + cellPad + 2.8 + lineIndex * lineHeight
+          if (col.align === 'right') {
+            pdf.text(line, x + colWidths[i]! - cellPad, textY, { align: 'right' })
+          } else {
+            pdf.text(line, x + cellPad, textY)
+          }
+        })
+        x += colWidths[i]!
+      })
+      y += rowHeight
+    }
+    y += 4
+  }
+
+  for (const section of sections) {
+    drawSection(section.heading, section.columns, section.rows)
+  }
+
+  pdf.save(fileName('police', meta.businessDate, 'pdf'))
+}
+
 export async function downloadBusinessDaySalesExcel(
   data: SalesReportData,
   meta: Omit<BusinessDayExportMeta, 'tab'>
@@ -1328,5 +1678,82 @@ export async function downloadBusinessDayDiscountsPdf(
       },
     ],
     { ...meta, tab: 'discounts' }
+  )
+}
+
+function mapPoliceGuestRow(
+  g: NonNullable<PoliceReportData['guests']>[number],
+  includeBusinessDate: boolean
+): Record<string, string> {
+  const row: Record<string, string> = {
+    'Guest name': String(g.guestName ?? ''),
+    Mobile: String(g.mobile ?? '—'),
+    'NID / Passport / License': String(g.idDocument ?? '—'),
+    Address: String(g.address ?? '—'),
+    Nationality: String(g.nationality ?? '—'),
+    Room: String(g.roomNumber ?? ''),
+    'Checked-in date & time': String(g.checkInAtDisplay ?? '—'),
+  }
+  if (includeBusinessDate) {
+    row['Business date'] = g.businessDate
+      ? formatBusinessDateDisplay(g.businessDate)
+      : '—'
+  }
+  return row
+}
+
+function policePdfColumns(includeBusinessDate: boolean): PdfColumn[] {
+  const columns: PdfColumn[] = [
+    { header: 'Guest name', width: 26, value: (r) => String(r['Guest name']) },
+    { header: 'Mobile', width: 16, value: (r) => String(r.Mobile) },
+    { header: 'NID / Passport / License', width: 24, value: (r) => String(r['NID / Passport / License']) },
+    { header: 'Address', width: 28, value: (r) => String(r.Address) },
+    { header: 'Nationality', width: 14, value: (r) => String(r.Nationality) },
+    { header: 'Room', width: 10, value: (r) => String(r.Room) },
+    { header: 'Checked-in date & time', width: 22, value: (r) => String(r['Checked-in date & time']) },
+  ]
+  if (includeBusinessDate) {
+    columns.splice(6, 0, {
+      header: 'Business date',
+      width: 16,
+      value: (r) => String(r['Business date']),
+    })
+  }
+  return columns
+}
+
+export async function downloadBusinessDayPoliceExcel(
+  data: PoliceReportData,
+  meta: Omit<BusinessDayExportMeta, 'tab'>
+): Promise<void> {
+  const guests = data.guests ?? []
+  const includeBusinessDate = isPoliceReportDateRange(data)
+  await writeInHouseBookingExcelWorkbook(
+    [
+      {
+        heading: `Guests checked in (${data.totalCheckIns ?? 0} booking(s), ${data.guestCount ?? guests.length} guest(s))`,
+        rows: guests.map((guest) => mapPoliceGuestRow(guest, includeBusinessDate)),
+      },
+    ],
+    meta
+  )
+}
+
+export async function downloadBusinessDayPolicePdf(
+  data: PoliceReportData,
+  meta: Omit<BusinessDayExportMeta, 'tab'>
+): Promise<void> {
+  const guests = data.guests ?? []
+  const includeBusinessDate = isPoliceReportDateRange(data)
+  const rows = guests.map((guest) => mapPoliceGuestRow(guest, includeBusinessDate))
+  await writeInHouseBookingPdf(
+    [
+      {
+        heading: `Guests checked in (${data.totalCheckIns ?? 0} booking(s), ${data.guestCount ?? guests.length} guest(s))`,
+        columns: policePdfColumns(includeBusinessDate),
+        rows,
+      },
+    ],
+    meta
   )
 }

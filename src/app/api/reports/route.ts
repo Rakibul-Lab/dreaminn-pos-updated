@@ -19,6 +19,7 @@ import {
   resolveBusinessDayReportWindow,
 } from '@/lib/hotel-pms-reports';
 import { buildHotelDiscountReportForDateRange } from '@/lib/hotel-daily-discount-report';
+import { buildHotelPoliceReport, buildHotelPoliceReportForDateRange } from '@/lib/hotel-police-report';
 
 function buildReportDateFilter(startDate: string | null, endDate: string | null): Record<string, unknown> {
   const dateFilter: Record<string, unknown> = {};
@@ -63,7 +64,7 @@ export async function GET(request: NextRequest) {
 
     if (!type) {
       return errorResponse(
-        'Report type is required. Valid types: restaurant-daily, restaurant-monthly, hotel-revenue, hotel-occupancy, food-charges-by-room, combined-revenue, admin-summary, order-status, hotel-daily-sales, hotel-daily-arrivals, hotel-daily-departures, hotel-daily-collections, hotel-daily-discounts'
+        'Report type is required. Valid types: restaurant-daily, restaurant-monthly, hotel-revenue, hotel-occupancy, food-charges-by-room, combined-revenue, admin-summary, order-status, hotel-daily-sales, hotel-daily-arrivals, hotel-daily-departures, hotel-daily-collections, hotel-daily-discounts, hotel-police-report'
       );
     }
 
@@ -96,6 +97,8 @@ export async function GET(request: NextRequest) {
         return await handleHotelDailyCollections(user, businessDate, dateFrom, dateTo);
       case 'hotel-daily-discounts':
         return await handleHotelDailyDiscounts(user, businessDate, dateFrom, dateTo);
+      case 'hotel-police-report':
+        return await handleHotelPoliceReport(user, businessDate, dateFrom, dateTo);
       default:
         return errorResponse('Invalid report type', 400);
     }
@@ -719,5 +722,26 @@ async function handleHotelDailyDiscounts(
     return successResponse(report);
   }
   const report = await buildHotelDiscountReportForDateRange();
+  return successResponse(report);
+}
+
+async function handleHotelPoliceReport(
+  user: { role: string },
+  businessDateParam: string | null,
+  dateFromParam: string | null,
+  dateToParam: string | null
+) {
+  if (!canAccessHotel(user.role as 'ADMIN' | 'HOTEL_STAFF' | 'RESTAURANT_STAFF')) {
+    return errorResponse('Access denied. HOTEL_STAFF or ADMIN only.', 403);
+  }
+  if (dateFromParam || dateToParam) {
+    const report = await buildHotelPoliceReportForDateRange(
+      dateFromParam ?? undefined,
+      dateToParam ?? undefined
+    );
+    return successResponse(report);
+  }
+  const window = await resolveBusinessDayReportWindow(businessDateParam);
+  const report = await buildHotelPoliceReport(window);
   return successResponse(report);
 }

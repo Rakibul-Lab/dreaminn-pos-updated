@@ -4,8 +4,12 @@ export type CheckoutDiscountInput = {
   discountEnabled: boolean
   discountType: 'PERCENTAGE' | 'FIXED'
   discountValue: number
-  /** True when discount was set at reservation — checkout cannot add/change it. */
-  reservationDiscountLocked: boolean
+}
+
+export type BookingDiscountPrefill = {
+  enabled: boolean
+  type: 'PERCENTAGE' | 'FIXED'
+  value: number
 }
 
 type BookingDiscountFields = {
@@ -14,7 +18,7 @@ type BookingDiscountFields = {
   discountValue?: number | null
 }
 
-/** Use reservation discount when already applied; otherwise allow checkout discount toggle. */
+/** Checkout discount: staff override wins; otherwise fall back to reservation booking discount. */
 export function resolveCheckoutDiscount(
   booking: BookingDiscountFields,
   checkoutOverride?: {
@@ -23,20 +27,41 @@ export function resolveCheckoutDiscount(
     value?: number
   }
 ): CheckoutDiscountInput {
+  if (checkoutOverride?.enabled === true) {
+    return {
+      discountEnabled: true,
+      discountType: parseBookingDiscountType(checkoutOverride.type ?? booking.discountType),
+      discountValue: Math.max(0, Number(checkoutOverride.value) || 0),
+    }
+  }
+
+  if (checkoutOverride?.enabled === false) {
+    return {
+      discountEnabled: false,
+      discountType: parseBookingDiscountType(booking.discountType),
+      discountValue: 0,
+    }
+  }
+
   if (booking.discountEnabled === true) {
     return {
       discountEnabled: true,
       discountType: parseBookingDiscountType(booking.discountType),
       discountValue: Math.max(0, Number(booking.discountValue) || 0),
-      reservationDiscountLocked: true,
     }
   }
 
-  const enabled = checkoutOverride?.enabled === true
   return {
-    discountEnabled: enabled,
-    discountType: parseBookingDiscountType(checkoutOverride?.type),
-    discountValue: enabled ? Math.max(0, Number(checkoutOverride?.value) || 0) : 0,
-    reservationDiscountLocked: false,
+    discountEnabled: false,
+    discountType: 'PERCENTAGE',
+    discountValue: 0,
+  }
+}
+
+export function bookingDiscountPrefill(booking: BookingDiscountFields): BookingDiscountPrefill {
+  return {
+    enabled: booking.discountEnabled === true,
+    type: parseBookingDiscountType(booking.discountType),
+    value: Math.max(0, Number(booking.discountValue) || 0),
   }
 }

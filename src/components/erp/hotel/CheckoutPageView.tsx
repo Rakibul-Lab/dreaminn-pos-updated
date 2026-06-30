@@ -25,7 +25,7 @@ import {
 } from '@/lib/payment-method'
 import { Switch } from '@/components/ui/switch'
 import { useHotelTimes } from '@/hooks/use-hotel-times'
-import type { BookingDiscountType } from '@/lib/booking-discount'
+import { parseBookingDiscountType, type BookingDiscountType } from '@/lib/booking-discount'
 import { CompanyLedgerSearchField } from './CompanyLedgerSearchField'
 import { DEFAULT_GUEST_COMPANY } from '@/lib/reservation-terms'
 
@@ -50,7 +50,11 @@ export interface CheckoutPreview {
   damageCharge?: number
   subtotal: number
   discount: number
-  reservationDiscountLocked?: boolean
+  bookingDiscount?: {
+    enabled: boolean
+    type: BookingDiscountType
+    value: number
+  }
   vatApplied?: boolean
   vatPercent: number
   vatAmount: number
@@ -127,6 +131,7 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
   const [billTransferTargetId, setBillTransferTargetId] = useState<string | null>(null)
   const [checkoutCompanyLedgerId, setCheckoutCompanyLedgerId] = useState('')
   const [checkoutCompanyLedgerLabel, setCheckoutCompanyLedgerLabel] = useState(DEFAULT_GUEST_COMPANY)
+  const [discountReady, setDiscountReady] = useState(false)
 
   const parsedDamageAmount = Math.max(0, parseFloat(damageChargeAmount) || 0)
   const parsedDiscountValue = Math.max(0, parseFloat(discountValue) || 0)
@@ -179,6 +184,36 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
 
   const isBillTransferOut = roomCreditTransferEnabled && !!billTransferTargetId
 
+  const { data: bookingSeedData } = useQuery({
+    queryKey: ['checkout-booking-seed', bookingId],
+    queryFn: () =>
+      api.get<{
+        success: boolean
+        data: {
+          discountEnabled?: boolean
+          discountType?: string | null
+          discountValue?: number | null
+        }
+      }>(`/bookings/${bookingId}`),
+    enabled: !!bookingId,
+    staleTime: 60_000,
+  })
+
+  useEffect(() => {
+    if (discountReady) return
+    const booking = (bookingSeedData as { data?: { discountEnabled?: boolean; discountType?: string | null; discountValue?: number | null } } | undefined)?.data
+    if (!bookingSeedData || !booking) return
+    if (booking.discountEnabled === true) {
+      const type = parseBookingDiscountType(booking.discountType)
+      const value = Math.max(0, Number(booking.discountValue) || 0)
+      setDiscountEnabled(true)
+      setDiscountType(type)
+      setDiscountValue(value > 0 ? String(value) : '')
+      setDebouncedDiscountValue(value)
+    }
+    setDiscountReady(true)
+  }, [bookingSeedData, discountReady])
+
   const { data: checkoutPreviewData, isFetching: checkoutPreviewFetching } = useQuery({
       queryKey: [
         'checkout-preview',
@@ -223,7 +258,7 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
           `/bookings/check-out/${bookingId}${qs ? `?${qs}` : ''}`
         )
       },
-      enabled: !!bookingId,
+      enabled: !!bookingId && discountReady,
       retry: false,
       placeholderData: (previous) => previous,
     })
@@ -232,7 +267,7 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
     | { success?: boolean; data?: CheckoutPreview; error?: string; message?: string }
     | undefined
   const checkoutPreview = previewRes?.success !== false ? previewRes?.data : undefined
-  const reservationDiscountLocked = checkoutPreview?.reservationDiscountLocked === true
+  const discountFromReservation = checkoutPreview?.bookingDiscount?.enabled === true
   const previewApiError =
     previewRes?.success === false ? previewRes.error || previewRes.message : undefined
   const isCompanyLedgerCheckout = !!checkoutCompanyLedgerId
@@ -544,13 +579,13 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
             )}
           </div>
 
-          {!reservationDiscountLocked && (
           <div className="rounded-lg border border-border p-3 space-y-3">
             <div className="flex items-center justify-between gap-3">
               <div>
                 <p className="text-sm font-medium text-foreground">Discount</p>
                 <p className="text-xs text-muted-foreground">
                   Applied to room and service charges before VAT — included on invoice
+                  {discountFromReservation ? ' (from reservation — editable)' : ''}
                 </p>
               </div>
               <Switch
@@ -594,7 +629,6 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
               </div>
             )}
           </div>
-          )}
 
           <div className="rounded-lg border border-indigo-200 bg-indigo-50/50 p-3 space-y-3">
             <div className="flex items-center justify-between gap-3">
@@ -936,7 +970,7 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
             checkoutPreviewFetching ||
             (debouncedRoomCharge != null && debouncedRoomCharge <= 0) ||
             (damageChargesEnabled && parsedDamageAmount <= 0) ||
-            (!reservationDiscountLocked && discountEnabled && parsedDiscountValue <= 0) ||
+            (discountEnabled && parsedDiscountValue <= 0) ||
             (roomCreditTransferEnabled && !billTransferTargetId) ||
             (!isBillTransferOut &&
               !isCompanyLedgerCheckout &&
@@ -952,7 +986,7 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
               toast.error('Enter a damage charge amount greater than zero, or turn damage charges off.')
               return
             }
-            if (!reservationDiscountLocked && discountEnabled && parsedDiscountValue <= 0) {
+            if (discountEnabled && parsedDiscountValue <= 0) {
               toast.error('Enter a discount greater than zero, or turn discount off.')
               return
             }

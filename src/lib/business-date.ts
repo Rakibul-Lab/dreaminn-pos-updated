@@ -3,27 +3,21 @@ import type { Prisma } from '@prisma/client'
 import { db } from '@/lib/db'
 import { resolveBookingDateRange, type BookingDatePreset } from '@/lib/booking-date-filter'
 import { buildGuestStayOverlapWhere, buildInHouseStayOverlapWhere } from '@/lib/guest-stay-date-filter'
+import {
+  formatBusinessDate,
+  formatBusinessDateDisplay,
+  isValidBusinessDateString,
+  parseBusinessDateString,
+} from '@/lib/business-date-format'
+
+export {
+  formatBusinessDate,
+  formatBusinessDateDisplay,
+  isValidBusinessDateString,
+  parseBusinessDateString,
+} from '@/lib/business-date-format'
 
 export const CURRENT_BUSINESS_DATE_KEY = 'current_business_date'
-
-const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/
-
-export function formatBusinessDate(date: Date = new Date()): string {
-  return format(startOfDay(date), 'yyyy-MM-dd')
-}
-
-export function isValidBusinessDateString(value: string | null | undefined): boolean {
-  if (!value || !DATE_ONLY.test(value.trim())) return false
-  const parsed = parseISO(`${value.trim()}T12:00:00`)
-  return !Number.isNaN(parsed.getTime())
-}
-
-export function parseBusinessDateString(value: string): Date {
-  if (!isValidBusinessDateString(value)) {
-    throw new Error('Invalid business date')
-  }
-  return parseISO(`${value.trim()}T12:00:00`)
-}
 
 /** Calendar midnight bounds for a business date label (local timezone). */
 export function getCalendarDayBounds(businessDate: string): { start: Date; end: Date } {
@@ -200,14 +194,6 @@ export async function stampCurrentBusinessDate(): Promise<string> {
 
 export function getCalendarDateString(date: Date = new Date()): string {
   return formatBusinessDate(date)
-}
-
-export function formatBusinessDateDisplay(value: string): string {
-  try {
-    return format(parseBusinessDateString(value), 'dd/MM/yyyy')
-  } catch {
-    return value
-  }
 }
 
 export type DayCloseGateResult = {

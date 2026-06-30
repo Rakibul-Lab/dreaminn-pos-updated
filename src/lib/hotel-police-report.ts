@@ -6,8 +6,25 @@ import {
   isValidBusinessDateString,
 } from '@/lib/business-date'
 import { expectedCompanionCount } from '@/lib/booking-companions'
+import { getBookingSourceLabel } from '@/lib/booking-company'
 import { formatGuestId } from '@/lib/id-type-label'
+import { DEFAULT_GUEST_COMPANY } from '@/lib/reservation-terms'
 import { resolveBusinessDayReportWindow, type BusinessDayWindow } from '@/lib/hotel-pms-reports'
+
+type PoliceCompanyBooking = {
+  company: string | null
+  companyLedgerId: string | null
+  companyLedger?: { name: string } | null
+}
+
+function resolvePoliceGuestCompany(
+  booking: PoliceCompanyBooking,
+  guestCompany?: string | null
+): string {
+  const guest = guestCompany?.trim()
+  if (guest && guest !== DEFAULT_GUEST_COMPANY) return guest
+  return getBookingSourceLabel(booking)
+}
 
 export type PoliceReportGuestRole = 'primary' | 'companion' | 'child' | 'unregistered'
 
@@ -19,6 +36,7 @@ export type PoliceReportGuestRow = {
   idDocument: string
   address: string | null
   nationality: string | null
+  company: string
   roomNumber: string
   checkInAt: string | null
   checkInAtDisplay: string
@@ -69,7 +87,7 @@ function formatCompanionIdDocument(companion: {
 }
 
 function mapPrimaryGuestRow(
-  booking: {
+  booking: PoliceCompanyBooking & {
     id: string
     actualCheckIn: Date | null
     customer: {
@@ -79,6 +97,7 @@ function mapPrimaryGuestRow(
       nationality: string | null
       idType: string | null
       idNumber: string | null
+      company: string | null
     }
     room: { roomNumber: string }
   },
@@ -93,6 +112,7 @@ function mapPrimaryGuestRow(
     idDocument: formatGuestId(booking.customer.idType, booking.customer.idNumber),
     address: booking.customer.address?.trim() || null,
     nationality: booking.customer.nationality?.trim() || null,
+    company: resolvePoliceGuestCompany(booking, booking.customer.company),
     roomNumber: booking.room.roomNumber,
     checkInAt: checkIn.iso,
     checkInAtDisplay: checkIn.display,
@@ -103,7 +123,7 @@ function mapPrimaryGuestRow(
 }
 
 function mapCompanionRow(
-  booking: {
+  booking: PoliceCompanyBooking & {
     id: string
     actualCheckIn: Date | null
     room: { roomNumber: string }
@@ -135,6 +155,7 @@ function mapCompanionRow(
       : formatCompanionIdDocument(companion),
     address: companion.address?.trim() || null,
     nationality: companion.nationality?.trim() || null,
+    company: resolvePoliceGuestCompany(booking, companion.company),
     roomNumber: booking.room.roomNumber,
     checkInAt: checkIn.iso,
     checkInAtDisplay: checkIn.display,
@@ -145,7 +166,7 @@ function mapCompanionRow(
 }
 
 function mapPlaceholderGuestRow(
-  booking: {
+  booking: PoliceCompanyBooking & {
     id: string
     actualCheckIn: Date | null
     room: { roomNumber: string }
@@ -163,6 +184,7 @@ function mapPlaceholderGuestRow(
     idDocument: '—',
     address: null,
     nationality: null,
+    company: resolvePoliceGuestCompany(booking),
     roomNumber: booking.room.roomNumber,
     checkInAt: checkIn.iso,
     checkInAtDisplay: checkIn.display,
@@ -173,7 +195,7 @@ function mapPlaceholderGuestRow(
 }
 
 function collectBookingGuestRows(
-  booking: {
+  booking: PoliceCompanyBooking & {
     id: string
     adults: number
     children: number
@@ -185,6 +207,7 @@ function collectBookingGuestRows(
       nationality: string | null
       idType: string | null
       idNumber: string | null
+      company: string | null
     }
     room: { roomNumber: string }
     companions: Array<{
@@ -249,6 +272,7 @@ export async function buildHotelPoliceReport(window: BusinessDayWindow): Promise
   const bookings = await db.booking.findMany({
     where: buildPoliceInHouseOnBusinessDayWhere(businessDate, openedAt, closedAt),
     include: {
+      companyLedger: { select: { name: true } },
       customer: {
         select: {
           name: true,
@@ -257,6 +281,7 @@ export async function buildHotelPoliceReport(window: BusinessDayWindow): Promise
           nationality: true,
           idType: true,
           idNumber: true,
+          company: true,
         },
       },
       room: { select: { roomNumber: true } },

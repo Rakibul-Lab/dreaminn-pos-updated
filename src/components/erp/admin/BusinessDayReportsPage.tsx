@@ -1296,7 +1296,7 @@ export default function BusinessDayReportsPage() {
               </CardHeader>
               <CardContent className="p-0">
                 <div className="max-h-[560px] overflow-auto">
-                  <Table className="table-fixed min-w-[1100px]">
+                  <Table className="table-fixed min-w-[1220px]">
                     <TableHeader>
                       <TableRow>
                         <TableHead className="w-[160px]">Guest name</TableHead>
@@ -1304,6 +1304,7 @@ export default function BusinessDayReportsPage() {
                         <TableHead className="w-[180px] whitespace-normal">NID / Passport / License</TableHead>
                         <TableHead className="w-[200px] whitespace-normal">Address</TableHead>
                         <TableHead className="w-[120px]">Nationality</TableHead>
+                        <TableHead className="w-[140px] whitespace-normal">Company</TableHead>
                         <TableHead className="w-[72px]">Room</TableHead>
                         {isPoliceDateRange ? (
                           <TableHead className="w-[110px] whitespace-normal">Business date</TableHead>
@@ -1314,7 +1315,7 @@ export default function BusinessDayReportsPage() {
                     <TableBody>
                       {loadingPolice ? (
                         <TableRow>
-                          <TableCell colSpan={isPoliceDateRange ? 8 : 7}>
+                          <TableCell colSpan={isPoliceDateRange ? 9 : 8}>
                             <Skeleton className="h-8 w-full" />
                           </TableCell>
                         </TableRow>
@@ -1335,6 +1336,7 @@ export default function BusinessDayReportsPage() {
                             <TableCell className="text-sm">{guest.idDocument || '—'}</TableCell>
                             <TableCell className="text-sm whitespace-normal">{guest.address || '—'}</TableCell>
                             <TableCell>{guest.nationality || '—'}</TableCell>
+                            <TableCell className="text-sm whitespace-normal">{guest.company || '—'}</TableCell>
                             <TableCell className="font-mono">{guest.roomNumber}</TableCell>
                             {isPoliceDateRange ? (
                               <TableCell className="text-sm whitespace-nowrap">
@@ -1352,7 +1354,7 @@ export default function BusinessDayReportsPage() {
                       ) : (
                         <TableRow>
                           <TableCell
-                            colSpan={isPoliceDateRange ? 8 : 7}
+                            colSpan={isPoliceDateRange ? 9 : 8}
                             className="text-center py-8 text-muted-foreground"
                           >
                             No in-house guests for the selected period

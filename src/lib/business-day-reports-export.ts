@@ -39,6 +39,7 @@ export type PoliceReportData = {
     idDocument?: string
     address?: string | null
     nationality?: string | null
+    company?: string | null
     roomNumber?: string
     checkInAt?: string | null
     checkInAtDisplay?: string
@@ -1691,6 +1692,7 @@ function mapPoliceGuestRow(
     'NID / Passport / License': String(g.idDocument ?? '—'),
     Address: String(g.address ?? '—'),
     Nationality: String(g.nationality ?? '—'),
+    Company: String(g.company ?? '—'),
     Room: String(g.roomNumber ?? ''),
     'Checked-in date & time': String(g.checkInAtDisplay ?? '—'),
   }
@@ -1707,15 +1709,16 @@ function policePdfColumns(includeBusinessDate: boolean): PdfColumn[] {
     { header: 'Guest name', width: 26, value: (r) => String(r['Guest name']) },
     { header: 'Mobile', width: 16, value: (r) => String(r.Mobile) },
     { header: 'NID / Passport / License', width: 24, value: (r) => String(r['NID / Passport / License']) },
-    { header: 'Address', width: 28, value: (r) => String(r.Address) },
-    { header: 'Nationality', width: 14, value: (r) => String(r.Nationality) },
+    { header: 'Address', width: 24, value: (r) => String(r.Address) },
+    { header: 'Nationality', width: 12, value: (r) => String(r.Nationality) },
+    { header: 'Company', width: 16, value: (r) => String(r.Company) },
     { header: 'Room', width: 10, value: (r) => String(r.Room) },
-    { header: 'Checked-in date & time', width: 22, value: (r) => String(r['Checked-in date & time']) },
+    { header: 'Checked-in date & time', width: 20, value: (r) => String(r['Checked-in date & time']) },
   ]
   if (includeBusinessDate) {
-    columns.splice(6, 0, {
+    columns.splice(7, 0, {
       header: 'Business date',
-      width: 16,
+      width: 14,
       value: (r) => String(r['Business date']),
     })
   }

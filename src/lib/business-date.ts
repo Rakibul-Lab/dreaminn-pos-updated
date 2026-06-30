@@ -379,6 +379,45 @@ export function buildInHouseOnBusinessDayWhere(
   }
 }
 
+/**
+ * Police / in-house register: guests who were still in-house when the business day ended.
+ * Once a guest checks out (e.g. 30/06 at noon), they drop off that day and all later days.
+ */
+export function buildPoliceInHouseOnBusinessDayWhere(
+  businessDate: string,
+  openedAt: Date,
+  closedAt: Date
+): Prisma.BookingWhereInput {
+  const { start } = getCalendarDayBounds(businessDate)
+
+  return {
+    status: { not: 'CANCELLED' },
+    actualCheckIn: { not: null, lte: closedAt },
+    AND: [
+      {
+        OR: [
+          { actualCheckIn: { gte: openedAt, lte: closedAt } },
+          {
+            AND: [
+              { actualCheckIn: { lt: openedAt } },
+              { checkOut: { gte: start } },
+            ],
+          },
+        ],
+      },
+      {
+        OR: [
+          { status: 'CHECKED_IN' },
+          {
+            status: 'CHECKED_OUT',
+            actualCheckOut: { gt: closedAt },
+          },
+        ],
+      },
+    ],
+  }
+}
+
 /** Resolve booking list / guest filters using business-day window for single-day filters. */
 export async function buildGuestStayFilterWhere(
   dateFrom: string | null | undefined,

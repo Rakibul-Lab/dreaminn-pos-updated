@@ -1731,7 +1731,7 @@ export async function downloadBusinessDayPoliceExcel(
   await writeInHouseBookingExcelWorkbook(
     [
       {
-        heading: `Guests checked in (${data.totalCheckIns ?? 0} booking(s), ${data.guestCount ?? guests.length} guest(s))`,
+        heading: `Guests in-house (${data.totalCheckIns ?? 0} booking(s), ${data.guestCount ?? guests.length} guest(s))`,
         rows: guests.map((guest) => mapPoliceGuestRow(guest, includeBusinessDate)),
       },
     ],
@@ -1749,7 +1749,7 @@ export async function downloadBusinessDayPolicePdf(
   await writeInHouseBookingPdf(
     [
       {
-        heading: `Guests checked in (${data.totalCheckIns ?? 0} booking(s), ${data.guestCount ?? guests.length} guest(s))`,
+        heading: `Guests in-house (${data.totalCheckIns ?? 0} booking(s), ${data.guestCount ?? guests.length} guest(s))`,
         columns: policePdfColumns(includeBusinessDate),
         rows,
       },

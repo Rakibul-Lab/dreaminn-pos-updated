@@ -1263,12 +1263,12 @@ export default function BusinessDayReportsPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Card>
                 <CardContent className="p-4">
-                  <p className="text-sm text-muted-foreground">Checked-in</p>
+                  <p className="text-sm text-muted-foreground">In-house bookings</p>
                   <p className="text-2xl font-bold text-slate-800">
                     {policeData?.totalCheckIns ?? 0}
                   </p>
                   <p className="text-xs text-muted-foreground mt-1">
-                    Actual check-ins during the selected period
+                    Bookings with guests in-house on the selected day(s)
                   </p>
                 </CardContent>
               </Card>
@@ -1279,7 +1279,7 @@ export default function BusinessDayReportsPage() {
                     {policeData?.guestCount ?? policeGuests.length}
                   </p>
                   <p className="text-xs text-muted-foreground mt-1">
-                    Includes primary guests and adult companions
+                    Primary guests, companions, and children listed
                   </p>
                 </CardContent>
               </Card>
@@ -1287,10 +1287,11 @@ export default function BusinessDayReportsPage() {
 
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-base">Police register — guests checked in</CardTitle>
+                <CardTitle className="text-base">Police register — guests in-house</CardTitle>
                 <p className="text-sm text-muted-foreground font-normal">
-                  For law-enforcement reporting. Guests who checked in during{' '}
-                  <span className="font-medium text-foreground">{policeDateDisplay}</span>.
+                  For law-enforcement reporting. Guests in-house at the end of{' '}
+                  <span className="font-medium text-foreground">{policeDateDisplay}</span>. Guests
+                  who checked out during the day are removed from that day onward.
                 </p>
               </CardHeader>
               <CardContent className="p-0">
@@ -1354,7 +1355,7 @@ export default function BusinessDayReportsPage() {
                             colSpan={isPoliceDateRange ? 8 : 7}
                             className="text-center py-8 text-muted-foreground"
                           >
-                            No check-ins recorded for the selected period
+                            No in-house guests for the selected period
                           </TableCell>
                         </TableRow>
                       )}

@@ -1,7 +1,7 @@
 import { addDays, format, parseISO } from 'date-fns'
 import { db } from '@/lib/db'
 import {
-  buildCheckInsDuringWindowWhere,
+  buildPoliceInHouseOnBusinessDayWhere,
   formatBusinessDateDisplay,
   isValidBusinessDateString,
 } from '@/lib/business-date'
@@ -242,12 +242,12 @@ function collectBookingGuestRows(
   return rows
 }
 
-/** Guests who actually checked in during the business day window (police register). */
+/** Guests in-house during the business day (police / in-house register). */
 export async function buildHotelPoliceReport(window: BusinessDayWindow): Promise<HotelPoliceReport> {
   const { openedAt, closedAt, businessDate } = window
 
   const bookings = await db.booking.findMany({
-    where: buildCheckInsDuringWindowWhere(openedAt, closedAt),
+    where: buildPoliceInHouseOnBusinessDayWhere(businessDate, openedAt, closedAt),
     include: {
       customer: {
         select: {
@@ -312,7 +312,7 @@ export async function buildHotelPoliceReportForDateRange(
     return buildHotelPoliceReport(window)
   }
 
-  const seenGuestIds = new Set<string>()
+  const seenGuestDayIds = new Set<string>()
   const mergedGuests: PoliceReportGuestRow[] = []
   let totalCheckIns = 0
 
@@ -321,8 +321,9 @@ export async function buildHotelPoliceReportForDateRange(
     const dayReport = await buildHotelPoliceReport(await resolveBusinessDayReportWindow(day))
     totalCheckIns += dayReport.totalCheckIns
     for (const guest of dayReport.guests) {
-      if (seenGuestIds.has(guest.id)) continue
-      seenGuestIds.add(guest.id)
+      const dedupeKey = `${guest.businessDate ?? day}:${guest.id}`
+      if (seenGuestDayIds.has(dedupeKey)) continue
+      seenGuestDayIds.add(dedupeKey)
       mergedGuests.push(guest)
     }
     if (day === to) break

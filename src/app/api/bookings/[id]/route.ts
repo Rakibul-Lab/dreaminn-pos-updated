@@ -18,10 +18,11 @@ import {
 import { formatGuestCompany } from '@/lib/reservation-terms';
 import { getCompleteReservationMissingFields, getCorporateGuestMissingFields } from '@/lib/reservation-completion-fields';
 import { hasBookingCompany } from '@/lib/booking-company';
-import { ensureCustomerRegistrationNumber } from '@/lib/guest-registration-number';
+import { ensureCustomerRegistrationNumber, ensureBookingRegistrationNumber } from '@/lib/guest-registration-number';
 import { getRoomNightlyTotal } from '@/lib/room-pricing';
 import { getEmailValidationError } from '@/lib/email-validation';
 import { assertRoomAvailableForBooking } from '@/lib/reservation-entry';
+import { resolveCompanyLedgerBooking, ensureCompanyLedgerGuestFromCustomer } from '@/lib/company-ledger-billing';
 import { readCurrentBusinessDateString } from '@/lib/business-date';
 import { isArrivalOnOrBeforeBusinessDate } from '@/lib/room-effective-status';
 
@@ -155,6 +156,21 @@ export async function PUT(
     if (body.children !== undefined) updateData.children = parseInt(String(body.children));
     if (body.notes !== undefined) updateData.notes = body.notes;
     if (body.company !== undefined) updateData.company = formatGuestCompany(body.company);
+    if (body.companyLedgerId !== undefined) {
+      const ledgerId =
+        typeof body.companyLedgerId === 'string' ? body.companyLedgerId.trim() : '';
+      if (!ledgerId) {
+        updateData.companyLedgerId = null;
+        updateData.companyLedgerGuestId = null;
+      } else {
+        const ledgerResult = await resolveCompanyLedgerBooking(db, ledgerId, null);
+        if ('error' in ledgerResult) {
+          return errorResponse(ledgerResult.error);
+        }
+        updateData.companyLedgerId = ledgerResult.companyLedgerId;
+        updateData.company = ledgerResult.companyName;
+      }
+    }
     if (body.withMeal !== undefined) updateData.withMeal = body.withMeal === true;
     if (body.discountEnabled !== undefined) {
       updateData.discountEnabled = body.discountEnabled === true;
@@ -437,8 +453,16 @@ export async function PUT(
         idDocumentCount: idDocCount,
         nidPhysicallyReceived: resolvedNidPhysicallyReceived,
         hasCompanySelected: hasBookingCompany({
-          company: existing.company,
-          companyLedgerId: existing.companyLedgerId,
+          company:
+            body.company !== undefined
+              ? formatGuestCompany(body.company)
+              : existing.company,
+          companyLedgerId:
+            body.companyLedgerId !== undefined
+              ? typeof body.companyLedgerId === 'string'
+                ? body.companyLedgerId.trim() || null
+                : null
+              : existing.companyLedgerId,
         }),
       });
       if (missing.length > 0) {
@@ -488,15 +512,29 @@ export async function PUT(
     }
 
     if (body.companions !== undefined && !corporateBooking) {
+      const resolvedNid =
+        body.nidPhysicallyReceived !== undefined
+          ? body.nidPhysicallyReceived !== false
+          : existing.nidPhysicallyReceived !== false
       const companionError = validateCompanionInputs(
         resolvedAdults,
         resolvedChildren,
         (body.companions as CompanionInput[]) ?? [],
         {
-          requireIdFields: !hasBookingCompany({
-            company: existing.company,
-            companyLedgerId: existing.companyLedgerId,
-          }),
+          requireIdFields:
+            resolvedNid ||
+            !hasBookingCompany({
+              company:
+                body.company !== undefined
+                  ? formatGuestCompany(body.company)
+                  : existing.company,
+              companyLedgerId:
+                body.companyLedgerId !== undefined
+                  ? typeof body.companyLedgerId === 'string'
+                    ? body.companyLedgerId.trim() || null
+                    : null
+                  : existing.companyLedgerId,
+            }),
         }
       );
       if (companionError) {
@@ -506,6 +544,36 @@ export async function PUT(
 
     const oldRoomId = existing.roomId;
     const newRoomId = (updateData.roomId as string) || existing.roomId;
+
+    if (
+      updateData.companyLedgerId &&
+      typeof updateData.companyLedgerId === 'string'
+    ) {
+      const customerForLedger = await db.customer.findUnique({
+        where: { id: existing.customerId },
+      });
+      if (customerForLedger) {
+        await ensureBookingRegistrationNumber(id);
+        const regBooking = await db.booking.findUnique({
+          where: { id },
+          select: { registrationNumber: true },
+        });
+        updateData.companyLedgerGuestId = await ensureCompanyLedgerGuestFromCustomer(
+          db,
+          updateData.companyLedgerId,
+          {
+            name: customerForLedger.name,
+            phone: customerForLedger.phone,
+            email: customerForLedger.email,
+            nationality: customerForLedger.nationality,
+            registrationNumber: regBooking?.registrationNumber,
+            address: customerForLedger.address,
+            idType: customerForLedger.idType,
+            idNumber: customerForLedger.idNumber,
+          }
+        );
+      }
+    }
 
     const booking = await db.booking.update({
       where: { id },

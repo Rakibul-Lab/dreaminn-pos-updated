@@ -325,6 +325,7 @@ export function NewReservationWizard({
     companyLedgerId,
     company: guestCompany,
   })
+  const isCompanyLedgerReservation = Boolean(companyLedgerId)
   const { selectedRoomId, checkInDate, checkOutDate, adults, children, withMeal } = stay
   const {
     advancePayment,
@@ -500,7 +501,7 @@ export function NewReservationWizard({
       parseInt(adults, 10) || 1,
       parseInt(children, 10) || 0,
       buildCompanionsPayload(),
-      { requireIdFields: !hasCompanySelected }
+      { requireIdFields: nidPhysicallyReceived || !hasCompanySelected }
     )
   }
   const patchPayment = (patch: Partial<PaymentDraft>) => patchDraft({ payment: patch })
@@ -1018,13 +1019,14 @@ export function NewReservationWizard({
     } else if (
       !options?.skipIdRequirement &&
       !nidPhysicallyReceived &&
+      !hasCompanySelected &&
       idDocuments.length === 0
     ) {
       toast.error('Upload or scan at least one ID image before continuing')
       return null
     }
 
-    if (!isCorporateGuest && nidPhysicallyReceived && !hasCompanySelected) {
+    if (!isCorporateGuest && nidPhysicallyReceived) {
       const physicalMissing = getPhysicalIdMissingFields({
         idNumber,
         idType,
@@ -1151,7 +1153,7 @@ export function NewReservationWizard({
     }
 
     const skipId =
-      isCorporateGuest || asInitial || nidPhysicallyReceived
+      isCorporateGuest || asInitial || nidPhysicallyReceived || hasCompanySelected
     const customerId = await resolveCustomerId({ skipIdRequirement: skipId })
     if (!customerId) return
     if (!selectedRoomId) {
@@ -1174,7 +1176,8 @@ export function NewReservationWizard({
 
       if (isEditMode && editBookingId) {
         const editPayload: Record<string, unknown> = {
-          company: resolvedBookingCompany(),
+          company: companyLedgerId ? undefined : resolvedBookingCompany(),
+          companyLedgerId: companyLedgerId || null,
           roomId: selectedRoomId,
           checkIn: checkInDate,
           checkOut: checkOutDate,
@@ -1244,8 +1247,8 @@ export function NewReservationWizard({
 
       const res = (await createReservationMutation.mutateAsync({
         customerId,
-        company: resolvedBookingCompany(),
-        companyLedgerId: isCorporateGuest ? undefined : companyLedgerId || undefined,
+        company: companyLedgerId ? undefined : resolvedBookingCompany(),
+        companyLedgerId: companyLedgerId || undefined,
         roomId: selectedRoomId,
         checkIn: checkInDate,
         checkOut: checkOutDate,
@@ -1328,7 +1331,7 @@ export function NewReservationWizard({
     ? hasIdActivity
     : !isInitialFlow && (hasIdActivity || nidPhysicallyReceived)
   const idNumberRequired =
-    !hasCompanySelected && (nidPhysicallyReceived || showCompleteRequiredMarkers)
+    nidPhysicallyReceived || (!hasCompanySelected && showCompleteRequiredMarkers)
   const emailAddressRequired =
     showCompleteRequiredMarkers && !nidPhysicallyReceived && !hasCompanySelected
   const completeReservationMissing = getCompleteReservationMissingFields({
@@ -1390,7 +1393,7 @@ export function NewReservationWizard({
       return null
     }
 
-    if (nidPhysicallyReceived && !hasCompanySelected) {
+    if (nidPhysicallyReceived) {
       const physicalMissing = getPhysicalIdMissingFields({
         idNumber,
         idType,
@@ -1402,7 +1405,7 @@ export function NewReservationWizard({
       return null
     }
 
-    if (!forInitialSave && idDocuments.length === 0) {
+    if (!forInitialSave && !hasCompanySelected && idDocuments.length === 0) {
       return 'Upload or scan at least one ID image, or turn on “ID documents physically received”'
     }
 
@@ -1714,7 +1717,6 @@ export function NewReservationWizard({
                       onCheckedChange={(on) => {
                         const patch: Partial<GuestDraft> = { isCorporateGuest: on }
                         if (on) {
-                          patch.companyLedgerId = ''
                           patch.companions = []
                           patch.corporateCompanions = buildAdultCompanionSlots(
                             parseInt(adults, 10) || 1
@@ -1855,6 +1857,14 @@ export function NewReservationWizard({
                           designation: guestDesignation,
                           address: guestAddress,
                         }}
+                        companyLedgerId={companyLedgerId}
+                        onCompanyLedgerSelect={(company) =>
+                          patchGuest({
+                            companyLedgerId: company.id,
+                            guestCompany: company.name,
+                          })
+                        }
+                        onCompanyManualChange={() => patchGuest({ companyLedgerId: '' })}
                         onChange={(patch) =>
                           patchGuest({
                             ...(patch.name !== undefined ? { guestName: patch.name } : {}),
@@ -1867,6 +1877,12 @@ export function NewReservationWizard({
                           })
                         }
                       />
+                      {isCompanyLedgerReservation && (
+                        <p className="text-xs text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-md px-3 py-2">
+                          Checkout can bill room charges to <strong>{guestCompany}</strong> on the
+                          company ledger without guest payment.
+                        </p>
+                      )}
                       {buildAdultCompanionSlots(parseInt(adults, 10) || 1).map((slot, index) => (
                         <CorporateCompanionGuestFields
                           key={`${slot.companionType}-${index}`}
@@ -1891,21 +1907,17 @@ export function NewReservationWizard({
                         <div>
                           <p className="text-sm font-semibold text-sky-900">ID documents physically received</p>
                           <p className="text-xs text-muted-foreground">
-                            When on, upload ID documents from the bookings list before checkout.
-                            {hasCompanySelected
-                              ? ' Company guests do not need ID/passport numbers here.'
-                              : ' Select document type and enter ID/passport number to continue.'}
+                            When on, select document type and enter ID/passport number — including
+                            for company ledger guests. Upload scanned copies from the bookings list
+                            before checkout.
                           </p>
                         </div>
                         <Switch
                           checked={nidPhysicallyReceived}
                           onCheckedChange={(on) => {
-                            const patch: Partial<GuestDraft> = { nidPhysicallyReceived: on }
-                            if (on && !hasCompanySelected) {
-                              patch.idType = resolveIdTypeForNationality(
-                                guestNationality,
-                                idType
-                              )
+                            const patch: Partial<GuestDraft> = {
+                              nidPhysicallyReceived: on,
+                              idType: resolveIdTypeForNationality(guestNationality, idType),
                             }
                             patchGuest(patch)
                           }}
@@ -1927,10 +1939,18 @@ export function NewReservationWizard({
                         <strong>Initial reservation</strong> to continue without ID for now.
                       </div>
                     )}
-                  {guestMode === 'new' && showInitialReservationOption && !isInitialFlow && (
+                  {guestMode === 'new' && showInitialReservationOption && !isInitialFlow && !isCompanyLedgerReservation && (
                     <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
                       Upload or scan at least one ID image to continue — or use{' '}
                       <strong>Initial reservation</strong> below to save without ID for now.
+                    </div>
+                  )}
+                  {isCompanyLedgerReservation && !nidPhysicallyReceived && (
+                    <div className="rounded-md border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm text-indigo-900">
+                      <strong>Company ledger guest</strong> — ID scan is optional. Remaining room
+                      charges can be billed to <strong>{guestCompany}</strong> on checkout. Turn on
+                      &ldquo;ID documents physically received&rdquo; if you need to record ID type
+                      and number now.
                     </div>
                   )}
                   {isInitialFlow && showInitialReservationOption && (
@@ -1941,7 +1961,7 @@ export function NewReservationWizard({
                     </div>
                   )}
 
-                  {nidPhysicallyReceived && !hasCompanySelected ? (
+                  {nidPhysicallyReceived ? (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-start">
                       <NationalityField
                         value={guestNationality}
@@ -1965,7 +1985,7 @@ export function NewReservationWizard({
                     />
                   )}
 
-                  {showCompleteRequiredMarkers && (
+                  {showCompleteRequiredMarkers && !isCompanyLedgerReservation && (
                     <p className="text-sm font-medium text-foreground">ID document images *</p>
                   )}
 
@@ -2107,7 +2127,7 @@ export function NewReservationWizard({
                     key={`${slot.companionType}-${index}`}
                     label={slot.label}
                     value={companions[index] ?? emptyCompanionDraft()}
-                    requireId={!hasCompanySelected}
+                    requireId={nidPhysicallyReceived || !hasCompanySelected}
                     onChange={(patch) => {
                       const next = [...companions]
                       next[index] = { ...(next[index] ?? emptyCompanionDraft()), ...patch }
@@ -2504,6 +2524,12 @@ export function NewReservationWizard({
                       ৳{estimatedTotals().dueAmount.toLocaleString()}
                     </span>
                   </div>
+                  {isCompanyLedgerReservation && estimatedTotals().dueAmount > 0 && (
+                    <p className="text-xs text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-md px-3 py-2">
+                      Remaining balance will be billed to <strong>{guestCompany}</strong> on the
+                      company ledger at checkout.
+                    </p>
+                  )}
                 </CardContent>
               </Card>
               <div className="space-y-2">
@@ -2535,7 +2561,10 @@ export function NewReservationWizard({
                     {guestName || '—'}
                   </span>
                   <span className="text-muted-foreground">Company</span>
-                  <span>{isCorporateGuest ? guestCompany || '—' : formatGuestCompany(guestCompany)}</span>
+                  <span>
+                    {isCorporateGuest ? guestCompany || '—' : formatGuestCompany(guestCompany)}
+                    {isCompanyLedgerReservation ? ' (company ledger)' : ''}
+                  </span>
                   {isCorporateGuest && (
                     <>
                       <span className="text-muted-foreground">Designation</span>

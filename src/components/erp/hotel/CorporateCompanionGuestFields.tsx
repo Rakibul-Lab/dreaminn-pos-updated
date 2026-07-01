@@ -2,6 +2,7 @@
 
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { CompanyLedgerSearchField } from '@/components/erp/hotel/CompanyLedgerSearchField'
 
 export type CorporateCompanionDraft = {
   name: string
@@ -25,13 +26,29 @@ type CorporateCompanionGuestFieldsProps = {
   label: string
   value: CorporateCompanionDraft
   onChange: (patch: Partial<CorporateCompanionDraft>) => void
+  companyLedgerId?: string
+  onCompanyLedgerSelect?: (company: { id: string; name: string }) => void
+  onCompanyManualChange?: (name: string) => void
 }
 
 export function CorporateCompanionGuestFields({
   label,
   value,
   onChange,
+  companyLedgerId = '',
+  onCompanyLedgerSelect,
+  onCompanyManualChange,
 }: CorporateCompanionGuestFieldsProps) {
+  const handleCompanyManual = (name: string) => {
+    onChange({ company: name })
+    onCompanyManualChange?.(name)
+  }
+
+  const handleCompanySelect = (company: { id: string; name: string }) => {
+    onChange({ company: company.name })
+    onCompanyLedgerSelect?.(company)
+  }
+
   return (
     <div className="rounded-lg border border-violet-200 bg-violet-50/30 p-4 space-y-3">
       <p className="text-sm font-semibold text-foreground">{label}</p>
@@ -46,10 +63,15 @@ export function CorporateCompanionGuestFields({
         </div>
         <div className="space-y-1">
           <Label>Company name *</Label>
-          <Input
-            value={value.company}
-            onChange={(e) => onChange({ company: e.target.value })}
-            placeholder="Type company name"
+          <CompanyLedgerSearchField
+            mode="manual-or-ledger"
+            manualValue={value.company}
+            selectedLedgerId={companyLedgerId}
+            selectedLabel={value.company}
+            onManualChange={handleCompanyManual}
+            onSelect={handleCompanySelect}
+            onClear={() => handleCompanyManual('')}
+            placeholder="Type or search company…"
           />
         </div>
         <div className="space-y-1">

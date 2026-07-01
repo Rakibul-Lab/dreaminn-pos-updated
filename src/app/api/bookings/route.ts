@@ -261,6 +261,7 @@ export async function POST(request: NextRequest) {
 
     const adultCount = Math.max(1, parseInt(String(adults ?? 1), 10) || 1);
     const childCount = Math.max(0, parseInt(String(children ?? 0), 10) || 0);
+    const nidReceived = corporateGuest ? false : nidPhysicallyReceived !== false;
     const hasCompanySelected = hasBookingCompany({
       companyLedgerId: companyLedgerId ?? null,
       company: company ?? customer.company,
@@ -270,16 +271,14 @@ export async function POST(request: NextRequest) {
         adultCount,
         childCount,
         (companions as CompanionInput[]) ?? [],
-        { requireIdFields: !hasCompanySelected }
+        { requireIdFields: nidReceived || !hasCompanySelected }
       );
       if (companionError) {
         return errorResponse(companionError);
       }
     }
 
-    const nidReceived = corporateGuest ? false : nidPhysicallyReceived !== false;
-
-    if (nidReceived && !corporateGuest && !hasCompanySelected) {
+    if (nidReceived && !corporateGuest) {
       const idMissing = getPhysicalIdMissingFields({
         idNumber: customer.idNumber ?? '',
         idType: customer.idType ?? '',
@@ -441,7 +440,7 @@ export async function POST(request: NextRequest) {
     let resolvedCompanyLedgerId: string | null = null;
     let resolvedCompanyLedgerGuestId: string | null = null;
 
-    if (!corporateGuest && companyLedgerId) {
+    if (companyLedgerId) {
       const ledgerResult = await resolveCompanyLedgerBooking(db, companyLedgerId, null);
       if ('error' in ledgerResult) {
         return errorResponse(ledgerResult.error);

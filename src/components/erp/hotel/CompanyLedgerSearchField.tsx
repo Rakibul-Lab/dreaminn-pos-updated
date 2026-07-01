@@ -21,6 +21,11 @@ interface CompanyLedgerSearchFieldProps {
   selectedLabel: string
   onSelect: (company: CompanyLedgerSearchResult) => void
   onClear: () => void
+  /** Walk-in + ledger (default), or type a name / pick from ledger (corporate flows). */
+  mode?: 'walkin-or-ledger' | 'manual-or-ledger'
+  manualValue?: string
+  onManualChange?: (name: string) => void
+  placeholder?: string
 }
 
 function filterCompanies(
@@ -43,6 +48,10 @@ export function CompanyLedgerSearchField({
   selectedLabel,
   onSelect,
   onClear,
+  mode = 'walkin-or-ledger',
+  manualValue = '',
+  onManualChange,
+  placeholder,
 }: CompanyLedgerSearchFieldProps) {
   const listboxId = useId()
   const listRef = useRef<HTMLUListElement>(null)
@@ -51,8 +60,13 @@ export function CompanyLedgerSearchField({
   const [inputValue, setInputValue] = useState('')
   const [highlightedIndex, setHighlightedIndex] = useState(-1)
 
-  const isWalkIn = !selectedLedgerId
-  const closedDisplay = isWalkIn ? DEFAULT_GUEST_COMPANY : selectedLabel
+  const isManualOrLedger = mode === 'manual-or-ledger'
+  const isWalkIn = !isManualOrLedger && !selectedLedgerId
+  const closedDisplay = isManualOrLedger
+    ? manualValue.trim() || selectedLabel.trim()
+    : isWalkIn
+      ? DEFAULT_GUEST_COMPANY
+      : selectedLabel
   const searchQuery = inputValue.trim()
 
   useEffect(() => {
@@ -88,7 +102,9 @@ export function CompanyLedgerSearchField({
   const options: Array<
     | { type: 'walkin' }
     | { type: 'company'; company: CompanyLedgerSearchResult }
-  > = [{ type: 'walkin' }, ...companyResults.map((company) => ({ type: 'company' as const, company }))]
+  > = isManualOrLedger
+    ? companyResults.map((company) => ({ type: 'company' as const, company }))
+    : [{ type: 'walkin' }, ...companyResults.map((company) => ({ type: 'company' as const, company }))]
 
   const showList = open
   const hasSearch = searchQuery.length > 0
@@ -96,6 +112,10 @@ export function CompanyLedgerSearchField({
 
   useEffect(() => {
     if (!open) return
+    if (isManualOrLedger) {
+      setHighlightedIndex(companyResults.length > 0 ? 0 : -1)
+      return
+    }
     if (hasSearch && companyResults.length > 0) {
       setHighlightedIndex(1)
       return
@@ -105,7 +125,7 @@ export function CompanyLedgerSearchField({
       return
     }
     setHighlightedIndex(-1)
-  }, [open, hasSearch, companyResults.length, inputValue])
+  }, [open, hasSearch, companyResults.length, inputValue, isManualOrLedger])
 
   useEffect(() => {
     if (highlightedIndex < 0 || !listRef.current) return
@@ -128,6 +148,21 @@ export function CompanyLedgerSearchField({
   }
 
   const resolveEnterSelection = () => {
+    if (isManualOrLedger) {
+      if (hasSearch && companyResults.length > 0) {
+        if (highlightedIndex >= 0) {
+          const option = options[highlightedIndex]
+          if (option?.type === 'company') return selectCompany(option.company)
+        }
+        return selectCompany(companyResults[0]!)
+      }
+      onManualChange?.(searchQuery)
+      setInputValue('')
+      setOpen(false)
+      setHighlightedIndex(-1)
+      return
+    }
+
     if (!hasSearch) {
       if (highlightedIndex >= 1) {
         const option = options[highlightedIndex]
@@ -145,6 +180,8 @@ export function CompanyLedgerSearchField({
     }
   }
 
+  const listStart = isManualOrLedger ? 0 : hasSearch && companyResults.length > 0 ? 1 : 0
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'ArrowDown') {
       if (!showList) {
@@ -153,10 +190,9 @@ export function CompanyLedgerSearchField({
       }
       if (!canNavigate) return
       e.preventDefault()
-      const start = hasSearch && companyResults.length > 0 ? 1 : 0
       setHighlightedIndex((prev) => {
-        if (prev < start) return start
-        return prev < options.length - 1 ? prev + 1 : start
+        if (prev < listStart) return listStart
+        return prev < options.length - 1 ? prev + 1 : listStart
       })
       return
     }
@@ -164,9 +200,8 @@ export function CompanyLedgerSearchField({
     if (e.key === 'ArrowUp') {
       if (!canNavigate) return
       e.preventDefault()
-      const start = hasSearch && companyResults.length > 0 ? 1 : 0
       setHighlightedIndex((prev) => {
-        if (prev <= start) return options.length - 1
+        if (prev <= listStart) return options.length - 1
         return prev - 1
       })
       return
@@ -210,16 +245,23 @@ export function CompanyLedgerSearchField({
           const next = e.target.value
           setInputValue(next)
           setOpen(true)
+          if (isManualOrLedger) {
+            onManualChange?.(next)
+            return
+          }
           if (!next.trim()) {
             setHighlightedIndex(0)
           }
         }}
         onFocus={() => {
           setOpen(true)
+          if (isManualOrLedger && manualValue.trim()) {
+            setInputValue(manualValue)
+          }
         }}
         onClick={() => setOpen(true)}
         onKeyDown={handleKeyDown}
-        placeholder={DEFAULT_GUEST_COMPANY}
+        placeholder={placeholder ?? (isManualOrLedger ? 'Type or search company…' : DEFAULT_GUEST_COMPANY)}
         className="pr-9"
         autoComplete="off"
       />
@@ -246,6 +288,7 @@ export function CompanyLedgerSearchField({
           className="absolute z-50 mt-1 max-h-52 w-full overflow-auto rounded-md border bg-popover shadow-md"
           role="listbox"
         >
+          {!isManualOrLedger ? (
           <li
             id={`${listboxId}-option-0`}
             role="option"
@@ -267,16 +310,21 @@ export function CompanyLedgerSearchField({
               {DEFAULT_GUEST_COMPANY}
             </button>
           </li>
+          ) : null}
 
           {isFetching && allCompanies.length === 0 ? (
             <li className="px-3 py-2 text-sm text-muted-foreground border-t">Loading companies…</li>
           ) : companyResults.length === 0 ? (
             <li className="px-3 py-2 text-sm text-muted-foreground border-t">
-              {hasSearch ? 'No companies found' : 'No companies in ledger yet'}
+              {hasSearch
+                ? isManualOrLedger
+                  ? 'No ledger match — press Enter to use typed name'
+                  : 'No companies found'
+                : 'No companies in ledger yet'}
             </li>
           ) : (
             companyResults.map((company, index) => {
-              const optionIndex = index + 1
+              const optionIndex = isManualOrLedger ? index : index + 1
               return (
                 <li
                   key={company.id}

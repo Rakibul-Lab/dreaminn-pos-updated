@@ -2,7 +2,7 @@ import { hasBookingCompany } from '@/lib/booking-company'
 import { isKnownNationality } from '@/lib/nationalities'
 import { getIdTypeOptionsForNationality } from '@/lib/id-type-label'
 
-/** ID/passport is required only for direct/walk-in guests when ID is physically received. */
+/** ID/passport is required for walk-in guests, or whenever ID is physically received (including company ledger guests). */
 export function requiresIdPassportFields(input: {
   isCorporateGuest?: boolean | null
   hasCompanySelected?: boolean | null
@@ -10,8 +10,8 @@ export function requiresIdPassportFields(input: {
   requireForCompleteReservation?: boolean
 }): boolean {
   if (input.isCorporateGuest === true) return false
-  if (input.hasCompanySelected === true) return false
   if (input.nidPhysicallyReceived === true) return true
+  if (input.hasCompanySelected === true) return false
   return input.requireForCompleteReservation !== false
 }
 
@@ -88,7 +88,7 @@ export function getCompleteReservationMissingFields(guest: {
   const missing: string[] = []
   if (!isKnownNationality(guest.nationality)) missing.push('Nationality')
 
-  if (guest.nidPhysicallyReceived === true && !guest.hasCompanySelected) {
+  if (guest.nidPhysicallyReceived === true) {
     missing.push(
       ...getPhysicalIdMissingFields({
         idNumber: guest.idNumber,
@@ -109,7 +109,11 @@ export function getCompleteReservationMissingFields(guest: {
     if (!guest.email.trim()) missing.push('Email')
     if (!guest.address.trim()) missing.push('Address')
   }
-  if (guest.idDocumentCount === 0 && guest.nidPhysicallyReceived !== true) {
+  if (
+    guest.idDocumentCount === 0 &&
+    guest.nidPhysicallyReceived !== true &&
+    !guest.hasCompanySelected
+  ) {
     missing.push('ID document image')
   }
   return missing

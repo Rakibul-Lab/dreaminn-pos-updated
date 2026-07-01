@@ -139,6 +139,29 @@ export type PaperSalesInput = {
   }
 }
 
+export function resolveChargeLineTotal(
+  grossTotal: number,
+  allocation: {
+    companyBill?: number
+    cash?: number
+    card?: number
+    mbanking?: number
+  }
+): number {
+  const companyBill = allocation.companyBill ?? 0
+  const cash = allocation.cash ?? 0
+  const card = allocation.card ?? 0
+  const mbanking = allocation.mbanking ?? 0
+  const columnSum = companyBill + cash + card + mbanking
+  if (columnSum > 0.005) {
+    return Number(columnSum.toFixed(2))
+  }
+  if (grossTotal > 0) {
+    return Number(grossTotal.toFixed(2))
+  }
+  return 0
+}
+
 export function buildPaperSalesLines(lines: PaperSalesInputLine[] | undefined): PaperSalesLine[] {
   return (lines ?? []).map((line) => {
     // Others Service Sale column is intentionally left empty for now.
@@ -152,14 +175,18 @@ export function buildPaperSalesLines(lines: PaperSalesInputLine[] | undefined): 
     const columnSum =
       (cash ?? 0) + (card ?? 0) + (mBanking ?? 0) + (company ?? 0)
     const lineTotal = line.total ?? 0
-    const totalInclVat =
-      line.lineType === 'charge' && lineTotal !== 0
-        ? Number(lineTotal.toFixed(2))
-        : columnSum !== 0
-          ? Number(columnSum.toFixed(2))
-          : lineTotal !== 0
-            ? Number(lineTotal.toFixed(2))
-            : null
+    let totalInclVat: number | null = null
+    if (line.lineType === 'charge') {
+      if (columnSum > 0) {
+        totalInclVat = Number(columnSum.toFixed(2))
+      } else if (lineTotal !== 0) {
+        totalInclVat = Number(lineTotal.toFixed(2))
+      }
+    } else if (columnSum !== 0) {
+      totalInclVat = Number(columnSum.toFixed(2))
+    } else if (lineTotal !== 0) {
+      totalInclVat = Number(lineTotal.toFixed(2))
+    }
 
     let displayCash = cash
     let displayCard = card
@@ -224,7 +251,7 @@ export function computeBillBreakdown(
   let restaurantBills = 0
   for (const line of lines ?? []) {
     if (line.lineType !== 'charge') continue
-    const total = line.total ?? 0
+    const total = resolveChargeLineTotal(line.total ?? 0, line)
     if (total <= 0) continue
     if (line.source === 'invoice' || line.source === 'beverage') {
       hotelBills += total
@@ -244,7 +271,7 @@ export function buildPaperSummary(data: PaperSalesInput): PaperSummary {
   const balances = data.balances ?? {}
   const openingBalance = balances.openingBalance ?? data.openingBalance ?? 0
   const dueBill = balances.companyBillTotal ?? totals.dueBill
-  const totalSale = data.balances?.salesTotal ?? totals.totalInclVat
+  const totalSale = totals.totalInclVat
   const grandTotal = openingBalance + totalSale
   const closingBalance = balances.closingBalance ?? grandTotal - dueBill
   const hotelDiscount = data.hotel?.discount ?? 0

@@ -33,6 +33,7 @@ import {
   fetchInHouseBookingDiscountsForWindow,
   sumInHouseBookingDiscounts,
 } from '@/lib/in-house-booking-discount'
+import { resolveChargeLineTotal } from '@/lib/daily-sales-paper-format'
 
 export type DailySalesLine = {
   id: string
@@ -395,8 +396,13 @@ function computeReportBillBreakdown(
   let restaurantBills = 0
   for (const line of lines) {
     if (line.lineType !== 'charge') continue
-    const total = line.total ?? 0
-    if (total <= 0 && (line.companyBill ?? 0) <= 0) continue
+    const total = resolveChargeLineTotal(line.total ?? 0, {
+      companyBill: line.companyBill,
+      cash: line.cash,
+      card: line.card,
+      mbanking: line.mbanking,
+    })
+    if (total <= 0) continue
     if (line.source === 'invoice' || line.source === 'beverage') {
       hotelBills += total > 0 ? total : 0
     } else if (line.source === 'restaurant' || line.source === 'guest-restaurant-bill') {
@@ -620,6 +626,7 @@ export async function buildDailySalesDetailReport(
     }
 
     if (invoice.roomCharges > 0) {
+      const roomCompanyBill = foodExtra > 0 ? 0 : companyBill
       lines.push({
         id: `${invoice.id}-room`,
         lineType: 'charge',
@@ -632,9 +639,9 @@ export async function buildDailySalesDetailReport(
         cash: 0,
         card: 0,
         mbanking: 0,
-        companyBill: foodExtra > 0 ? 0 : companyBill,
+        companyBill: roomCompanyBill,
         remark: buildCheckoutInvoiceRoomRemark(invoice.invoiceNumber, companyRemark),
-        total: invoice.roomCharges,
+        total: resolveChargeLineTotal(invoice.roomCharges, { companyBill: roomCompanyBill }),
         reference: invoice.invoiceNumber,
         sortAt,
       })
@@ -644,6 +651,7 @@ export async function buildDailySalesDetailReport(
       const billPayment = restaurantBillRemark
         ? resolveCheckoutFoodPaymentAllocation(booking.id, restaurantOrders, foodExtra)
         : { cash: 0, card: 0, mbanking: 0 }
+      const foodCompanyBill = invoice.roomCharges > 0 ? 0 : companyBill
 
       lines.push({
         id: `${invoice.id}-food`,
@@ -657,9 +665,14 @@ export async function buildDailySalesDetailReport(
         cash: billPayment.cash,
         card: billPayment.card,
         mbanking: billPayment.mbanking,
-        companyBill: invoice.roomCharges > 0 ? 0 : companyBill,
+        companyBill: foodCompanyBill,
         remark: buildCheckoutInvoiceFoodRemark(invoice.invoiceNumber, restaurantBillRemark),
-        total: foodExtra,
+        total: resolveChargeLineTotal(foodExtra, {
+          companyBill: foodCompanyBill,
+          cash: billPayment.cash,
+          card: billPayment.card,
+          mbanking: billPayment.mbanking,
+        }),
         reference: invoice.invoiceNumber,
         sortAt,
       })
@@ -680,7 +693,7 @@ export async function buildDailySalesDetailReport(
         mbanking: 0,
         companyBill,
         remark: buildCheckoutInvoiceRoomRemark(invoice.invoiceNumber, companyRemark),
-        total: invoice.totalAmount,
+        total: resolveChargeLineTotal(invoice.totalAmount, { companyBill }),
         reference: invoice.invoiceNumber,
         sortAt,
       })
@@ -717,7 +730,11 @@ export async function buildDailySalesDetailReport(
       mbanking: billPayment.mbanking,
       companyBill: 0,
       remark: buildGuestRestaurantBillRemark(order.notes ?? null),
-      total: order.totalAmount,
+      total: resolveChargeLineTotal(order.totalAmount, {
+        cash: billPayment.cash,
+        card: billPayment.card,
+        mbanking: billPayment.mbanking,
+      }),
       reference:
         parsed.billNo !== '—'
           ? parsed.billNo
@@ -752,7 +769,7 @@ export async function buildDailySalesDetailReport(
         order.orderNumber,
         ledgerBill?.companyLedger.name ?? null
       ),
-      total: order.totalAmount,
+      total: resolveChargeLineTotal(order.totalAmount, { companyBill }),
       reference: order.orderNumber ? `#${order.orderNumber}` : order.id.slice(-6),
       sortAt: order.createdAt.toISOString(),
     })

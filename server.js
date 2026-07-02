@@ -26,8 +26,13 @@ function loadEnvFile(filePath) {
 }
 
 const appDir = __dirname
+// Anchor the whole app to the hotel's timezone so check-in/out times and the
+// auto next-day bill grace are computed in local hotel time, not the (UTC) host.
+process.env.TZ = process.env.TZ || 'Asia/Dhaka'
 loadEnvFile(path.join(appDir, '.env'))
 loadEnvFile(path.join(appDir, '.env.production'))
+// .env may override the timezone; make sure Node actually adopts it.
+if (!process.env.TZ) process.env.TZ = 'Asia/Dhaka'
 const requiredFiles = path.join(appDir, '.next', 'required-server-files.json')
 
 if (!fs.existsSync(requiredFiles)) {

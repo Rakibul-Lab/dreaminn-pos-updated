@@ -345,12 +345,13 @@ export function InvoicePrintView({
   const restaurantServiceChargePercent =
     resolveRestaurantInvoiceServicePercentLabel(restaurantOrders)
   const invoiceDateTime = chargeDateTime(invoice.createdAt)
-  const stayChargeDateTime = splitDisplayDateTime(displayCheckIn)
   const lineItems = invoice.items ?? []
   const discountMeta = resolveInvoiceDiscountMeta(invoice.booking)
 
   const resolveItemDateTime = (type: string, referenceId?: string | null) => {
-    if (type === 'room_charge' || type === 'extra_service') return stayChargeDateTime
+    // Hotel charges are billed at checkout, so show the invoice (payment received)
+    // date/time rather than the guest's check-in date.
+    if (type === 'room_charge' || type === 'extra_service') return invoiceDateTime
     if (referenceId && orderDateTimeByRef.has(referenceId)) {
       return orderDateTimeByRef.get(referenceId)!
     }
@@ -391,7 +392,7 @@ export function InvoicePrintView({
     hotelDiscountValue: discountMeta.value,
     roomNumber: invoice.booking.room.roomNumber,
     roomTypeName: invoice.booking.room.type.name,
-    stayDateTime: stayChargeDateTime,
+    stayDateTime: invoiceDateTime,
     invoiceDateTime,
     resolveItemDateTime,
     resolveOrderVatPercent,

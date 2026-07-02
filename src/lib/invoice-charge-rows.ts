@@ -102,8 +102,15 @@ function lineItemCategory(type: string) {
   }
 }
 
-/** Gross room rent = nightly rate × nights (e.g. ৳3,500 × 8 = ৳28,000). */
+/**
+ * Room rent shown on the invoice is the actual room charge on the folio
+ * (`roomBill`) — this already reflects any amount edited at checkout or a stay
+ * adjustment. Falls back to nightly rate × nights only when no charge is stored.
+ */
 function resolveHotelGrossRoomRent(ctx: BuildRowsContext): number {
+  if (ctx.roomBill > 0) {
+    return Math.round(ctx.roomBill)
+  }
   if (ctx.nightlyRate > 0 && ctx.bookedNights > 0) {
     return Math.round(ctx.nightlyRate * ctx.bookedNights)
   }

@@ -3,6 +3,27 @@ const GENERIC_PAYMENT_NOTES = new Set([
   'Final payment at check-out',
 ])
 
+/** System-generated booking note lines that must never appear on invoices. */
+const SYSTEM_NOTE_PATTERNS = [
+  /^Auto-extended\b/i,
+  /checkout grace\.?$/i,
+]
+
+/** Drop auto-generated system lines, keep only human-written booking notes. */
+function stripSystemBookingNotes(notes?: string | null): string | null {
+  if (!notes) return null
+  const kept = notes
+    .split('\n')
+    .filter((line) => {
+      const trimmed = line.trim()
+      if (!trimmed) return false
+      return !SYSTEM_NOTE_PATTERNS.some((pattern) => pattern.test(trimmed))
+    })
+    .join('\n')
+    .trim()
+  return kept.length > 0 ? kept : null
+}
+
 export type InvoiceNotesInput = {
   bookingNotes?: string | null
   customerNotes?: string | null
@@ -22,7 +43,7 @@ export function collectInvoiceNotes(input: InvoiceNotesInput): string[] {
     lines.push(trimmed)
   }
 
-  add(input.bookingNotes)
+  add(stripSystemBookingNotes(input.bookingNotes))
   add(input.customerNotes)
   add(input.companyLedgerGuestNotes)
 

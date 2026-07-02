@@ -78,6 +78,12 @@ export async function extendOverdueCheckedInBooking(
     }
   )
 
+  console.info(
+    `[auto-next-day-bill] booking=${bookingId} reg=${booking.registrationNumber ?? '—'} ` +
+      `grace=${resolvedGrace} (${formatTime12h(resolvedGrace)}) now=${now.toString()} ` +
+      `TZ=${process.env.TZ ?? 'system'} extended=${extensions} night(s) newCheckOut=${checkOut.toString()}`
+  )
+
   await db.booking.update({
     where: { id: bookingId },
     data: {

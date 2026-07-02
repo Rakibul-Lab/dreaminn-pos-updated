@@ -82,14 +82,34 @@ function buildRoomChargeLines(input: BuildInvoiceLineItemsInput): InvoiceLineIte
 
   const roomRateCharges = input.charges.filter((c) => c.chargeType === 'ROOM_RATE')
   if (roomRateCharges.length > 0) {
-    return roomRateCharges.map((charge) => ({
-      itemType: 'room_charge',
-      referenceId: charge.id,
-      description: charge.description || `Room rate – Room ${roomNumber}`,
-      quantity: charge.quantity,
-      unitPrice: charge.amount,
-      total: charge.amount * charge.quantity,
-    }))
+    const folioRoomTotal = roomRateCharges.reduce(
+      (sum, c) => sum + c.amount * c.quantity,
+      0
+    )
+    // Itemize the folio room charges only when they still match the authoritative
+    // room total. If the amount was edited at checkout (override), the folio no
+    // longer reflects it — emit a single line for the actual charged amount.
+    if (Math.abs(folioRoomTotal - roomCharges) < 0.01) {
+      return roomRateCharges.map((charge) => ({
+        itemType: 'room_charge',
+        referenceId: charge.id,
+        description: charge.description || `Room rate – Room ${roomNumber}`,
+        quantity: charge.quantity,
+        unitPrice: charge.amount,
+        total: charge.amount * charge.quantity,
+      }))
+    }
+
+    const overrideNights = Math.max(1, countBookedNights(input.checkIn, input.checkOut))
+    return [
+      {
+        itemType: 'room_charge',
+        description: `Room ${roomNumber} (${roomTypeName}) – ${overrideNights} night${overrideNights > 1 ? 's' : ''}`,
+        quantity: overrideNights,
+        unitPrice: roomCharges / overrideNights,
+        total: roomCharges,
+      },
+    ]
   }
 
   if (roomCharges <= 0) return []

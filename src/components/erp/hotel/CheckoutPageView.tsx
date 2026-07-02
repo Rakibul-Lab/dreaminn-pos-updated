@@ -340,6 +340,15 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
     ? Math.max(0, checkOutDue - totalCheckoutPayments)
     : 0
 
+  // Use the value the user actually typed (not the 400ms-debounced one), so a
+  // room-charge edit is never lost when Checkout is clicked right after typing.
+  const resolveSubmitRoomCharge = (): number | undefined => {
+    if (!roomChargeTouched) return debouncedRoomCharge ?? undefined
+    const parsed = parseFloat(roomChargeInput)
+    if (roomChargeInput.trim() === '' || Number.isNaN(parsed)) return undefined
+    return Math.max(0, parsed)
+  }
+
   const checkOutMutation = useMutation({
     mutationFn: () =>
       api.post(`/bookings/check-out/${bookingId}`, {
@@ -362,7 +371,7 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
         roomCreditTransferEnabled,
         creditTransferBookingIds:
           roomCreditTransferEnabled && billTransferTargetId ? [billTransferTargetId] : [],
-        roomCharge: debouncedRoomCharge ?? undefined,
+        roomCharge: resolveSubmitRoomCharge(),
         companyLedgerId: checkoutCompanyLedgerId || null,
       }),
     onSuccess: (res: {

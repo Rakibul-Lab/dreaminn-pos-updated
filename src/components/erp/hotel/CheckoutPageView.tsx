@@ -131,6 +131,9 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
   const [billTransferTargetId, setBillTransferTargetId] = useState<string | null>(null)
   const [checkoutCompanyLedgerId, setCheckoutCompanyLedgerId] = useState('')
   const [checkoutCompanyLedgerLabel, setCheckoutCompanyLedgerLabel] = useState(DEFAULT_GUEST_COMPANY)
+  // Only send/override the company when the user actually edits it at checkout.
+  // Otherwise we leave the booking's existing company untouched (never wipe it).
+  const [checkoutCompanyLedgerTouched, setCheckoutCompanyLedgerTouched] = useState(false)
   const [discountReady, setDiscountReady] = useState(false)
 
   const parsedDamageAmount = Math.max(0, parseFloat(damageChargeAmount) || 0)
@@ -229,6 +232,7 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
         billTransferTargetId,
         debouncedRoomCharge,
         checkoutCompanyLedgerId,
+        checkoutCompanyLedgerTouched,
       ],
       queryFn: () => {
         const params = new URLSearchParams()
@@ -252,7 +256,11 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
         if (debouncedRoomCharge != null) {
           params.set('roomCharge', String(debouncedRoomCharge))
         }
-        params.set('companyLedgerId', checkoutCompanyLedgerId)
+        // Only override the company in the preview when the user edited it;
+        // otherwise omit it so the preview reflects the booking's saved company.
+        if (checkoutCompanyLedgerTouched) {
+          params.set('companyLedgerId', checkoutCompanyLedgerId)
+        }
         const qs = params.toString()
         return api.get<{ success: boolean; data: CheckoutPreview; error?: string }>(
           `/bookings/check-out/${bookingId}${qs ? `?${qs}` : ''}`
@@ -270,12 +278,28 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
   const discountFromReservation = checkoutPreview?.bookingDiscount?.enabled === true
   const previewApiError =
     previewRes?.success === false ? previewRes.error || previewRes.message : undefined
-  const isCompanyLedgerCheckout = !!checkoutCompanyLedgerId
+  const isCompanyLedgerCheckout = checkoutCompanyLedgerTouched
+    ? !!checkoutCompanyLedgerId
+    : !!checkoutPreview?.billToCompanyLedger
 
   useEffect(() => {
     if (!checkoutPreview?.roomCharges || roomChargeTouched) return
     setRoomChargeInput(String(checkoutPreview.roomCharges))
   }, [checkoutPreview?.roomCharges, roomChargeTouched])
+
+  // Seed the company field from the booking's saved company ledger so it shows
+  // in the UI and is preserved through checkout (until the user edits it).
+  useEffect(() => {
+    if (checkoutCompanyLedgerTouched) return
+    if (checkoutPreview?.companyLedgerId) {
+      setCheckoutCompanyLedgerId(checkoutPreview.companyLedgerId)
+      setCheckoutCompanyLedgerLabel(checkoutPreview.companyLedgerName ?? DEFAULT_GUEST_COMPANY)
+    }
+  }, [
+    checkoutPreview?.companyLedgerId,
+    checkoutPreview?.companyLedgerName,
+    checkoutCompanyLedgerTouched,
+  ])
 
   const checkOutDue =
     isBillTransferOut ? 0 : (checkoutPreview?.dueBeforeSettlement ?? 0)
@@ -372,7 +396,11 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
         creditTransferBookingIds:
           roomCreditTransferEnabled && billTransferTargetId ? [billTransferTargetId] : [],
         roomCharge: resolveSubmitRoomCharge(),
-        companyLedgerId: checkoutCompanyLedgerId || null,
+        // Only send the company when the user edited it at checkout; omitting it
+        // leaves the booking's saved company intact (never reset to walk-in).
+        ...(checkoutCompanyLedgerTouched
+          ? { companyLedgerId: checkoutCompanyLedgerId || null }
+          : {}),
       }),
     onSuccess: (res: {
       success?: boolean
@@ -708,10 +736,12 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
               selectedLedgerId={checkoutCompanyLedgerId}
               selectedLabel={checkoutCompanyLedgerLabel}
               onSelect={(company) => {
+                setCheckoutCompanyLedgerTouched(true)
                 setCheckoutCompanyLedgerId(company.id)
                 setCheckoutCompanyLedgerLabel(company.name)
               }}
               onClear={() => {
+                setCheckoutCompanyLedgerTouched(true)
                 setCheckoutCompanyLedgerId('')
                 setCheckoutCompanyLedgerLabel(DEFAULT_GUEST_COMPANY)
               }}

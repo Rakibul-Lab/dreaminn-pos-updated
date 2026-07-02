@@ -155,7 +155,12 @@ export async function PUT(
     if (body.adults !== undefined) updateData.adults = parseInt(String(body.adults));
     if (body.children !== undefined) updateData.children = parseInt(String(body.children));
     if (body.notes !== undefined) updateData.notes = body.notes;
-    if (body.company !== undefined) updateData.company = formatGuestCompany(body.company);
+    if (body.company !== undefined) {
+      const trimmedCompany = typeof body.company === 'string' ? body.company.trim() : '';
+      // On edit, a blank company means "leave as-is" — never reset an existing
+      // company to the default walk-in value.
+      if (trimmedCompany) updateData.company = formatGuestCompany(trimmedCompany);
+    }
     if (body.companyLedgerId !== undefined) {
       const ledgerId =
         typeof body.companyLedgerId === 'string' ? body.companyLedgerId.trim() : '';

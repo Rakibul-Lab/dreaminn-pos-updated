@@ -102,7 +102,7 @@ export function DailySalesPaperView({ data }: DailySalesPaperViewProps) {
                   </tr>
                 )}
                 <tr className="font-semibold">
-                  {paperTotalsToRow(totals).map((cell, index) => (
+                  {paperTotalsToRow(totals, summary.totalSale).map((cell, index) => (
                     <td
                       key={index}
                       className={`border border-black px-1 py-1 ${

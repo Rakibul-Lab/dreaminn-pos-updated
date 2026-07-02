@@ -107,6 +107,7 @@ export type PaperSalesInput = {
   lines?: PaperSalesInputLine[]
   balances?: {
     openingBalance?: number
+    salesTotal?: number
     companyBillTotal?: number
     closingBalance?: number
   }
@@ -271,7 +272,10 @@ export function buildPaperSummary(data: PaperSalesInput): PaperSummary {
   const balances = data.balances ?? {}
   const openingBalance = balances.openingBalance ?? data.openingBalance ?? 0
   const dueBill = balances.companyBillTotal ?? totals.dueBill
-  const totalSale = totals.totalInclVat
+  // Authoritative day sale (charge lines + same-day checkout collections whose
+  // invoice charge rows were suppressed) comes from balances.salesTotal.
+  // Fall back to charge-line totals only when balances are unavailable.
+  const totalSale = balances.salesTotal ?? totals.totalInclVat
   const grandTotal = openingBalance + totalSale
   const closingBalance = balances.closingBalance ?? grandTotal - dueBill
   const hotelDiscount = data.hotel?.discount ?? 0

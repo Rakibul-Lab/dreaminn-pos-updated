@@ -131,6 +131,15 @@ export async function computeLateCheckoutFee(
   return { amount: Math.max(0, charge), hoursLate }
 }
 
+/**
+ * Time on the check-out day after which an un-departed guest is auto-billed for
+ * the next night. Standard 2:00 PM, editable from hotel settings.
+ */
+export async function getAutoNextDayBillTime(): Promise<string> {
+  const raw = await readSettingValue('auto_next_day_bill_time')
+  return normalizeTimeHHmm(raw, DEF_BY_KEY.get('auto_next_day_bill_time')?.value ?? '14:00')
+}
+
 export async function getHotelCheckInOutTimes(): Promise<HotelTimes> {
   const checkInRaw = await readSettingValue('check_in_time')
   const checkOutRaw = await readSettingValue('check_out_time')

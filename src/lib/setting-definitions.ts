@@ -43,6 +43,14 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
     hint: 'Applied to all reservation check-out dates and late-checkout deadline',
   },
   {
+    key: 'auto_next_day_bill_time',
+    value: '14:00',
+    group: 'hotel',
+    label: 'Auto Next-Day Bill Time',
+    inputType: 'time',
+    hint: 'After this time on the check-out day, an extra night is auto-added if the guest has not checked out (standard 2:00 PM)',
+  },
+  {
     key: 'late_checkout_charge',
     value: '500',
     group: 'hotel',

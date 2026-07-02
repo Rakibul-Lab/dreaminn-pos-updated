@@ -410,7 +410,7 @@ async function writeDailySalesExcel(
     row += 1
   }
 
-  const totalValues = paperTotalsToRow(totals)
+  const totalValues = paperTotalsToRow(totals, summary.totalSale)
   totalValues.forEach((value, index) => {
     const cell = sheet.getCell(row, index + 1)
     cell.value = value
@@ -596,7 +596,7 @@ async function writeDailySalesPdf(
   }
 
   pdf.setFont('helvetica', 'bold')
-  const totalValues = paperTotalsToRow(totals)
+  const totalValues = paperTotalsToRow(totals, summary.totalSale)
   let x = mainStartX + 1
   totalValues.forEach((text, i) => {
     if (i === 6 && totals.dueBill > 0) pdf.setTextColor(204, 0, 0)

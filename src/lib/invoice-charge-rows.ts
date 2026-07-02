@@ -235,13 +235,18 @@ function buildHotelRowsFromLineItems(ctx: BuildRowsContext): InvoiceChargeDispla
     const { date, time } = ctx.resolveItemDateTime('extra_service', item.referenceId)
     const base = Math.abs(item.total)
     const isBeverage = item.description.toLowerCase().includes('beverage')
+    const isLateCheckout = item.description.toLowerCase().includes('late checkout')
     rows.push(
       buildChargeDisplayRow({
         id: item.id,
         date,
         time,
-        category: isBeverage ? 'Hotel Beverage' : lineItemCategory('extra_service'),
-        description: item.description,
+        category: isBeverage
+          ? 'Hotel Beverage'
+          : isLateCheckout
+            ? item.description
+            : lineItemCategory('extra_service'),
+        description: isLateCheckout ? '' : item.description,
         roomRent: base,
         sdAmount: 0,
         vatAmount: 0,

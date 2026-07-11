@@ -13,6 +13,7 @@ import {
   GUEST_FOLIO_RESTAURANT_VAT_PERCENT,
   isGuestFolioManualRestaurantBill,
 } from '@/lib/booking-restaurant-bill.shared'
+import { formatPaymentTypeLabel, isManualRecordPaymentType } from '@/lib/payment-method'
 
 const HOTEL_CHARGE_TYPES = new Set(['room_charge', 'extra_service', 'discount'])
 const RESTAURANT_CHARGE_TYPES = new Set(['food_order'])
@@ -60,6 +61,10 @@ type BuildRowsContext = {
   resolveItemDateTime: (type: string, referenceId?: string | null) => { date: string; time: string }
   resolveOrderVatPercent: (description: string) => number | null
   defaultRestaurantVatPercent: number | null
+  manualChargePaymentsById?: Map<
+    string,
+    { paymentType: string; amount: number; notes?: string | null; createdAt: string }
+  >
 }
 
 function resolveRestaurantRowServicePercent(
@@ -232,7 +237,14 @@ function buildHotelRowsFromLineItems(ctx: BuildRowsContext): InvoiceChargeDispla
   }
 
   for (const item of extraItems) {
-    const { date, time } = ctx.resolveItemDateTime('extra_service', item.referenceId)
+    const manualPayment = item.referenceId
+      ? ctx.manualChargePaymentsById?.get(item.referenceId)
+      : undefined
+    const isManualCharge =
+      manualPayment != null && isManualRecordPaymentType(manualPayment.paymentType)
+    const { date, time } = isManualCharge
+      ? ctx.resolveItemDateTime('manual_charge', item.referenceId)
+      : ctx.resolveItemDateTime('extra_service', item.referenceId)
     const base = Math.abs(item.total)
     const isBeverage = item.description.toLowerCase().includes('beverage')
     const isLateCheckout = item.description.toLowerCase().includes('late checkout')
@@ -241,12 +253,18 @@ function buildHotelRowsFromLineItems(ctx: BuildRowsContext): InvoiceChargeDispla
         id: item.id,
         date,
         time,
-        category: isBeverage
-          ? 'Hotel Beverage'
+        category: isManualCharge
+          ? formatPaymentTypeLabel(manualPayment.paymentType)
+          : isBeverage
+            ? 'Hotel Beverage'
+            : isLateCheckout
+              ? item.description
+              : lineItemCategory('extra_service'),
+        description: isManualCharge
+          ? ''
           : isLateCheckout
-            ? item.description
-            : lineItemCategory('extra_service'),
-        description: isLateCheckout ? '' : item.description,
+            ? ''
+            : item.description,
         roomRent: base,
         sdAmount: 0,
         vatAmount: 0,
@@ -258,6 +276,46 @@ function buildHotelRowsFromLineItems(ctx: BuildRowsContext): InvoiceChargeDispla
   }
 
   return rows
+}
+
+/** Hotel rows for manual charge payments not yet stored as invoice line items. */
+function appendOrphanManualChargeRows(
+  ctx: BuildRowsContext,
+  rows: InvoiceChargeDisplayRow[]
+): InvoiceChargeDisplayRow[] {
+  const payments = ctx.manualChargePaymentsById
+  if (!payments?.size) return rows
+
+  const referencedPaymentIds = new Set(
+    ctx.lineItems
+      .map((item) => item.referenceId)
+      .filter((id): id is string => !!id)
+  )
+
+  const extraRows = [...rows]
+  for (const [paymentId, payment] of payments) {
+    if (!isManualRecordPaymentType(payment.paymentType)) continue
+    if (referencedPaymentIds.has(paymentId)) continue
+
+    const { date, time } = ctx.resolveItemDateTime('manual_charge', paymentId)
+    extraRows.push(
+      buildChargeDisplayRow({
+        id: `manual-charge-${paymentId}`,
+        date,
+        time,
+        category: formatPaymentTypeLabel(payment.paymentType),
+        description: '',
+        roomRent: Math.abs(payment.amount),
+        sdAmount: 0,
+        vatAmount: 0,
+        serviceChargeAmount: 0,
+        discountLabel: INVOICE_ZERO_DISCOUNT_DISPLAY,
+        discountAmount: 0,
+      })
+    )
+  }
+
+  return extraRows
 }
 
 function buildFallbackHotelRows(ctx: BuildRowsContext): InvoiceChargeDisplayRow[] {
@@ -287,7 +345,7 @@ function buildFallbackHotelRows(ctx: BuildRowsContext): InvoiceChargeDisplayRow[
 }
 
 export function buildHotelInvoiceChargeRows(ctx: BuildRowsContext): InvoiceChargeDisplayRow[] {
-  const fromItems = buildHotelRowsFromLineItems(ctx)
+  const fromItems = appendOrphanManualChargeRows(ctx, buildHotelRowsFromLineItems(ctx))
   if (fromItems.length > 0) return fromItems
   return buildFallbackHotelRows(ctx)
 }

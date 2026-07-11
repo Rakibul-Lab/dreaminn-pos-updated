@@ -52,6 +52,7 @@ import {
 import { formatInvoiceNumberDisplay } from '@/lib/invoice-number'
 import { INVOICE_GUEST_AGREEMENT } from '@/lib/reservation-terms'
 import { formatBookingStatusFilterLabel } from '@/lib/booking-date-filter'
+import { isManualRecordPaymentType } from '@/lib/payment-method'
 
 export interface InvoicePrintData {
   id: string
@@ -75,6 +76,7 @@ export interface InvoicePrintData {
     method: string
     paymentType: string
     createdAt: string
+    notes?: string | null
   }>
   booking: {
     id: string
@@ -347,11 +349,32 @@ export function InvoicePrintView({
   const invoiceDateTime = chargeDateTime(invoice.createdAt)
   const lineItems = invoice.items ?? []
   const discountMeta = resolveInvoiceDiscountMeta(invoice.booking)
+  const manualChargePaymentsById = new Map(
+    (invoice.payments ?? [])
+      .filter((payment) => payment.id && isManualRecordPaymentType(payment.paymentType))
+      .map((payment) => [
+        payment.id,
+        {
+          paymentType: payment.paymentType,
+          amount: payment.amount,
+          notes: payment.notes,
+          createdAt: payment.createdAt,
+        },
+      ])
+  )
+  const paymentDateTimeByRef = new Map(
+    (invoice.payments ?? []).map((payment) => [payment.id, chargeDateTime(payment.createdAt)])
+  )
 
   const resolveItemDateTime = (type: string, referenceId?: string | null) => {
+    if (referenceId && paymentDateTimeByRef.has(referenceId)) {
+      return paymentDateTimeByRef.get(referenceId)!
+    }
     // Hotel charges are billed at checkout, so show the invoice (payment received)
     // date/time rather than the guest's check-in date.
-    if (type === 'room_charge' || type === 'extra_service') return invoiceDateTime
+    if (type === 'room_charge' || type === 'extra_service' || type === 'manual_charge') {
+      return invoiceDateTime
+    }
     if (referenceId && orderDateTimeByRef.has(referenceId)) {
       return orderDateTimeByRef.get(referenceId)!
     }
@@ -397,6 +420,7 @@ export function InvoicePrintView({
     resolveItemDateTime,
     resolveOrderVatPercent,
     defaultRestaurantVatPercent,
+    manualChargePaymentsById,
   }
 
   const hotelRows = buildHotelInvoiceChargeRows(rowContext)
@@ -415,7 +439,7 @@ export function InvoicePrintView({
     dueAmount: invoice.dueAmount,
   })
   const cardPaymentAmount = sumPaymentsByMethod(invoice.payments ?? [], 'CARD')
-  const totalInWords = formatAmountInWords(invoice.totalAmount)
+  const totalInWords = formatAmountInWords(combinedTotal)
   const invoiceNotes = invoice.invoiceNotes ?? []
   const hotelDiscountColumnHeading = formatDiscountColumnHeading(
     discountMeta.type,
@@ -727,13 +751,15 @@ export function InvoicePrintView({
               hotelServiceChargePercent,
               hotelDiscountColumnHeading
             )}
-            {renderChargeTable(
-              'Restaurant',
-              restaurantRows,
-              restaurantPartTotal,
-              defaultRestaurantVatPercent,
-              restaurantServiceChargePercent
-            )}
+            {restaurantRows.length > 0
+              ? renderChargeTable(
+                  'Restaurant',
+                  restaurantRows,
+                  restaurantPartTotal,
+                  defaultRestaurantVatPercent ?? INVOICE_VAT_PERCENT,
+                  restaurantServiceChargePercent
+                )
+              : null}
           </div>
 
           <div className="invoice-pdf-summary w-full text-[8.5pt]">

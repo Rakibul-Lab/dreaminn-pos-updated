@@ -573,6 +573,48 @@
   print-color-adjust: exact !important;
 }
 
+.invoice-a4-sheet .invoice-pdf-header-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr) auto;
+  align-items: start;
+  column-gap: 5mm;
+}
+
+.invoice-a4-sheet .invoice-pdf-header-brand {
+  align-self: start;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.invoice-a4-sheet .invoice-pdf-header-brand-text {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.invoice-a4-sheet .invoice-pdf-header-brand .invoice-hotel-address,
+.invoice-a4-sheet .invoice-pdf-header-brand .invoice-hotel-mobile {
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.invoice-a4-sheet .invoice-pdf-header-invoice {
+  justify-self: center;
+  align-self: start;
+  min-width: 0;
+}
+
+.invoice-a4-sheet .invoice-tax-meta {
+  justify-self: end;
+  align-self: start;
+  text-align: right;
+}
+
+.invoice-a4-sheet .invoice-tax-meta p {
+  margin: 0;
+  line-height: 1.35;
+}
+
 .invoice-a4-sheet .invoice-signatures {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -881,6 +923,53 @@
     page-break-inside: avoid !important;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
+  }
+
+  .invoice-a4-sheet .invoice-pdf-header,
+  .invoice-a4-sheet .invoice-pdf-header-grid {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr) auto !important;
+    align-items: start !important;
+    column-gap: 5mm !important;
+    row-gap: 0 !important;
+    flex-direction: unset !important;
+    flex-wrap: unset !important;
+    justify-content: unset !important;
+  }
+
+  .invoice-a4-sheet .invoice-pdf-header-brand {
+    flex: unset !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    overflow: hidden !important;
+    align-self: start !important;
+  }
+
+  .invoice-a4-sheet .invoice-pdf-header-brand .invoice-hotel-address,
+  .invoice-a4-sheet .invoice-pdf-header-brand .invoice-hotel-mobile {
+    white-space: nowrap !important;
+    overflow-wrap: normal !important;
+    word-break: normal !important;
+    max-width: 100% !important;
+  }
+
+  .invoice-a4-sheet .invoice-pdf-header-invoice {
+    display: flex !important;
+    justify-content: center !important;
+    justify-self: center !important;
+    align-self: start !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+    text-align: left !important;
+  }
+
+  .invoice-a4-sheet .invoice-tax-meta {
+    border-left: none !important;
+    padding-left: 0 !important;
+    justify-self: end !important;
+    align-self: start !important;
+    text-align: right !important;
+    min-width: 38mm !important;
   }
 
   .invoice-a4-sheet .text-muted-foreground {

@@ -150,6 +150,12 @@ export function DailySalesPaperView({ data }: DailySalesPaperViewProps) {
                   </td>
                 </tr>
                 <tr>
+                  <td className="border border-black px-2 py-1">Transport bills</td>
+                  <td className="border border-black px-2 py-1 text-right">
+                    {formatPaperAmountAlways(summary.transportBills)}
+                  </td>
+                </tr>
+                <tr>
                   <td className="border border-black px-2 py-1">Restaurant bills</td>
                   <td className="border border-black px-2 py-1 text-right">
                     {formatPaperAmountAlways(summary.restaurantBills)}

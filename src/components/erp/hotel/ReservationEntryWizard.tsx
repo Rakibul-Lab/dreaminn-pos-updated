@@ -46,7 +46,6 @@ import { GuestIdTypeField } from '@/components/erp/hotel/GuestIdTypeField'
 import type { IdDocumentType } from '@/lib/id-ocr'
 import { getIdTypeOptionsForNationality } from '@/lib/id-type-label'
 import { isKnownNationality } from '@/lib/nationalities'
-import { getPhysicalIdTypeMissingFields } from '@/lib/reservation-completion-fields'
 
 type RoomType = { id: string; name: string }
 
@@ -323,13 +322,6 @@ export function ReservationEntryWizard() {
     if (phoneError) return phoneError
     if (requiresGuestIdFields) {
       if (!isKnownNationality(guestNationality)) return 'Nationality is required'
-      const typeMissing = getPhysicalIdTypeMissingFields({
-        idType: guestIdType,
-        nationality: guestNationality,
-      })
-      if (typeMissing.length > 0) {
-        return `Required: ${typeMissing.join(', ')}`
-      }
     }
     const validLines = lines.filter((line) => line.roomTypeId)
     if (!validLines.length) return 'Add at least one room category line'
@@ -573,7 +565,6 @@ export function ReservationEntryWizard() {
                   idType={guestIdType}
                   onIdTypeChange={setGuestIdType}
                   allowUnset
-                  required
                 />
               </div>
               <div className="min-w-0 space-y-2">

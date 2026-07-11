@@ -696,6 +696,10 @@ export default function ReportsPage() {
                               amount:
                                 dailySalesHotel?.hotelSalesTotal ?? dailySalesHotel?.invoiceTotal ?? 0,
                             },
+                            {
+                              category: 'Transport sales',
+                              amount: dailySalesHotel?.transportSales ?? 0,
+                            },
                             { category: 'Discount', amount: dailySalesHotel?.discount ?? 0 },
                             { category: 'VAT', amount: dailySalesHotel?.vat ?? 0 },
                             { category: 'Restaurant POS', amount: dailySalesRestaurant?.grossSales ?? 0 },
@@ -719,6 +723,7 @@ export default function ReportsPage() {
                       <div className="flex justify-between"><span>Extras</span><span>৳{((dailySalesHotel?.extraSales || 0) as number).toLocaleString()}</span></div>
                       <div className="flex justify-between"><span>Hotel beverage (walk-in)</span><span>৳{((dailySalesHotel?.beverageWalkInSales || 0) as number).toLocaleString()}</span></div>
                       <div className="flex justify-between font-medium"><span>Hotel sales total</span><span>৳{((dailySalesHotel?.hotelSalesTotal ?? dailySalesHotel?.invoiceTotal ?? 0) as number).toLocaleString()}</span></div>
+                      <div className="flex justify-between"><span>Transport sales</span><span>৳{((dailySalesHotel?.transportSales || 0) as number).toLocaleString()}</span></div>
                       <div className="flex justify-between"><span>Discount</span><span>৳{((dailySalesHotel?.discount || 0) as number).toLocaleString()}</span></div>
                       <div className="flex justify-between"><span>VAT</span><span>৳{((dailySalesHotel?.vat || 0) as number).toLocaleString()}</span></div>
                       <div className="flex justify-between"><span>Restaurant POS</span><span>৳{((dailySalesRestaurant?.grossSales || 0) as number).toLocaleString()}</span></div>

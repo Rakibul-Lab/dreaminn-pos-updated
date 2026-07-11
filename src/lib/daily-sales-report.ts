@@ -18,6 +18,8 @@ import { parseBookingRestaurantBillNotes } from '@/lib/booking-restaurant-bill-n
 import { PAYMENT_METHOD_OPTIONS } from '@/lib/payment-method'
 import {
   beverageSaleNumberFromPayment,
+  isTransportSalePayment,
+  transportSaleNumberFromPayment,
   resolvePaymentGuestName,
   resolvePaymentReference,
   resolvePaymentRoomNumber,
@@ -42,6 +44,7 @@ export type DailySalesLine = {
     | 'invoice'
     | 'restaurant'
     | 'beverage'
+    | 'transport'
     | 'guest-restaurant-bill'
     | 'payment'
   guestName: string | null
@@ -88,7 +91,10 @@ export type DailySalesDetailReport = {
     beverageWalkInSales: number
     beverageRoomSales: number
     beverageSales: number
-    /** Hotel-side total: room invoices + walk-in beverage (not restaurant POS). */
+    transportWalkInSales: number
+    transportRoomSales: number
+    transportSales: number
+    /** Hotel-side total: room invoices + walk-in beverage (not restaurant POS or transport). */
     hotelSalesTotal: number
   }
   restaurant: {
@@ -105,6 +111,7 @@ export type DailySalesDetailReport = {
   billBreakdown: {
     hotelBills: number
     restaurantBills: number
+    transportBills: number
   }
 }
 
@@ -139,6 +146,14 @@ function paymentWindowWhere(businessDate: string, openedAt: Date, closedAt: Date
       },
       {
         reference: { startsWith: 'BEV-' },
+        createdAt: { gte: openedAt, lte: closedAt },
+      },
+      {
+        notes: { contains: 'Transport sale' },
+        createdAt: { gte: openedAt, lte: closedAt },
+      },
+      {
+        reference: { startsWith: 'TRN-' },
         createdAt: { gte: openedAt, lte: closedAt },
       },
     ],
@@ -374,12 +389,15 @@ function uncapturedPaymentSalesTotal(
     paymentType: string
     invoiceId: string | null
     orderId: string | null
+    notes?: string | null
+    reference?: string | null
   }>
 ): number {
   return Number(
     payments
       .reduce((sum, payment) => {
         if (payment.invoiceId || payment.orderId) return sum
+        if (isTransportSalePayment(payment)) return sum
         if (payment.paymentType === 'REFUND') return sum - Math.abs(payment.amount)
         return sum + payment.amount
       }, 0)
@@ -387,11 +405,70 @@ function uncapturedPaymentSalesTotal(
   )
 }
 
+function transportRoomFromSale(
+  sale: { roomNumber?: string | null; room?: { roomNumber: string } | null } | undefined
+): string | null {
+  if (!sale) return null
+  const manual = sale.roomNumber?.trim()
+  if (manual) return manual
+  return sale.room?.roomNumber ?? null
+}
+
+type TransportSaleForReport = {
+  id: string
+  saleNumber: string
+  saleType: string
+  customerName: string
+  roomNumber?: string | null
+  totalAmount: number
+  createdAt: Date
+  room?: { roomNumber: string } | null
+  invoice?: { invoiceNumber: string } | null
+}
+
+type TransportPaymentBucket = {
+  cash: number
+  card: number
+  mbanking: number
+  sortAt: string
+}
+
+function buildTransportSalesReportLine(
+  sale: TransportSaleForReport,
+  bucket?: TransportPaymentBucket
+): DailySalesLine {
+  const invoiceRef = sale.invoice?.invoiceNumber ?? sale.saleNumber
+  const guestLabel = sale.saleType === 'ROOM' ? 'in-house guest' : 'walk-in guest'
+  const cash = bucket?.cash ?? 0
+  const card = bucket?.card ?? 0
+  const mbanking = bucket?.mbanking ?? 0
+
+  return {
+    id: sale.id,
+    lineType: 'charge',
+    source: 'transport',
+    guestName: sale.customerName,
+    room: transportRoomFromSale(sale),
+    regNo: sale.saleNumber,
+    roomAmount: 0,
+    otherService: sale.totalAmount,
+    cash,
+    card,
+    mbanking,
+    companyBill: 0,
+    remark: `Transport sale (${guestLabel}) · ${invoiceRef}`,
+    total: resolveChargeLineTotal(sale.totalAmount, { cash, card, mbanking }),
+    reference: invoiceRef,
+    sortAt: bucket?.sortAt ?? sale.createdAt.toISOString(),
+  }
+}
+
 function computeReportBillBreakdown(
   lines: DailySalesLine[],
   invoices: Array<{ id: string; totalAmount: number }>,
-  invoiceIdsWithCheckoutPayments: Set<string>
-): { hotelBills: number; restaurantBills: number } {
+  invoiceIdsWithCheckoutPayments: Set<string>,
+  transportBills: number
+): { hotelBills: number; restaurantBills: number; transportBills: number } {
   let hotelBills = 0
   let restaurantBills = 0
   for (const line of lines) {
@@ -413,6 +490,7 @@ function computeReportBillBreakdown(
   return {
     hotelBills: Number(hotelBills.toFixed(2)),
     restaurantBills: Number(restaurantBills.toFixed(2)),
+    transportBills: Number(transportBills.toFixed(2)),
   }
 }
 
@@ -434,6 +512,7 @@ export async function buildDailySalesDetailReport(
     restaurantOrders,
     allPayments,
     beverageSales,
+    transportSales,
     companyBills,
     checkIns,
     checkOuts,
@@ -527,6 +606,24 @@ export async function buildDailySalesDetailReport(
       },
       orderBy: { createdAt: 'asc' },
     }),
+    db.transportSale.findMany({
+      where: {
+        OR: [
+          { createdAt: { gte: openedAt, lte: closedAt } },
+          { businessDate },
+        ],
+      },
+      include: {
+        room: { select: { roomNumber: true } },
+        booking: {
+          include: {
+            customer: { select: { name: true } },
+          },
+        },
+        invoice: { select: { invoiceNumber: true } },
+      },
+      orderBy: { createdAt: 'asc' },
+    }),
     db.companyLedgerBill.findMany({
       where: {
         billedAt: { gte: openedAt, lte: closedAt },
@@ -560,10 +657,33 @@ export async function buildDailySalesDetailReport(
   const checkoutBookingIds = new Set(invoices.map((invoice) => invoice.bookingId))
   const invoiceIdsWithCheckoutPayments = checkoutInvoiceIdsWithPayments(allPayments)
   const coveredBeverageSaleNumbers = new Set<string>()
+  const transportPaymentBuckets = new Map<string, TransportPaymentBucket>()
+  const transportSaleByNumber = new Map(
+    transportSales.map((sale) => [sale.saleNumber, sale] as const)
+  )
 
   for (const payment of allPayments) {
     const saleNumber = beverageSaleNumberFromPayment(payment)
     if (saleNumber) coveredBeverageSaleNumbers.add(saleNumber)
+
+    const transportSaleNumber = transportSaleNumberFromPayment(payment)
+    if (transportSaleNumber && isTransportSalePayment(payment)) {
+      const { cash, card, mbanking } = allocateSinglePaymentAmounts(payment)
+      const bucket = transportPaymentBuckets.get(transportSaleNumber) ?? {
+        cash: 0,
+        card: 0,
+        mbanking: 0,
+        sortAt: payment.createdAt.toISOString(),
+      }
+      bucket.cash += cash
+      bucket.card += card
+      bucket.mbanking += mbanking
+      if (payment.createdAt.toISOString() < bucket.sortAt) {
+        bucket.sortAt = payment.createdAt.toISOString()
+      }
+      transportPaymentBuckets.set(transportSaleNumber, bucket)
+      continue
+    }
 
     const { cash, card, mbanking } = allocateSinglePaymentAmounts(payment)
     const roomNumber = resolvePaymentRoomNumber(payment)
@@ -822,6 +942,44 @@ export async function buildDailySalesDetailReport(
     }
   }
 
+  const missingTransportSaleNumbers = [...transportPaymentBuckets.keys()].filter(
+    (saleNumber) => !transportSaleByNumber.has(saleNumber)
+  )
+  if (missingTransportSaleNumbers.length > 0) {
+    const extraTransportSales = await db.transportSale.findMany({
+      where: { saleNumber: { in: missingTransportSaleNumbers } },
+      include: {
+        room: { select: { roomNumber: true } },
+        booking: {
+          include: {
+            customer: { select: { name: true } },
+          },
+        },
+        invoice: { select: { invoiceNumber: true } },
+      },
+    })
+    for (const sale of extraTransportSales) {
+      transportSaleByNumber.set(sale.saleNumber, sale)
+      if (!transportSales.some((existing) => existing.id === sale.id)) {
+        transportSales.push(sale)
+      }
+    }
+  }
+
+  for (const sale of transportSales) {
+    const bucket = transportPaymentBuckets.get(sale.saleNumber)
+    if (bucket) {
+      transportPaymentBuckets.delete(sale.saleNumber)
+    }
+    lines.push(buildTransportSalesReportLine(sale, bucket))
+  }
+
+  for (const [saleNumber, bucket] of transportPaymentBuckets) {
+    const sale = transportSaleByNumber.get(saleNumber)
+    if (!sale) continue
+    lines.push(buildTransportSalesReportLine(sale, bucket))
+  }
+
   const sortedLines = sortSalesLines(lines)
 
   const roomSales = invoices.reduce((s, i) => s + i.roomCharges, 0)
@@ -850,6 +1008,13 @@ export async function buildDailySalesDetailReport(
     .filter((sale) => sale.saleType === 'ROOM')
     .reduce((s, sale) => s + sale.totalAmount, 0)
   const beverageSalesTotal = beverageWalkInSales + beverageRoomSales
+  const transportWalkInSales = transportSales
+    .filter((sale) => sale.saleType === 'WALK_IN')
+    .reduce((s, sale) => s + sale.totalAmount, 0)
+  const transportRoomSales = transportSales
+    .filter((sale) => sale.saleType === 'ROOM')
+    .reduce((s, sale) => s + sale.totalAmount, 0)
+  const transportSalesTotal = transportWalkInSales + transportRoomSales
   const hotelSalesTotal = invoiceTotal + beverageWalkInSales
   const totalDiscount = hotelDiscount + restaurantDiscount
 
@@ -863,7 +1028,8 @@ export async function buildDailySalesDetailReport(
   const billBreakdown = computeReportBillBreakdown(
     sortedLines,
     invoices,
-    invoiceIdsWithCheckoutPayments
+    invoiceIdsWithCheckoutPayments,
+    transportSalesTotal
   )
   const companyBillTotal = companyBills.reduce((s, bill) => s + bill.dueAmount, 0)
   const balances =
@@ -909,6 +1075,9 @@ export async function buildDailySalesDetailReport(
       beverageWalkInSales,
       beverageRoomSales,
       beverageSales: beverageSalesTotal,
+      transportWalkInSales,
+      transportRoomSales,
+      transportSales: transportSalesTotal,
       hotelSalesTotal,
     },
     restaurant: {

@@ -112,6 +112,39 @@ const PAYMENT_TYPE_LABELS: Record<string, string> = {
   PARTIAL: 'Partial payment',
   RESTAURANT: 'Restaurant',
   REFUND: 'Refund',
+  EXTRA_CHARGES: 'Extra Charges',
+  DAMAGE_CHARGES: 'Damage Charges',
+  OTHERS: 'Others',
+}
+
+/** Payment categories shown in Payments → Record New Payment. */
+export const MANUAL_RECORD_PAYMENT_TYPE_OPTIONS = [
+  {
+    value: 'EXTRA_CHARGES',
+    label: 'Extra Charges',
+    description: 'Late checkout, services, add-ons',
+  },
+  {
+    value: 'DAMAGE_CHARGES',
+    label: 'Damage Charges',
+    description: 'Room damage or breakage fees',
+  },
+  {
+    value: 'OTHERS',
+    label: 'Others',
+    description: 'Any other guest payment',
+  },
+] as const
+
+export type ManualRecordPaymentType =
+  (typeof MANUAL_RECORD_PAYMENT_TYPE_OPTIONS)[number]['value']
+
+const MANUAL_RECORD_PAYMENT_TYPE_SET = new Set<string>(
+  MANUAL_RECORD_PAYMENT_TYPE_OPTIONS.map((option) => option.value)
+)
+
+export function isManualRecordPaymentType(type: string): boolean {
+  return MANUAL_RECORD_PAYMENT_TYPE_SET.has(type)
 }
 
 export function formatPaymentTypeLabel(type: string): string {

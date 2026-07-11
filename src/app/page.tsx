@@ -15,7 +15,7 @@ import {
   ScrollText, Package, LogOut, Hotel, UtensilsCrossed, Menu, X,
   Bed, CalendarCheck, UserCircle, SprayCan, ShoppingCart,
   ChefHat, Grid3X3, ClipboardList, DoorOpen, Tag, Bell, Loader2, User, UserRound,
-  ChevronLeft, ChevronRight, Building2, Landmark, Lock, CalendarClock, Coffee,
+  ChevronLeft, ChevronRight, Building2, Landmark, Lock, CalendarClock, Coffee, Car,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -77,6 +77,9 @@ const HousekeepingPage = dynamicPage(() =>
 const HotelBeverageSalesPage = dynamicPage(() =>
   import('@/components/erp/hotel/HotelBeverageSalesPage').then((m) => m.HotelBeverageSalesPage)
 )
+const TransportSalesPage = dynamicPage(() =>
+  import('@/components/erp/hotel/TransportSalesPage').then((m) => m.TransportSalesPage)
+)
 const POSPage = dynamicPage(() => import('@/components/erp/restaurant/POSPage'))
 const MenuPage = dynamicPage(() => import('@/components/erp/restaurant/MenuPage'))
 const OrdersPage = dynamicPage(() => import('@/components/erp/restaurant/OrdersPage'))
@@ -101,7 +104,7 @@ const ProfilePage = dynamicPage(() =>
 )
 
 type PageKey = 
-  | 'hotel-dashboard' | 'rooms' | 'room-types' | 'bookings' | 'customers' | 'company-ledger' | 'housekeeping' | 'hotel-beverage-sales'
+  | 'hotel-dashboard' | 'rooms' | 'room-types' | 'bookings' | 'customers' | 'company-ledger' | 'housekeeping' | 'hotel-beverage-sales' | 'transport-sales'
   | 'pos' | 'menu' | 'orders' | 'kitchen' | 'tables' | 'waiters'
   | 'invoices' | 'payments' | 'deposits' | 'reports' | 'day-close' | 'business-day-reports'
   | 'admin-dashboard' | 'users' | 'settings' | 'logs' | 'inventory'
@@ -134,6 +137,7 @@ const navItems: NavItem[] = [
   { key: 'company-ledger', label: 'Company Ledger', icon: <Building2 className="h-4 w-4" />, allowedRoles: ['ADMIN', 'HOTEL_STAFF', 'HOTEL_FD'], group: 'RRP Dream Inn' },
   { key: 'housekeeping', label: 'Housekeeping', icon: <SprayCan className="h-4 w-4" />, allowedRoles: ['ADMIN', 'HOTEL_STAFF', 'HOTEL_FD'], group: 'RRP Dream Inn' },
   { key: 'hotel-beverage-sales', label: 'Beverage Sales', icon: <Coffee className="h-4 w-4" />, allowedRoles: ['ADMIN', 'HOTEL_STAFF', 'HOTEL_FD'], group: 'RRP Dream Inn' },
+  { key: 'transport-sales', label: 'Transport', icon: <Car className="h-4 w-4" />, allowedRoles: ['ADMIN', 'HOTEL_STAFF', 'HOTEL_FD'], group: 'RRP Dream Inn' },
   // Housekeeper — rooms (view only) + inventory
   { key: 'rooms', label: 'Rooms', icon: <Bed className="h-4 w-4" />, allowedRoles: ['HOUSEKEEPER'], group: 'Housekeeping' },
   { key: 'inventory', label: 'Inventory', icon: <Package className="h-4 w-4" />, allowedRoles: ['HOUSEKEEPER'], group: 'Housekeeping' },
@@ -303,6 +307,7 @@ const pageTitles: Record<PageKey, string> = {
   'company-ledger': 'Company Ledger',
   'housekeeping': 'Housekeeping',
   'hotel-beverage-sales': 'Beverage Sales',
+  'transport-sales': 'Transport Sales',
   'pos': 'POS Terminal',
   'menu': 'Menu Management',
   'orders': 'Order Management',
@@ -432,6 +437,7 @@ function ERPApp() {
       case 'company-ledger': return <CompanyLedgerPage />
       case 'housekeeping': return <HousekeepingPage />
       case 'hotel-beverage-sales': return <HotelBeverageSalesPage />
+      case 'transport-sales': return <TransportSalesPage />
       case 'pos': return <POSPage />
       case 'menu': return <MenuPage />
       case 'orders': return <OrdersPage />

@@ -17,6 +17,9 @@ type HotelSalesSlice = {
   foodSales?: number
   beverageWalkInSales?: number
   beverageRoomSales?: number
+  transportWalkInSales?: number
+  transportRoomSales?: number
+  transportSales?: number
   hotelSalesTotal?: number
   invoiceTotal?: number
   discount?: number
@@ -255,6 +258,10 @@ export function BusinessDaySummarySection({
                 <div className="flex justify-between font-medium">
                   <span>Hotel sales total</span>
                   <span>৳{hotelSalesTotal.toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Transport sales</span>
+                  <span>৳{(hotel?.transportSales ?? 0).toLocaleString()}</span>
                 </div>
                 <div className="flex justify-between">
                   <span>Restaurant POS</span>

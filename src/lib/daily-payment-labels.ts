@@ -1,6 +1,7 @@
 import { formatRestaurantPaymentSourceLabel } from '@/lib/restaurant-order-settle'
 
 const BEVERAGE_SALE_NUMBER_RE = /BEV-\d{8}-\d+/
+const TRANSPORT_SALE_NUMBER_RE = /TRN-\d{8}-\d+/
 
 export function isBeverageWalkInPayment(payment: {
   notes?: string | null
@@ -19,6 +20,33 @@ export function beverageSaleNumberFromPayment(payment: {
   if (payment.reference?.startsWith('BEV-')) return payment.reference
   const match = payment.notes?.match(BEVERAGE_SALE_NUMBER_RE)
   return match?.[0] ?? null
+}
+
+export function isTransportWalkInPayment(payment: {
+  notes?: string | null
+  reference?: string | null
+}): boolean {
+  return isTransportSalePayment(payment)
+}
+
+export function isTransportSalePayment(payment: {
+  notes?: string | null
+  reference?: string | null
+}): boolean {
+  return (
+    payment.notes?.includes('Transport sale') === true ||
+    payment.notes?.includes('Transport walk-in sale') === true ||
+    payment.reference?.startsWith('TRN-') === true
+  )
+}
+
+export function transportSaleNumberFromPayment(payment: {
+  notes?: string | null
+  reference?: string | null
+}): string | null {
+  const fromNotes = payment.notes?.match(TRANSPORT_SALE_NUMBER_RE)?.[0] ?? null
+  if (payment.reference?.startsWith('TRN-')) return payment.reference
+  return fromNotes
 }
 
 export type PaymentLabelInput = {
@@ -80,6 +108,14 @@ export function resolvePaymentSourceLabel(payment: PaymentLabelInput): string {
       : 'Hotel beverage (walk-in)'
   }
 
+  if (isTransportSalePayment(payment)) {
+    const saleNumber = transportSaleNumberFromPayment(payment)
+    const isInHouse = payment.notes?.includes('In-house guest') === true
+    return saleNumber
+      ? `Transport sale (${isInHouse ? 'in-house guest' : 'walk-in'}) · ${saleNumber}`
+      : 'Transport sale'
+  }
+
   if (payment.booking?.id) {
     const room = payment.booking.room?.roomNumber
     const roomSuffix = room ? ` · Room ${room}` : ''
@@ -92,6 +128,12 @@ export function resolvePaymentSourceLabel(payment: PaymentLabelInput): string {
         return `Initial payment${roomSuffix}`
       case 'FINAL':
         return `Final payment${roomSuffix}`
+      case 'EXTRA_CHARGES':
+        return `Extra charges${roomSuffix}`
+      case 'DAMAGE_CHARGES':
+        return `Damage charges${roomSuffix}`
+      case 'OTHERS':
+        return `Other payment${roomSuffix}`
       default:
         return `Booking payment${roomSuffix}`
     }
@@ -130,6 +172,7 @@ export function resolvePaymentReference(payment: PaymentLabelInput): string | nu
     payment.invoice?.invoiceNumber ??
     (payment.order?.orderNumber ? `#${payment.order.orderNumber}` : null) ??
     beverageSaleNumberFromPayment(payment) ??
+    transportSaleNumberFromPayment(payment) ??
     payment.reservationEntry?.registrationNumber ??
     payment.booking?.id?.slice(-6) ??
     null

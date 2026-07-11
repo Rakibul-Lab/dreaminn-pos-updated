@@ -28,6 +28,7 @@ model User {
   hotelClearedBills CompanyLedgerBill[] @relation("HotelClearedBills")
   dayCloses         DayClose[]
   hotelBeverageSales HotelBeverageSale[]
+  transportSales     TransportSale[]
   reservationEntries ReservationEntry[]
 
   @@map("users")
@@ -61,6 +62,7 @@ model Room {
   housekeeping     HousekeepingTask[]
   restaurantOrders RestaurantOrder[]
   hotelBeverageSales HotelBeverageSale[]
+  transportSales     TransportSale[]
   reservationEntryLines ReservationEntryLine[]
   reservationEntryLineBookings ReservationEntryLineBooking[]
   type             RoomType           @relation(fields: [typeId], references: [id])
@@ -217,6 +219,7 @@ model Booking {
   payments         Payment[]
   restaurantOrders RestaurantOrder[]
   hotelBeverageSales HotelBeverageSale[]
+  transportSales     TransportSale[]
   charges          RoomCharge[]
   idDocuments      BookingIdDocument[]
   companions       BookingCompanion[]
@@ -347,12 +350,15 @@ model RoomCharge {
   quantity            Int                @default(1)
   chargeDate          DateTime           @default(now())
   hotelBeverageSaleId String?            @map("hotel_beverage_sale_id")
+  transportSaleId     String?            @map("transport_sale_id")
   createdAt           DateTime           @default(now())
   booking             Booking            @relation(fields: [bookingId], references: [id])
   hotelBeverageSale   HotelBeverageSale? @relation(fields: [hotelBeverageSaleId], references: [id], onDelete: SetNull)
+  transportSale       TransportSale?     @relation(fields: [transportSaleId], references: [id], onDelete: SetNull)
 
   @@index([bookingId], map: "room_charges_bookingId_fkey")
   @@index([hotelBeverageSaleId], map: "room_charges_hotel_beverage_sale_id_fkey")
+  @@index([transportSaleId], map: "room_charges_transport_sale_id_fkey")
   @@map("room_charges")
 }
 
@@ -726,6 +732,104 @@ model HotelBeverageSaleItem {
   @@map("hotel_beverage_sale_items")
 }
 
+enum TransportSaleType {
+  WALK_IN
+  ROOM
+}
+
+enum TransportInvoiceStatus {
+  ISSUED
+  PAID
+  CANCELLED
+}
+
+model TransportService {
+  id           String              @id @default(cuid())
+  name         String
+  description  String?
+  defaultPrice Float               @default(0) @map("default_price")
+  isActive     Boolean             @default(true) @map("is_active")
+  sortOrder    Int                 @default(0) @map("sort_order")
+  createdAt    DateTime            @default(now()) @map("created_at")
+  updatedAt    DateTime            @updatedAt @map("updated_at")
+  saleItems    TransportSaleItem[]
+
+  @@map("transport_services")
+}
+
+model TransportSale {
+  id            String            @id @default(cuid())
+  saleNumber    String            @unique @map("sale_number")
+  saleType      TransportSaleType @map("sale_type")
+  bookingId     String?           @map("booking_id")
+  roomId        String?           @map("room_id")
+  roomNumber    String?           @map("room_number")
+  customerName  String            @map("customer_name")
+  customerPhone String?           @map("customer_phone")
+  routeFrom     String?           @map("route_from")
+  routeTo       String?           @map("route_to")
+  vehicleType   String?           @map("vehicle_type")
+  tripDate      DateTime?         @map("trip_date")
+  subtotal      Float             @default(0)
+  vatAmount     Float             @default(0) @map("vat_amount")
+  totalAmount   Float             @default(0) @map("total_amount")
+  paymentMethod PaymentMethod?    @map("payment_method")
+  notes         String?
+  businessDate  String?           @map("business_date")
+  createdBy     String?           @map("created_by")
+  createdAt     DateTime          @default(now()) @map("created_at")
+  booking       Booking?          @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+  room          Room?             @relation(fields: [roomId], references: [id], onDelete: SetNull)
+  creator       User?             @relation(fields: [createdBy], references: [id], onDelete: SetNull)
+  items         TransportSaleItem[]
+  invoice       TransportInvoice?
+  roomCharges   RoomCharge[]
+
+  @@index([bookingId], map: "transport_sales_booking_id_fkey")
+  @@index([roomId], map: "transport_sales_room_id_fkey")
+  @@index([createdBy], map: "transport_sales_created_by_fkey")
+  @@index([businessDate], map: "transport_sales_business_date_idx")
+  @@map("transport_sales")
+}
+
+model TransportSaleItem {
+  id                 String            @id @default(cuid())
+  saleId             String            @map("sale_id")
+  transportServiceId String?           @map("transport_service_id")
+  serviceName        String            @map("service_name")
+  description        String?
+  quantity           Int               @default(1)
+  unitPrice          Float             @map("unit_price")
+  lineTotal          Float             @map("line_total")
+  sale               TransportSale     @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  transportService   TransportService? @relation(fields: [transportServiceId], references: [id], onDelete: SetNull)
+
+  @@index([saleId], map: "transport_sale_items_sale_id_fkey")
+  @@index([transportServiceId], map: "transport_sale_items_transport_service_id_fkey")
+  @@map("transport_sale_items")
+}
+
+model TransportInvoice {
+  id            String                 @id @default(cuid())
+  invoiceNumber String                 @unique @map("invoice_number")
+  saleId        String                 @unique @map("sale_id")
+  subtotal      Float                  @default(0)
+  vatAmount     Float                  @default(0) @map("vat_amount")
+  discount      Float                  @default(0)
+  totalAmount   Float                  @default(0) @map("total_amount")
+  paidAmount    Float                  @default(0) @map("paid_amount")
+  dueAmount     Float                  @default(0) @map("due_amount")
+  status        TransportInvoiceStatus @default(ISSUED)
+  businessDate  String?                @map("business_date")
+  issuedAt      DateTime               @default(now()) @map("issued_at")
+  paidAt        DateTime?              @map("paid_at")
+  createdAt     DateTime               @default(now()) @map("created_at")
+  sale          TransportSale          @relation(fields: [saleId], references: [id], onDelete: Cascade)
+
+  @@index([businessDate], map: "transport_invoices_business_date_idx")
+  @@map("transport_invoices")
+}
+
 enum RoleType {
   ADMIN
   HOTEL_STAFF
@@ -810,6 +914,9 @@ enum PaymentType {
   PARTIAL
   RESTAURANT
   REFUND
+  EXTRA_CHARGES
+  DAMAGE_CHARGES
+  OTHERS
 }
 
 enum RestaurantSettlementSource {

@@ -117,6 +117,9 @@ export type SalesReportData = {
     beverageWalkInSales?: number
     beverageRoomSales?: number
     beverageSales?: number
+    transportWalkInSales?: number
+    transportRoomSales?: number
+    transportSales?: number
     hotelSalesTotal?: number
   }
   restaurant?: {
@@ -152,6 +155,7 @@ export type SalesReportData = {
   billBreakdown?: {
     hotelBills?: number
     restaurantBills?: number
+    transportBills?: number
   }
 }
 
@@ -429,6 +433,7 @@ async function writeDailySalesExcel(
     ['Opening balance', summary.openingBalance],
     ['Grand total', grandTotal],
     ['Hotel bills (incl. beverage)', summary.hotelBills],
+    ['Transport bills', summary.transportBills],
     ['Restaurant bills', summary.restaurantBills],
     ['Hotel discount', summary.hotelDiscount],
     ['Restaurant discount', summary.restaurantDiscount],
@@ -620,6 +625,7 @@ async function writeDailySalesPdf(
     ['Opening balance', formatPaperAmountAlways(summary.openingBalance)],
     ['Grand total', formatPaperAmountAlways(grandTotal)],
     ['Hotel bills (incl. beverage)', formatPaperAmountAlways(summary.hotelBills)],
+    ['Transport bills', formatPaperAmountAlways(summary.transportBills)],
     ['Restaurant bills', formatPaperAmountAlways(summary.restaurantBills)],
     ['Hotel discount', formatPaperAmountAlways(summary.hotelDiscount)],
     ['Restaurant discount', formatPaperAmountAlways(summary.restaurantDiscount)],
@@ -723,6 +729,7 @@ function salesSummaryRows(data: SalesReportData): Array<Record<string, string | 
     { Category: 'Invoice due', Amount: hotel.invoiceDue ?? 0 },
     { Category: 'Hotel beverage (walk-in)', Amount: hotel.beverageWalkInSales ?? 0 },
     { Category: 'Hotel sales total', Amount: hotel.hotelSalesTotal ?? hotel.invoiceTotal ?? 0 },
+    { Category: 'Transport sales', Amount: hotel.transportSales ?? 0 },
     { Category: 'Restaurant POS', Amount: restaurant.grossSales ?? 0 },
     { Category: 'Grand total', Amount: data.grandTotal ?? 0 },
     { Category: 'Collections', Amount: data.collections ?? 0 },

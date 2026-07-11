@@ -59,6 +59,7 @@ export type PaperSummary = {
   totalSentToHeadOffice: number
   hotelBills: number
   restaurantBills: number
+  transportBills: number
 }
 
 export function formatPaperDate(businessDate: string, businessDateDisplay?: string): string {
@@ -99,7 +100,7 @@ export type PaperSalesInputLine = {
   remark?: string | null
   total?: number
   lineType?: 'charge' | 'payment'
-  source?: 'invoice' | 'restaurant' | 'beverage' | 'guest-restaurant-bill' | 'payment'
+  source?: 'invoice' | 'restaurant' | 'beverage' | 'transport' | 'guest-restaurant-bill' | 'payment'
 }
 
 export type PaperSalesInput = {
@@ -126,6 +127,7 @@ export type PaperSalesInput = {
   billBreakdown?: {
     hotelBills?: number
     restaurantBills?: number
+    transportBills?: number
   }
   cashReconciliation?: {
     openingCash?: number
@@ -247,15 +249,18 @@ export function computePaperTotals(paperLines: PaperSalesLine[]): PaperSalesTota
 /** Charge totals by origin: hotel (invoices + beverage) vs restaurant (POS + guest bills). */
 export function computeBillBreakdown(
   lines: PaperSalesInputLine[] | undefined
-): { hotelBills: number; restaurantBills: number } {
+): { hotelBills: number; restaurantBills: number; transportBills: number } {
   let hotelBills = 0
   let restaurantBills = 0
+  let transportBills = 0
   for (const line of lines ?? []) {
     if (line.lineType !== 'charge') continue
     const total = resolveChargeLineTotal(line.total ?? 0, line)
     if (total <= 0) continue
     if (line.source === 'invoice' || line.source === 'beverage') {
       hotelBills += total
+    } else if (line.source === 'transport') {
+      transportBills += total
     } else if (line.source === 'restaurant' || line.source === 'guest-restaurant-bill') {
       restaurantBills += total
     }
@@ -263,6 +268,7 @@ export function computeBillBreakdown(
   return {
     hotelBills: Number(hotelBills.toFixed(2)),
     restaurantBills: Number(restaurantBills.toFixed(2)),
+    transportBills: Number(transportBills.toFixed(2)),
   }
 }
 
@@ -299,7 +305,7 @@ export function buildPaperSummary(data: PaperSalesInput): PaperSummary {
     data.cashReconciliation?.cashOnHand ??
     openingBalance + cashCollectedToday - cashSentToHeadOffice
 
-  const { hotelBills, restaurantBills } =
+  const { hotelBills, restaurantBills, transportBills } =
     data.billBreakdown ??
     computeBillBreakdown(data.lines)
 
@@ -326,6 +332,7 @@ export function buildPaperSummary(data: PaperSalesInput): PaperSummary {
     totalSentToHeadOffice,
     hotelBills,
     restaurantBills,
+    transportBills,
   }
 }
 

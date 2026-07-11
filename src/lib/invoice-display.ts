@@ -5,6 +5,10 @@ export const INVOICE_MUSHAK = 'Mushak-6.3'
 export const INVOICE_BIN = '006985415-1105'
 export const INVOICE_HOTEL_ADDRESS =
   '6th floor, RRP Center, Post office More, Ishwardi, Pabna.'
+export const INVOICE_HOTEL_ADDRESS_LINES = [
+  '6th floor, RRP Center,',
+  'Post office More, Ishwardi, Pabna.',
+] as const
 export const INVOICE_HOTEL_MOBILE = '01335107200'
 export const INVOICE_RESTAURANT_ADDRESS =
   '13th Floor, RRP Center, Post Office More, Ishwardi, Pabna-6620'

@@ -7,7 +7,7 @@ import {
   resolveInvoiceHotelVatPercent,
 } from '@/lib/invoice-display';
 import { collectInvoiceNotes } from '@/lib/invoice-notes';
-import { mergeFolioPayments } from '@/lib/invoice-payments';
+import { mergeFolioPayments, formatManualChargeInvoiceNote } from '@/lib/invoice-payments';
 import { filterGuestFolioRestaurantOrders } from '@/lib/restaurant-order-billing';
 import { InvoiceStatus } from '@prisma/client';
 
@@ -141,15 +141,14 @@ export async function GET(
 
     const declaredVatPercent = resolveInvoiceHotelVatPercent(invoice.booking);
     const declaredServiceChargePercent = resolveInvoiceHotelServicePercent(invoice.booking);
+    const folioRestaurantOrders = filterGuestFolioRestaurantOrders(invoice.booking.restaurantOrders)
+    const folioPayments = mergeFolioPayments(invoice.payments, invoice.booking.payments)
     const invoiceNotes = collectInvoiceNotes({
       bookingNotes: invoice.booking.notes,
       customerNotes: invoice.booking.customer.notes,
       companyLedgerGuestNotes: invoice.booking.companyLedgerGuest?.notes,
-      paymentNotes: invoice.booking.payments.map((payment) => payment.notes),
-    });
-
-    const folioRestaurantOrders = filterGuestFolioRestaurantOrders(invoice.booking.restaurantOrders)
-    const folioPayments = mergeFolioPayments(invoice.payments, invoice.booking.payments)
+      paymentNotes: folioPayments.map((payment) => formatManualChargeInvoiceNote(payment)),
+    })
 
     return successResponse({
       ...invoice,

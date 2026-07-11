@@ -440,6 +440,7 @@ export default function InvoiceDetail({ invoiceId, onClose }: InvoiceDetailProps
               </div>
             </div>
 
+            {(foodItems.length > 0 || restaurantBill > 0) && (
             <div className="rounded-md border border-border p-3 space-y-1.5">
               <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Restaurant Part</p>
               <div className="flex justify-between text-sm">
@@ -459,6 +460,7 @@ export default function InvoiceDetail({ invoiceId, onClose }: InvoiceDetailProps
                 <span>৳{restaurantPartTotal.toLocaleString()}</span>
               </div>
             </div>
+            )}
 
             <div className="flex justify-between text-sm">
               <span className="text-muted-foreground">Combined Total</span>

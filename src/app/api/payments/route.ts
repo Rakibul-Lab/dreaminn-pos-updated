@@ -3,7 +3,13 @@ import { db } from '@/lib/db';
 import { requireAuth, canAccessHotel, canAccessRestaurant } from '@/lib/auth';
 import { successResponse, errorResponse, paginatedResponse, logActivity } from '@/lib/api-utils';
 import { computeBookingRoomDue, resolveBookingDisplayDue, sumBookingNetPaid, applyBookingPaymentToStoredDue } from '@/lib/booking-totals';
-import { PaymentType, PaymentMethod, Prisma, InvoiceStatus } from '@prisma/client';
+import { PaymentType, PaymentMethod, Prisma } from '@prisma/client';
+import {
+  resolveActiveBookingInvoiceId,
+  syncInvoicePaymentTotals,
+  appendManualChargeInvoiceLine,
+} from '@/lib/invoice-payments';
+import { isManualRecordPaymentType } from '@/lib/payment-method';
 import {
   parsePaymentMethod,
   paymentRequiresLastFour,
@@ -258,6 +264,12 @@ export async function POST(request: NextRequest) {
 
     const businessDate = await stampCurrentBusinessDate();
 
+    let resolvedInvoiceId =
+      typeof invoiceId === 'string' && invoiceId.trim() ? invoiceId.trim() : null;
+    if (bookingId && !resolvedInvoiceId) {
+      resolvedInvoiceId = await resolveActiveBookingInvoiceId(db, bookingId);
+    }
+
     const payment = await db.payment.create({
       data: {
         amount,
@@ -266,7 +278,7 @@ export async function POST(request: NextRequest) {
         businessDate,
         bookingId: bookingId || null,
         orderId: null,
-        invoiceId: invoiceId || null,
+        invoiceId: resolvedInvoiceId,
         reference: paymentRequiresReference(resolvedMethod) ? trimmedReference : null,
         accountLastFour: paymentRequiresLastFour(resolvedMethod) ? trimmedLastFour : null,
         notes: notes || null,
@@ -286,6 +298,16 @@ export async function POST(request: NextRequest) {
         },
       },
     });
+
+    if (resolvedInvoiceId && isManualRecordPaymentType(resolvedPaymentType)) {
+      await appendManualChargeInvoiceLine(db, {
+        invoiceId: resolvedInvoiceId,
+        paymentId: payment.id,
+        paymentType: resolvedPaymentType,
+        amount,
+        notes: notes || null,
+      });
+    }
 
     // Update booking dueAmount after payment
     let updatedDueAmount: number | null = null;
@@ -324,38 +346,15 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Update invoice paid/due when payment is linked to an invoice
-    if (invoiceId) {
-      const invoice = await db.invoice.findUnique({ where: { id: invoiceId } });
-      if (invoice) {
-        const invoicePayments = await db.payment.findMany({
-          where: { invoiceId },
-          select: { amount: true, paymentType: true },
-        });
-        const paidAmount = sumBookingNetPaid(invoicePayments);
-        const dueAmount = Math.max(0, invoice.totalAmount - paidAmount);
-        let status: InvoiceStatus = invoice.status;
-        if (dueAmount <= 0) {
-          status = 'PAID';
-        } else if (paidAmount > 0 && invoice.status !== 'CANCELLED') {
-          status = 'PARTIALLY_PAID';
-        }
-        await db.invoice.update({
-          where: { id: invoiceId },
-          data: {
-            paidAmount,
-            dueAmount,
-            status,
-            paidAt: dueAmount <= 0 ? new Date() : null,
-          },
-        });
+    // Keep invoice paid/due in sync when the stay has an invoice (e.g. reg. no. payment).
+    if (resolvedInvoiceId) {
+      const synced = await syncInvoicePaymentTotals(db, resolvedInvoiceId);
+      if (synced) {
         await db.booking.update({
-          where: { id: invoice.bookingId },
-          data: { dueAmount },
+          where: { id: synced.bookingId },
+          data: { dueAmount: synced.dueAmount },
         });
-        if (updatedDueAmount == null) {
-          updatedDueAmount = dueAmount;
-        }
+        updatedDueAmount = synced.dueAmount;
       }
     }
 
@@ -370,6 +369,7 @@ export async function POST(request: NextRequest) {
         method,
         paymentType: resolvedPaymentType,
         bookingId: bookingId || undefined,
+        invoiceId: resolvedInvoiceId || undefined,
         orderId: orderId || undefined,
       })
     );
@@ -381,6 +381,13 @@ export async function POST(request: NextRequest) {
     );
   } catch (error) {
     console.error('Error creating payment:', error);
+    const detail = error instanceof Error ? error.message : '';
+    if (detail.includes('PaymentType') || detail.includes('paymentType')) {
+      return errorResponse(
+        'Payment type is not available on this database. Deploy the latest migration and try again.',
+        500
+      );
+    }
     return errorResponse('Failed to record payment', 500);
   }
 }

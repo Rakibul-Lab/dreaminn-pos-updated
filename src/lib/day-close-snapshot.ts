@@ -34,6 +34,9 @@ export type DayCloseSnapshot = {
     beverageWalkInSales: number
     beverageRoomSales: number
     beverageSales: number
+    transportWalkInSales: number
+    transportRoomSales: number
+    transportSales: number
     hotelSalesTotal: number
   }
   restaurant: {
@@ -115,6 +118,9 @@ export async function buildDayCloseSnapshot(
       beverageWalkInSales: salesReport.hotel.beverageWalkInSales,
       beverageRoomSales: salesReport.hotel.beverageRoomSales,
       beverageSales: salesReport.hotel.beverageSales,
+      transportWalkInSales: salesReport.hotel.transportWalkInSales,
+      transportRoomSales: salesReport.hotel.transportRoomSales,
+      transportSales: salesReport.hotel.transportSales,
       hotelSalesTotal: salesReport.hotel.hotelSalesTotal,
     },
     restaurant: {

@@ -7,7 +7,8 @@ import { useAuthStore, canAccessHotel, canAccessRestaurant, canAccessAdmin } fro
 import { useToast } from '@/hooks/use-toast'
 import { format } from 'date-fns'
 import {
-  CreditCard, Plus, Filter, RefreshCw, Wallet, TrendingUp, Calendar, CalendarRange, FileDown, Loader2, Landmark, AlertCircle, Search
+  CreditCard, Plus, Filter, RefreshCw, Wallet, TrendingUp, Calendar, CalendarRange, FileDown, Loader2, Landmark, AlertCircle, Search,
+  Sparkles, Wrench, CircleEllipsis, Receipt,
 } from 'lucide-react'
 import {
   BOOKING_DATE_PRESET_OPTIONS,
@@ -23,7 +24,9 @@ import {
   formatPaymentLastFourDisplay,
   formatPaymentMethod,
   formatPaymentReferenceDisplay,
+  formatPaymentTypeLabel,
   isValidPaymentAccountLastFour,
+  MANUAL_RECORD_PAYMENT_TYPE_OPTIONS,
   PAYMENT_METHOD_OPTIONS_WITH_PAYMENT,
   paymentRequiresLastFour,
   paymentRequiresReference,
@@ -33,7 +36,7 @@ import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter
+  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter
 } from '@/components/ui/dialog'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue
@@ -92,9 +95,18 @@ const paymentTypeColors: Record<string, string> = {
   INITIAL: 'bg-sky-50 text-sky-700 border-sky-200',
   FINAL: 'bg-emerald-50 text-emerald-700 border-emerald-200',
   PARTIAL: 'bg-orange-50 text-orange-700 border-orange-200',
+  EXTRA_CHARGES: 'bg-violet-50 text-violet-700 border-violet-200',
+  DAMAGE_CHARGES: 'bg-rose-50 text-rose-700 border-rose-200',
+  OTHERS: 'bg-slate-50 text-slate-700 border-slate-200',
   RESTAURANT: 'bg-purple-50 text-purple-700 border-purple-200',
   REFUND: 'bg-red-50 text-red-700 border-red-200',
 }
+
+const manualPaymentTypeIcons = {
+  EXTRA_CHARGES: Sparkles,
+  DAMAGE_CHARGES: Wrench,
+  OTHERS: CircleEllipsis,
+} as const
 
 export default function PaymentsPage() {
   const { user } = useAuthStore()
@@ -121,7 +133,7 @@ export default function PaymentsPage() {
   const [showNewPaymentDialog, setShowNewPaymentDialog] = useState(false)
   const [selectedBookingLabel, setSelectedBookingLabel] = useState('')
   const [paymentForm, setPaymentForm] = useState({
-    paymentType: 'PARTIAL',
+    paymentType: 'EXTRA_CHARGES',
     bookingId: '',
     orderId: '',
     amount: '',
@@ -155,7 +167,7 @@ export default function PaymentsPage() {
   const resetPaymentForm = () => {
     setSelectedBookingLabel('')
     setPaymentForm({
-      paymentType: 'PARTIAL',
+      paymentType: 'EXTRA_CHARGES',
       bookingId: '',
       orderId: '',
       amount: '',
@@ -176,6 +188,9 @@ export default function PaymentsPage() {
   }
 
   const validatePaymentForm = (): string | null => {
+    if ((isHotel || isAdmin) && !paymentForm.bookingId) {
+      return 'Select a guest booking to record this payment.'
+    }
     if (!paymentForm.amount || parseFloat(paymentForm.amount) <= 0) {
       return 'Enter a valid payment amount.'
     }
@@ -299,11 +314,20 @@ export default function PaymentsPage() {
       if (paymentForm.bookingId) payload.bookingId = paymentForm.bookingId
       return api.post('/payments', payload)
     },
-    onSuccess: (res) => {
+    onSuccess: (res: { success?: boolean; message?: string; error?: string }) => {
+      if (!res?.success) {
+        toast({
+          title: 'Error',
+          description: res?.error || res?.message || 'Failed to record payment',
+          variant: 'destructive',
+        })
+        return
+      }
       queryClient.invalidateQueries({ queryKey: ['payments'] })
       queryClient.invalidateQueries({ queryKey: ['payments-summary'] })
       if (paymentForm.bookingId) {
         queryClient.invalidateQueries({ queryKey: ['bookings'] })
+        queryClient.invalidateQueries({ queryKey: ['invoices'] })
       }
       toast({
         title: 'Payment Recorded',
@@ -584,6 +608,9 @@ export default function PaymentsPage() {
                   <SelectItem value="INITIAL">Initial</SelectItem>
                   <SelectItem value="FINAL">Final</SelectItem>
                   <SelectItem value="PARTIAL">Partial</SelectItem>
+                  <SelectItem value="EXTRA_CHARGES">Extra Charges</SelectItem>
+                  <SelectItem value="DAMAGE_CHARGES">Damage Charges</SelectItem>
+                  <SelectItem value="OTHERS">Others</SelectItem>
                   <SelectItem value="RESTAURANT">Restaurant</SelectItem>
                 </SelectContent>
               </Select>
@@ -676,7 +703,7 @@ export default function PaymentsPage() {
                           </Badge>
                         ) : (
                           <Badge variant="outline" className={paymentTypeColors[payment.paymentType] || ''}>
-                            {payment.paymentType}
+                            {formatPaymentTypeLabel(payment.paymentType)}
                           </Badge>
                         )}
                       </TableCell>
@@ -820,87 +847,164 @@ export default function PaymentsPage() {
           if (!open) resetPaymentForm()
         }}
       >
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Record New Payment</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div>
-              <Label>Payment Type</Label>
-              <Select value={paymentForm.paymentType} onValueChange={(v) => setPaymentForm((f) => ({ ...f, paymentType: v }))}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {(isHotel || isAdmin) && (
-                    <>
-                      <SelectItem value="ADVANCE">Advance</SelectItem>
-                      <SelectItem value="INITIAL">Initial</SelectItem>
-                      <SelectItem value="FINAL">Final</SelectItem>
-                      <SelectItem value="PARTIAL">Partial</SelectItem>
-                    </>
-                  )}
-                </SelectContent>
-              </Select>
+        <DialogContent className="flex max-h-[min(92dvh,42rem)] w-[calc(100%-1rem)] max-w-xl flex-col gap-0 overflow-hidden p-0 sm:rounded-2xl sm:max-h-[min(90dvh,40rem)]">
+          <div className="shrink-0 border-b bg-gradient-to-br from-emerald-600 via-emerald-700 to-teal-800 px-4 py-3 text-white sm:px-5 sm:py-4">
+            <DialogHeader className="space-y-1 text-left">
+              <div className="flex items-center gap-2.5 sm:gap-3">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/15 ring-1 ring-white/20 backdrop-blur-sm sm:h-10 sm:w-10 sm:rounded-xl">
+                  <Receipt className="h-4 w-4 sm:h-5 sm:w-5" />
+                </div>
+                <div className="min-w-0 pr-6">
+                  <DialogTitle className="text-base font-semibold tracking-tight text-white sm:text-lg">
+                    Record New Payment
+                  </DialogTitle>
+                  <DialogDescription className="line-clamp-1 text-xs text-emerald-50/90 sm:line-clamp-none sm:text-sm">
+                    Post a guest payment with charge category and method.
+                  </DialogDescription>
+                </div>
+              </div>
+            </DialogHeader>
+          </div>
+
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-4 py-3 sm:space-y-4 sm:px-5 sm:py-4">
+            <div className="space-y-2">
+              <Label className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Payment type
+              </Label>
+              <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
+                {MANUAL_RECORD_PAYMENT_TYPE_OPTIONS.map((option) => {
+                  const Icon = manualPaymentTypeIcons[option.value]
+                  const selected = paymentForm.paymentType === option.value
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => setPaymentForm((f) => ({ ...f, paymentType: option.value }))}
+                      className={cn(
+                        'rounded-lg border p-2 text-center transition-all sm:rounded-xl sm:p-2.5 sm:text-left',
+                        selected
+                          ? 'border-emerald-500 bg-emerald-50/80 shadow-sm ring-1 ring-emerald-500/30'
+                          : 'border-border bg-card hover:border-emerald-200 hover:bg-muted/40'
+                      )}
+                    >
+                      <div className="flex flex-col items-center gap-1.5 sm:flex-row sm:items-start sm:gap-2">
+                        <div
+                          className={cn(
+                            'flex h-7 w-7 shrink-0 items-center justify-center rounded-md sm:h-8 sm:w-8 sm:rounded-lg',
+                            selected ? 'bg-emerald-600 text-white' : 'bg-muted text-muted-foreground'
+                          )}
+                        >
+                          <Icon className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                        </div>
+                        <div className="min-w-0">
+                          <p
+                            className={cn(
+                              'text-[11px] font-semibold leading-tight sm:text-sm',
+                              selected && 'text-emerald-900'
+                            )}
+                          >
+                            <span className="sm:hidden">
+                              {option.value === 'EXTRA_CHARGES'
+                                ? 'Extra'
+                                : option.value === 'DAMAGE_CHARGES'
+                                  ? 'Damage'
+                                  : 'Other'}
+                            </span>
+                            <span className="hidden sm:inline">{option.label}</span>
+                          </p>
+                          <p className="mt-0.5 hidden text-xs leading-snug text-muted-foreground sm:block">
+                            {option.description}
+                          </p>
+                        </div>
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
             </div>
 
-            {/* Show booking selector for hotel payments */}
             {(isHotel || isAdmin) && (
-              <BookingPaymentSearchField
-                selectedId={paymentForm.bookingId}
-                selectedLabel={selectedBookingLabel}
-                onSelect={(booking: BookingPaymentSearchResult) => {
-                  setPaymentForm((f) => ({ ...f, bookingId: booking.id }))
-                  setSelectedBookingLabel(
-                    `${booking.customer.name} · Room ${booking.room.roomNumber}`
-                  )
-                }}
-                onClear={() => {
-                  setPaymentForm((f) => ({ ...f, bookingId: '' }))
-                  setSelectedBookingLabel('')
-                }}
-              />
+              <div className="space-y-2 rounded-lg border bg-muted/20 p-3 sm:rounded-xl sm:p-3.5">
+                <Label className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  Guest booking
+                </Label>
+                <BookingPaymentSearchField
+                  selectedId={paymentForm.bookingId}
+                  selectedLabel={selectedBookingLabel}
+                  onSelect={(booking: BookingPaymentSearchResult) => {
+                    setPaymentForm((f) => ({ ...f, bookingId: booking.id }))
+                    setSelectedBookingLabel(
+                      `${booking.customer.name} · Room ${booking.room.roomNumber}`
+                    )
+                  }}
+                  onClear={() => {
+                    setPaymentForm((f) => ({ ...f, bookingId: '' }))
+                    setSelectedBookingLabel('')
+                  }}
+                />
+                {selectedBookingLabel ? (
+                  <p className="truncate text-xs text-muted-foreground">
+                    Recording for{' '}
+                    <span className="font-medium text-foreground">{selectedBookingLabel}</span>
+                  </p>
+                ) : (
+                  <p className="text-xs text-amber-700">Select the guest stay for this payment.</p>
+                )}
+              </div>
             )}
 
-            <div>
-              <Label>Amount (৳)</Label>
-              <Input
-                type="number"
-                placeholder="Enter amount"
-                value={paymentForm.amount}
-                onChange={(e) => setPaymentForm((f) => ({ ...f, amount: e.target.value }))}
-              />
-            </div>
-
-            <div>
-              <Label>Payment Method</Label>
-              <Select value={paymentForm.method} onValueChange={handlePaymentMethodChange}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {PAYMENT_METHOD_OPTIONS_WITH_PAYMENT.map((opt) => (
-                    <SelectItem key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <div className="grid grid-cols-2 gap-2.5 sm:gap-4">
+              <div className="space-y-1.5">
+                <Label className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  Amount (৳)
+                </Label>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  placeholder="0.00"
+                  value={paymentForm.amount}
+                  onChange={(e) => setPaymentForm((f) => ({ ...f, amount: e.target.value }))}
+                  className="h-10 text-base font-semibold"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  Payment method
+                </Label>
+                <Select value={paymentForm.method} onValueChange={handlePaymentMethodChange}>
+                  <SelectTrigger className="h-10">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PAYMENT_METHOD_OPTIONS_WITH_PAYMENT.map((opt) => (
+                      <SelectItem key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
             {(showFormReference || showFormLastFour) && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-2.5 rounded-lg border bg-muted/15 p-3 sm:grid-cols-2 sm:gap-3 sm:rounded-xl sm:p-3.5">
                 {showFormReference && (
-                  <div>
-                    <Label>
+                  <div className="space-y-1.5">
+                    <Label className="text-sm">
                       Reference <span className="text-red-600">*</span>
                     </Label>
                     <Input
-                      placeholder="e.g. transaction ID or receipt number"
+                      placeholder="Transaction ID or receipt no."
                       value={paymentForm.reference}
                       onChange={(e) => setPaymentForm((f) => ({ ...f, reference: e.target.value }))}
+                      className="h-10"
                     />
                   </div>
                 )}
                 {showFormLastFour && (
-                  <div>
-                    <Label>
+                  <div className="space-y-1.5">
+                    <Label className="text-sm">
                       Last 4 digits <span className="text-red-600">*</span>
                     </Label>
                     <Input
@@ -914,27 +1018,35 @@ export default function PaymentsPage() {
                           accountLastFour: e.target.value.replace(/\D/g, '').slice(0, 4),
                         }))
                       }
+                      className="h-10"
                     />
                   </div>
                 )}
               </div>
             )}
 
-            <div>
-              <Label>Notes (optional)</Label>
+            <div className="space-y-1.5">
+              <Label className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Notes <span className="font-normal normal-case text-muted-foreground">(optional)</span>
+              </Label>
               <Textarea
-                placeholder="Payment notes"
+                placeholder="Payment details…"
                 value={paymentForm.notes}
                 onChange={(e) => setPaymentForm((f) => ({ ...f, notes: e.target.value }))}
-                rows={2}
+                rows={1}
+                className="min-h-[2.5rem] resize-none sm:min-h-[3.5rem] sm:rows-2"
               />
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowNewPaymentDialog(false)}>Done</Button>
+
+          <DialogFooter className="shrink-0 gap-2 border-t bg-muted/20 px-4 py-3 sm:flex-row sm:justify-between sm:px-5 sm:py-3.5">
+            <Button variant="ghost" onClick={() => setShowNewPaymentDialog(false)}>
+              Cancel
+            </Button>
             <Button
-              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+              className="min-w-[9rem] bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm"
               disabled={
+                !paymentForm.bookingId ||
                 !paymentForm.amount ||
                 parseFloat(paymentForm.amount) <= 0 ||
                 createPaymentMutation.isPending ||
@@ -950,7 +1062,14 @@ export default function PaymentsPage() {
                 createPaymentMutation.mutate()
               }}
             >
-              {createPaymentMutation.isPending ? 'Recording...' : 'Record Payment'}
+              {createPaymentMutation.isPending ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Recording…
+                </>
+              ) : (
+                'Record Payment'
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>

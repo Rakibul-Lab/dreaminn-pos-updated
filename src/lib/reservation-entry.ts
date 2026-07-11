@@ -17,7 +17,6 @@ import { generateGuestRegistrationNumber } from '@/lib/guest-registration-number
 import { generateReservationEntryConfirmationNumber } from '@/lib/confirmation-number.server'
 import { isArrivalOnOrBeforeBusinessDate } from '@/lib/room-effective-status'
 import { minCheckoutDatePickerValue } from '@/lib/hotel-times'
-import { getPhysicalIdTypeMissingFields } from '@/lib/reservation-completion-fields'
 import { isKnownNationality } from '@/lib/nationalities'
 import {
   isRoomStatusBlockedForSale,
@@ -947,13 +946,6 @@ export async function createReservationEntry(input: {
     const nationality = input.guestNationality?.trim() || ''
     if (!isKnownNationality(nationality)) {
       throw new Error('Nationality is required')
-    }
-    const typeMissing = getPhysicalIdTypeMissingFields({
-      idType: input.guestIdType ?? '',
-      nationality,
-    })
-    if (typeMissing.length > 0) {
-      throw new Error(`Required: ${typeMissing.join(', ')}`)
     }
   }
 

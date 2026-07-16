@@ -1,5 +1,5 @@
 import type { PrismaClient } from '@prisma/client'
-import { computeHotelDiscountAmount, parseBookingDiscountType } from '@/lib/booking-discount'
+import { computeHotelDiscountAmount, parseBookingDiscountType, taxableHotelAfterRoomDiscount } from '@/lib/booking-discount'
 import { bookingVatOptions, sumBookingNetPaid } from '@/lib/booking-totals'
 import { getRoomNightlyTotal } from '@/lib/room-pricing'
 import {
@@ -148,17 +148,19 @@ export function mergeCreditTransferSettlements(
   const vatOpts = bookingVatOptions(options.payingBooking)
   const vatApplied = vatOpts.vatApplied !== false
   const hotelVatRate = vatApplied ? Math.max(0, vatOpts.vatPercent ?? 0) : 0
+  // Paying-room discount applies to combined room charges only — not damage/extras.
   const discount = computeHotelDiscountAmount(
-    hotelBase,
+    roomCharges,
     options.discountEnabled,
     parseBookingDiscountType(options.discountType),
     options.discountValue
   )
   const restaurantVat = allSettlements.reduce((sum, s) => sum + s.restaurantVat, 0)
   const restaurantTotal = foodCharges + restaurantVat
-  const hotelVat = hotelVatRate > 0 ? ((hotelBase - discount) * hotelVatRate) / 100 : 0
+  const taxableHotel = taxableHotelAfterRoomDiscount(roomCharges, discount, extraCharges)
+  const hotelVat = hotelVatRate > 0 ? (taxableHotel * hotelVatRate) / 100 : 0
   const vatAmount = hotelVat + restaurantVat
-  const totalAmount = hotelBase - discount + hotelVat + restaurantTotal
+  const totalAmount = taxableHotel + hotelVat + restaurantTotal
 
   const allPayments = [
     ...options.primaryPayments,

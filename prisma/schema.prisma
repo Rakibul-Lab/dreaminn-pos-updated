@@ -603,10 +603,24 @@ model HousekeepingTask {
   @@map("housekeeping_tasks")
 }
 
+model InventoryCategory {
+  id          String          @id @default(cuid())
+  name        String          @unique
+  description String?
+  active      Boolean         @default(true)
+  sortOrder   Int             @default(0) @map("sort_order")
+  createdAt   DateTime        @default(now()) @map("created_at")
+  updatedAt   DateTime        @updatedAt @map("updated_at")
+  items       InventoryItem[]
+
+  @@map("inventory_categories")
+}
+
 model InventoryItem {
   id           String                 @id @default(cuid())
   name         String
   category     String?
+  categoryId   String?                @map("category_id")
   unit         String
   quantity     Float                  @default(0)
   minQuantity  Float                  @default(0)
@@ -614,8 +628,10 @@ model InventoryItem {
   supplier     String?
   createdAt    DateTime               @default(now())
   updatedAt    DateTime               @updatedAt
+  inventoryCategory InventoryCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   transactions InventoryTransaction[]
 
+  @@index([categoryId], map: "inventory_items_category_id_fkey")
   @@map("inventory_items")
 }
 

@@ -2,7 +2,7 @@ import { PrismaClient } from '@prisma/client'
 import { getServerEnv } from '@/lib/env'
 
 /** Bump when Prisma schema changes so dev HMR picks up new fields without a full server restart. */
-const PRISMA_CLIENT_VERSION = '20250709140000_transport_vehicle_type'
+const PRISMA_CLIENT_VERSION = '20250713120000_inventory_categories'
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined

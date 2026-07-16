@@ -9,7 +9,7 @@ import {
   buildManualInvoiceLineItems,
   replaceInvoiceLineItems,
 } from '@/lib/invoice-line-items';
-import { computeHotelDiscountAmount, parseBookingDiscountType } from '@/lib/booking-discount';
+import { computeHotelDiscountAmount, parseBookingDiscountType, taxableHotelAfterRoomDiscount } from '@/lib/booking-discount';
 import { resolveInvoiceBooking } from '@/lib/invoice-booking-resolve';
 import { isStayDatetimeRangeValid } from '@/lib/hotel-times';
 import { stampCurrentBusinessDate } from '@/lib/business-date';
@@ -276,20 +276,21 @@ export async function POST(request: NextRequest) {
     const hotelBase = roomCharges + extraCharges;
     const discount =
       discountOverride !== undefined
-        ? discountOverride
+        ? Math.min(Math.max(0, discountOverride), Math.max(0, roomCharges))
         : computeHotelDiscountAmount(
-            hotelBase,
+            roomCharges,
             booking.discountEnabled === true,
             parseBookingDiscountType(booking.discountType),
             Number(booking.discountValue) || 0
           );
 
-    const hotelVat = vatPercent > 0 ? ((hotelBase - discount) * vatPercent) / 100 : 0;
+    const taxableHotel = taxableHotelAfterRoomDiscount(roomCharges, discount, extraCharges);
+    const hotelVat = vatPercent > 0 ? (taxableHotel * vatPercent) / 100 : 0;
     const vatAmount = manualMode ? hotelVat : hotelVat + restaurantVat;
     const subtotal = hotelBase + foodCharges;
     const totalAmount = manualMode
-      ? hotelBase - discount + hotelVat + foodCharges
-      : hotelBase - discount + hotelVat + restaurantTotal;
+      ? taxableHotel + hotelVat + foodCharges
+      : taxableHotel + hotelVat + restaurantTotal;
 
     const paidAmount =
       paidAmountOverride !== undefined

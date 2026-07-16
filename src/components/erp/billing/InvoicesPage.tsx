@@ -360,11 +360,13 @@ export default function InvoicesPage() {
   const parsedRoom = parseFloat(invoiceForm.roomCharges) || 0
   const parsedFood = parseFloat(invoiceForm.foodCharges) || 0
   const parsedService = parseFloat(invoiceForm.serviceCharges) || 0
-  const parsedDiscount = parseFloat(invoiceForm.discount) || 0
+  const parsedDiscountRaw = parseFloat(invoiceForm.discount) || 0
   const parsedVat = parseFloat(invoiceForm.vatPercent) || 0
-  const hotelBase = parsedRoom + parsedService
-  const hotelVat = parsedVat > 0 ? ((hotelBase - parsedDiscount) * parsedVat) / 100 : 0
-  const estimatedTotal = Math.max(0, hotelBase - parsedDiscount + hotelVat + parsedFood)
+  // Discount is room-only; never reduce service/damage/extras.
+  const parsedDiscount = Math.min(Math.max(0, parsedDiscountRaw), Math.max(0, parsedRoom))
+  const taxableHotel = Math.max(0, parsedRoom - parsedDiscount) + Math.max(0, parsedService)
+  const hotelVat = parsedVat > 0 ? (taxableHotel * parsedVat) / 100 : 0
+  const estimatedTotal = Math.max(0, taxableHotel + hotelVat + parsedFood)
   const estimatedDue = Math.max(0, estimatedTotal - (parseFloat(invoiceForm.paidAmount) || 0))
 
   const filteredInvoices = invoices.filter((inv) => {

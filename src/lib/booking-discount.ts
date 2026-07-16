@@ -4,18 +4,31 @@ export function parseBookingDiscountType(value: unknown): BookingDiscountType {
   return value === 'FIXED' ? 'FIXED' : 'PERCENTAGE'
 }
 
+/**
+ * Hotel/booking discount is always computed on room charges only.
+ * Do not pass damage, extras, late checkout, or restaurant into `roomChargeBase`.
+ */
 export function computeHotelDiscountAmount(
-  hotelBase: number,
+  roomChargeBase: number,
   enabled: boolean,
   type: BookingDiscountType,
   value: number
 ): number {
-  if (!enabled || value <= 0 || hotelBase <= 0) return 0
+  if (!enabled || value <= 0 || roomChargeBase <= 0) return 0
   if (type === 'FIXED') {
-    return Math.min(hotelBase, Math.max(0, value))
+    return Math.min(roomChargeBase, Math.max(0, value))
   }
   const pct = Math.min(100, Math.max(0, value))
-  return (hotelBase * pct) / 100
+  return (roomChargeBase * pct) / 100
+}
+
+/** Room after discount + extras/damage at full price (never discounted). */
+export function taxableHotelAfterRoomDiscount(
+  roomCharges: number,
+  discountAmount: number,
+  extraCharges: number
+): number {
+  return Math.max(0, roomCharges - Math.max(0, discountAmount)) + Math.max(0, extraCharges)
 }
 
 export type BookingDiscountInput = {

@@ -621,7 +621,7 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
               <div>
                 <p className="text-sm font-medium text-foreground">Discount</p>
                 <p className="text-xs text-muted-foreground">
-                  Applied to room and service charges before VAT — included on invoice
+                  Applied to room charges only before VAT — damage and other extras are never discounted
                   {discountFromReservation ? ' (from reservation — editable)' : ''}
                 </p>
               </div>

@@ -1,4 +1,4 @@
-import { computeHotelDiscountAmount, parseBookingDiscountType } from '@/lib/booking-discount'
+import { computeHotelDiscountAmount, parseBookingDiscountType, taxableHotelAfterRoomDiscount } from '@/lib/booking-discount'
 import {
   bookingDiscountInput,
   bookingVatOptions,
@@ -176,16 +176,18 @@ export function computeCheckoutSettlement(
   const vatOpts = bookingVatOptions(booking)
   const vatApplied = vatOpts.vatApplied !== false
   const hotelVatRate = vatApplied ? Math.max(0, vatOpts.vatPercent ?? 0) : 0
+  // Discount applies to room charges only — never damage, late checkout, or other extras.
   const discount = computeHotelDiscountAmount(
-    hotelBase,
+    roomCharges,
     params.discountEnabled === true,
     parseBookingDiscountType(params.discountType),
     Number(params.discountValue) || 0
   )
+  const taxableHotel = taxableHotelAfterRoomDiscount(roomCharges, discount, extraCharges)
   const hotelVat =
-    hotelVatRate > 0 ? ((hotelBase - discount) * hotelVatRate) / 100 : 0
+    hotelVatRate > 0 ? (taxableHotel * hotelVatRate) / 100 : 0
   const vatAmount = hotelVat + restaurantVat
-  const totalAmount = hotelBase - discount + hotelVat + restaurantTotal
+  const totalAmount = taxableHotel + hotelVat + restaurantTotal
 
   const totalPaid = sumCheckoutBookingPaid(payments)
   const dueBeforeSettlement = totalAmount - totalPaid

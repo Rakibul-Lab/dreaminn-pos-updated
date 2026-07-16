@@ -112,7 +112,7 @@ export async function POST(request: NextRequest) {
     const authResult = await requireInventoryAccess(request);
     if (authResult instanceof Response) return authResult;
 
-    const { name, category, unit, quantity, minQuantity, costPerUnit, supplier } = body;
+    const { name, category, categoryId, unit, quantity, minQuantity, costPerUnit, supplier } = body;
 
     if (!name || typeof name !== 'string' || !name.trim()) {
       return errorResponse('Item name is required');
@@ -122,10 +122,33 @@ export async function POST(request: NextRequest) {
       return errorResponse('Unit is required');
     }
 
+    let resolvedCategoryId: string | null = null;
+    let resolvedCategoryName: string | null = category?.trim() || null;
+
+    if (categoryId && typeof categoryId === 'string' && categoryId.trim()) {
+      const selectedCategory = await db.inventoryCategory.findUnique({
+        where: { id: categoryId.trim() },
+      });
+      if (!selectedCategory || !selectedCategory.active) {
+        return errorResponse('Selected category was not found');
+      }
+      resolvedCategoryId = selectedCategory.id;
+      resolvedCategoryName = selectedCategory.name;
+    } else if (resolvedCategoryName) {
+      const byName = await db.inventoryCategory.findUnique({
+        where: { name: resolvedCategoryName },
+      });
+      if (byName) {
+        resolvedCategoryId = byName.id;
+        resolvedCategoryName = byName.name;
+      }
+    }
+
     const item = await db.inventoryItem.create({
       data: {
         name: name.trim(),
-        category: category?.trim() || null,
+        category: resolvedCategoryName,
+        categoryId: resolvedCategoryId,
         unit: unit.trim(),
         quantity: quantity !== undefined ? Number(quantity) : 0,
         minQuantity: minQuantity !== undefined ? Number(minQuantity) : 0,
@@ -245,7 +268,7 @@ export async function PUT(request: NextRequest) {
     if (authResult instanceof Response) return authResult;
 
     const body = await request.json();
-    const { id, name, category, unit, quantity, minQuantity, costPerUnit, supplier } = body;
+    const { id, name, category, categoryId, unit, quantity, minQuantity, costPerUnit, supplier } = body;
 
     if (!id) {
       return errorResponse('Inventory item ID is required');
@@ -258,12 +281,36 @@ export async function PUT(request: NextRequest) {
 
     const updateData: Record<string, unknown> = {};
     if (name !== undefined) updateData.name = name.trim();
-    if (category !== undefined) updateData.category = category?.trim() || null;
     if (unit !== undefined) updateData.unit = unit.trim();
     if (quantity !== undefined) updateData.quantity = Number(quantity);
     if (minQuantity !== undefined) updateData.minQuantity = Number(minQuantity);
     if (costPerUnit !== undefined) updateData.costPerUnit = costPerUnit !== null ? Number(costPerUnit) : null;
     if (supplier !== undefined) updateData.supplier = supplier?.trim() || null;
+
+    if (categoryId !== undefined || category !== undefined) {
+      let resolvedCategoryId: string | null = null;
+      let resolvedCategoryName: string | null = null;
+
+      if (categoryId && typeof categoryId === 'string' && categoryId.trim()) {
+        const selectedCategory = await db.inventoryCategory.findUnique({
+          where: { id: categoryId.trim() },
+        });
+        if (!selectedCategory || !selectedCategory.active) {
+          return errorResponse('Selected category was not found');
+        }
+        resolvedCategoryId = selectedCategory.id;
+        resolvedCategoryName = selectedCategory.name;
+      } else if (typeof category === 'string' && category.trim()) {
+        const byName = await db.inventoryCategory.findUnique({
+          where: { name: category.trim() },
+        });
+        resolvedCategoryName = category.trim();
+        resolvedCategoryId = byName?.id ?? null;
+      }
+
+      updateData.category = resolvedCategoryName;
+      updateData.categoryId = resolvedCategoryId;
+    }
 
     const item = await db.inventoryItem.update({
       where: { id },

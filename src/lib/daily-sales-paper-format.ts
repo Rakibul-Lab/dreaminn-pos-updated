@@ -231,9 +231,7 @@ export function computePaperTotals(paperLines: PaperSalesLine[]): PaperSalesTota
       card: acc.card + (line.card ?? 0),
       mBanking: acc.mBanking + (line.mBanking ?? 0),
       dueBill: acc.dueBill + (line.dueBill ?? 0),
-      totalInclVat:
-        acc.totalInclVat +
-        (line.lineType === 'payment' ? 0 : (line.totalInclVat ?? 0)),
+      totalInclVat: acc.totalInclVat + (line.totalInclVat ?? 0),
     }),
     {
       othersServiceSale: 0,
@@ -278,10 +276,20 @@ export function buildPaperSummary(data: PaperSalesInput): PaperSummary {
   const balances = data.balances ?? {}
   const openingBalance = balances.openingBalance ?? data.openingBalance ?? 0
   const dueBill = balances.companyBillTotal ?? totals.dueBill
-  // Authoritative day sale (charge lines + same-day checkout collections whose
-  // invoice charge rows were suppressed) comes from balances.salesTotal.
-  // Fall back to charge-line totals only when balances are unavailable.
-  const totalSale = balances.salesTotal ?? totals.totalInclVat
+  // Total Sale must foot with Cash + Card + M. Banking + Company on the paper.
+  // Do not use balances.salesTotal when tenders exist — that previously added full
+  // checkout invoice totals (including prior-day advances) and overstated the day.
+  const footedTenders =
+    totals.cash + totals.card + totals.mBanking + totals.dueBill + totals.othersServiceSale
+  const totalSale = Number(
+    (
+      footedTenders > 0
+        ? footedTenders
+        : totals.totalInclVat > 0
+          ? totals.totalInclVat
+          : (balances.salesTotal ?? 0)
+    ).toFixed(2)
+  )
   const grandTotal = openingBalance + totalSale
   const closingBalance = balances.closingBalance ?? grandTotal - dueBill
   const hotelDiscount = data.hotel?.discount ?? 0
@@ -354,7 +362,14 @@ export function paperTotalsToRow(
   totals: PaperSalesTotals,
   chargeSaleTotal?: number
 ): string[] {
-  const saleTotal = chargeSaleTotal ?? totals.totalInclVat
+  const footedTenders =
+    totals.cash + totals.card + totals.mBanking + totals.dueBill + totals.othersServiceSale
+  // Always foot with printed columns when they have activity; avoids stale/overstated
+  // chargeSaleTotal (e.g. full invoice incl. prior-day advance).
+  const saleTotal =
+    footedTenders > 0
+      ? footedTenders
+      : (chargeSaleTotal ?? totals.totalInclVat)
   return [
     'Total Sale =',
     '',

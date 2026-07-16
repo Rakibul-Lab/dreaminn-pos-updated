@@ -373,13 +373,31 @@ function shouldSkipInvoiceChargeLines(
   )
 }
 
-function suppressedCheckoutInvoiceChargeTotal(
-  invoices: Array<{ id: string; totalAmount: number }>,
-  invoiceIdsWithCheckoutPayments: Set<string>
+/**
+ * When checkout invoice charge rows are hidden (same-day payments shown instead),
+ * count only today's invoice-linked collections — never the full invoice.totalAmount.
+ * Using full invoice inflated Total Sale by prior-day advances already paid.
+ */
+function suppressedCheckoutInvoiceCollectionsTotal(
+  invoiceIdsWithCheckoutPayments: Set<string>,
+  payments: Array<{
+    invoiceId: string | null
+    amount: number
+    paymentType: string
+  }>
 ): number {
-  return invoices
-    .filter((invoice) => invoiceIdsWithCheckoutPayments.has(invoice.id))
-    .reduce((sum, invoice) => sum + invoice.totalAmount, 0)
+  if (invoiceIdsWithCheckoutPayments.size === 0) return 0
+  return Number(
+    payments
+      .reduce((sum, payment) => {
+        if (!payment.invoiceId || !invoiceIdsWithCheckoutPayments.has(payment.invoiceId)) {
+          return sum
+        }
+        if (payment.paymentType === 'REFUND') return sum - Math.abs(payment.amount)
+        return sum + payment.amount
+      }, 0)
+      .toFixed(2)
+  )
 }
 
 /** Booking advances, reservation payments, walk-in beverage, etc. — not already on charge lines. */
@@ -400,6 +418,27 @@ function uncapturedPaymentSalesTotal(
         if (isTransportSalePayment(payment)) return sum
         if (payment.paymentType === 'REFUND') return sum - Math.abs(payment.amount)
         return sum + payment.amount
+      }, 0)
+      .toFixed(2)
+  )
+}
+
+/**
+ * Day sale that foots with printed rows: tender columns when present,
+ * otherwise charge-line totals (posted sale with no cash/card yet).
+ */
+function sumReportSalesTotal(lines: DailySalesLine[]): number {
+  return Number(
+    lines
+      .reduce((sum, line) => {
+        const columnSum =
+          (line.cash || 0) +
+          (line.card || 0) +
+          (line.mbanking || 0) +
+          (line.companyBill || 0)
+        if (Math.abs(columnSum) > 0.005) return sum + columnSum
+        if (line.lineType === 'charge' && line.total) return sum + line.total
+        return sum
       }, 0)
       .toFixed(2)
   )
@@ -465,8 +504,12 @@ function buildTransportSalesReportLine(
 
 function computeReportBillBreakdown(
   lines: DailySalesLine[],
-  invoices: Array<{ id: string; totalAmount: number }>,
   invoiceIdsWithCheckoutPayments: Set<string>,
+  payments: Array<{
+    invoiceId: string | null
+    amount: number
+    paymentType: string
+  }>,
   transportBills: number
 ): { hotelBills: number; restaurantBills: number; transportBills: number } {
   let hotelBills = 0
@@ -486,7 +529,10 @@ function computeReportBillBreakdown(
       restaurantBills += total
     }
   }
-  hotelBills += suppressedCheckoutInvoiceChargeTotal(invoices, invoiceIdsWithCheckoutPayments)
+  hotelBills += suppressedCheckoutInvoiceCollectionsTotal(
+    invoiceIdsWithCheckoutPayments,
+    payments
+  )
   return {
     hotelBills: Number(hotelBills.toFixed(2)),
     restaurantBills: Number(restaurantBills.toFixed(2)),
@@ -921,6 +967,10 @@ export async function buildDailySalesDetailReport(
     }
 
     if (sale.saleType === 'ROOM') {
+      // Minibar/room beverage is already on the checkout invoice when the guest settles today.
+      if (sale.bookingId && checkoutBookingIds.has(sale.bookingId)) continue
+      if (coveredBeverageSaleNumbers.has(sale.saleNumber)) continue
+
       lines.push({
         id: sale.id,
         lineType: 'charge',
@@ -1018,17 +1068,20 @@ export async function buildDailySalesDetailReport(
   const hotelSalesTotal = invoiceTotal + beverageWalkInSales
   const totalDiscount = hotelDiscount + restaurantDiscount
 
-  const chargeTotalFromLines = sortedLines
-    .filter((line) => line.lineType === 'charge')
-    .reduce((sum, line) => sum + line.total, 0)
+  const chargeTotalFromLines = sumReportSalesTotal(sortedLines)
+  // Prefer line-based total (foots with Cash/Card/M.Banking/Company columns).
+  // Keep additive path only as a safety net if lines were empty but payments exist.
   const chargeTotal =
-    chargeTotalFromLines +
-    suppressedCheckoutInvoiceChargeTotal(invoices, invoiceIdsWithCheckoutPayments) +
-    uncapturedPaymentSalesTotal(allPayments)
+    chargeTotalFromLines > 0
+      ? chargeTotalFromLines
+      : suppressedCheckoutInvoiceCollectionsTotal(
+          invoiceIdsWithCheckoutPayments,
+          allPayments
+        ) + uncapturedPaymentSalesTotal(allPayments)
   const billBreakdown = computeReportBillBreakdown(
     sortedLines,
-    invoices,
     invoiceIdsWithCheckoutPayments,
+    allPayments,
     transportSalesTotal
   )
   const companyBillTotal = companyBills.reduce((s, bill) => s + bill.dueAmount, 0)

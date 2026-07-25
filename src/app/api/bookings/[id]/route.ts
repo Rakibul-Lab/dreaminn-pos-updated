@@ -25,6 +25,7 @@ import { assertRoomAvailableForBooking } from '@/lib/reservation-entry';
 import { resolveCompanyLedgerBooking, ensureCompanyLedgerGuestFromCustomer } from '@/lib/company-ledger-billing';
 import { readCurrentBusinessDateString } from '@/lib/business-date';
 import { isArrivalOnOrBeforeBusinessDate } from '@/lib/room-effective-status';
+import { isolateBookingCustomer } from '@/lib/booking-customer-isolation';
 
 export async function GET(
   request: NextRequest,
@@ -125,13 +126,15 @@ export async function PUT(
       isIdDocumentOnlyUpdate &&
       (existing.status === 'CHECKED_IN' || existing.status === 'RESERVED')
     ) {
+      // Don't rewrite ID path on a Customer shared with other bookings.
+      const customerId = await isolateBookingCustomer(id, existing.customerId)
       await replaceIdDocumentsForBooking(id, body.idDocumentPaths);
       const firstPath = body.idDocumentPaths.find(
         (p: unknown) => typeof p === 'string' && p.startsWith('/uploads/id-docs/')
       );
       if (firstPath) {
         await db.customer.update({
-          where: { id: existing.customerId },
+          where: { id: customerId },
           data: { idDocPath: firstPath },
         });
       }
@@ -326,6 +329,36 @@ export async function PUT(
     }
 
     const customerPatch = body.customer as Record<string, unknown> | undefined;
+    const willMutateCustomer =
+      Boolean(customerPatch) ||
+      Array.isArray(body.idDocumentPaths) ||
+      body.isInitialReservation === false ||
+      (typeof body.companyLedgerId === 'string' && body.companyLedgerId.trim() !== '');
+
+    // Guest profiles may be shared across bookings. Fork before mutating so
+    // edits on this stay do not rewrite guest data on other reservations.
+    let workingCustomerId = existing.customerId;
+    if (typeof body.customerId === 'string' && body.customerId.trim()) {
+      const requestedCustomerId = body.customerId.trim();
+      if (requestedCustomerId !== existing.customerId) {
+        const targetCustomer = await db.customer.findUnique({
+          where: { id: requestedCustomerId },
+          select: { id: true },
+        });
+        if (!targetCustomer) {
+          return errorResponse('Guest not found');
+        }
+        await db.booking.update({
+          where: { id },
+          data: { customerId: requestedCustomerId },
+        });
+        workingCustomerId = requestedCustomerId;
+      }
+    }
+    if (willMutateCustomer) {
+      workingCustomerId = await isolateBookingCustomer(id, workingCustomerId);
+    }
+
     if (customerPatch) {
       const customerUpdate: Record<string, unknown> = {};
       if (customerPatch.name !== undefined) customerUpdate.name = String(customerPatch.name).trim();
@@ -376,7 +409,7 @@ export async function PUT(
 
       if (Object.keys(customerUpdate).length > 0) {
         await db.customer.update({
-          where: { id: existing.customerId },
+          where: { id: workingCustomerId },
           data: customerUpdate,
         });
       }
@@ -389,7 +422,7 @@ export async function PUT(
       );
       if (firstPath) {
         await db.customer.update({
-          where: { id: existing.customerId },
+          where: { id: workingCustomerId },
           data: { idDocPath: firstPath },
         });
       }
@@ -410,7 +443,7 @@ export async function PUT(
 
       if (isCorporate) {
         const refreshedCustomer = await db.customer.findUnique({
-          where: { id: existing.customerId },
+          where: { id: workingCustomerId },
         });
         if (!refreshedCustomer) {
           return notFoundResponse('Customer');
@@ -476,7 +509,7 @@ export async function PUT(
         );
       }
 
-      await ensureCustomerRegistrationNumber(existing.customerId);
+      await ensureCustomerRegistrationNumber(workingCustomerId);
       }
     }
 
@@ -555,7 +588,7 @@ export async function PUT(
       typeof updateData.companyLedgerId === 'string'
     ) {
       const customerForLedger = await db.customer.findUnique({
-        where: { id: existing.customerId },
+        where: { id: workingCustomerId },
       });
       if (customerForLedger) {
         await ensureBookingRegistrationNumber(id);

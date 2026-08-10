@@ -80,66 +80,64 @@ export type PaymentLabelInput = {
 }
 
 export function resolvePaymentSourceLabel(payment: PaymentLabelInput): string {
+  let label = ''
+
   if (payment.paymentType === 'REFUND') {
     if (payment.invoice?.invoiceNumber) {
-      return `Refund · Invoice ${payment.invoice.invoiceNumber}`
+      label = `Refund · Invoice ${payment.invoice.invoiceNumber}`
+    } else if (payment.order?.orderNumber) {
+      label = `Refund · Restaurant #${payment.order.orderNumber}`
+    } else {
+      label = 'Refund'
     }
-    if (payment.order?.orderNumber) {
-      return `Refund · Restaurant #${payment.order.orderNumber}`
-    }
-    return 'Refund'
-  }
-
-  if (payment.invoice?.invoiceNumber) {
-    return `Checkout invoice · ${payment.invoice.invoiceNumber}`
-  }
-
-  if (payment.order?.orderNumber) {
+  } else if (payment.invoice?.invoiceNumber) {
+    label = `Checkout invoice · ${payment.invoice.invoiceNumber}`
+  } else if (payment.order?.orderNumber) {
     const source = payment.settlementSource
       ? formatRestaurantPaymentSourceLabel(payment.settlementSource)
       : 'Restaurant order'
-    return `${source} · #${payment.order.orderNumber}`
-  }
-
-  if (isBeverageWalkInPayment(payment)) {
+    label = `${source} · #${payment.order.orderNumber}`
+  } else if (isBeverageWalkInPayment(payment)) {
     const saleNumber = beverageSaleNumberFromPayment(payment)
-    return saleNumber
+    label = saleNumber
       ? `Hotel beverage (walk-in) · ${saleNumber}`
       : 'Hotel beverage (walk-in)'
-  }
-
-  if (isTransportSalePayment(payment)) {
+  } else if (isTransportSalePayment(payment)) {
     const saleNumber = transportSaleNumberFromPayment(payment)
     const isInHouse = payment.notes?.includes('In-house guest') === true
-    return saleNumber
+    label = saleNumber
       ? `Transport sale (${isInHouse ? 'in-house guest' : 'walk-in'}) · ${saleNumber}`
       : 'Transport sale'
-  }
-
-  if (payment.booking?.id) {
+  } else if (payment.booking?.id) {
     const room = payment.booking.room?.roomNumber
     const roomSuffix = room ? ` · Room ${room}` : ''
     switch (payment.paymentType) {
       case 'PARTIAL':
-        return `Guest folio (Add payment)${roomSuffix}`
+        label = `Guest folio (Add payment)${roomSuffix}`
+        break
       case 'ADVANCE':
-        return `Booking advance${roomSuffix}`
+        label = `Booking advance${roomSuffix}`
+        break
       case 'INITIAL':
-        return `Initial payment${roomSuffix}`
+        label = `Initial payment${roomSuffix}`
+        break
       case 'FINAL':
-        return `Final payment${roomSuffix}`
+        label = `Final payment${roomSuffix}`
+        break
       case 'EXTRA_CHARGES':
-        return `Extra charges${roomSuffix}`
+        label = `Extra charges${roomSuffix}`
+        break
       case 'DAMAGE_CHARGES':
-        return `Damage charges${roomSuffix}`
+        label = `Damage charges${roomSuffix}`
+        break
       case 'OTHERS':
-        return `Other payment${roomSuffix}`
+        label = `Other payment${roomSuffix}`
+        break
       default:
-        return `Booking payment${roomSuffix}`
+        label = `Booking payment${roomSuffix}`
+        break
     }
-  }
-
-  if (payment.reservationEntry) {
+  } else if (payment.reservationEntry) {
     const room = payment.reservationEntry.lines?.[0]?.room?.roomNumber
     const reg = payment.reservationEntry.registrationNumber
     const parts = [
@@ -147,10 +145,37 @@ export function resolvePaymentSourceLabel(payment: PaymentLabelInput): string {
     ]
     if (reg) parts.push(reg)
     if (room) parts.push(`Room ${room}`)
-    return parts.join(' · ')
+    label = parts.join(' · ')
+  } else {
+    switch (payment.paymentType) {
+      case 'EXTRA_CHARGES':
+        label = 'Extra charges'
+        break
+      case 'DAMAGE_CHARGES':
+        label = 'Damage charges'
+        break
+      case 'OTHERS':
+        label = 'Other payment'
+        break
+      default:
+        label = 'Payment'
+        break
+    }
   }
 
-  return 'Payment'
+  if (payment.notes && payment.notes.trim()) {
+    const cleanNotes = payment.notes.trim()
+    const isSystemNote =
+      isBeverageWalkInPayment(payment) ||
+      isTransportSalePayment(payment) ||
+      cleanNotes.startsWith('Beverage walk-in sale') ||
+      cleanNotes.startsWith('Transport sale')
+    if (!isSystemNote && !label.includes(cleanNotes)) {
+      label = `${label} · ${cleanNotes}`
+    }
+  }
+
+  return label
 }
 
 export function resolvePaymentRoomNumber(payment: PaymentLabelInput): string | null {

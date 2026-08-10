@@ -188,9 +188,6 @@ export default function PaymentsPage() {
   }
 
   const validatePaymentForm = (): string | null => {
-    if ((isHotel || isAdmin) && !paymentForm.bookingId) {
-      return 'Select a guest booking to record this payment.'
-    }
     if (!paymentForm.amount || parseFloat(paymentForm.amount) <= 0) {
       return 'Enter a valid payment amount.'
     }
@@ -312,7 +309,7 @@ export default function PaymentsPage() {
         notes: paymentForm.notes || null,
       }
       if (paymentForm.bookingId) payload.bookingId = paymentForm.bookingId
-      return api.post('/payments', payload)
+      return api.post<{ success?: boolean; message?: string; error?: string }>('/payments', payload)
     },
     onSuccess: (res: { success?: boolean; message?: string; error?: string }) => {
       if (!res?.success) {
@@ -925,9 +922,12 @@ export default function PaymentsPage() {
 
             {(isHotel || isAdmin) && (
               <div className="space-y-2 rounded-lg border bg-muted/20 p-3 sm:rounded-xl sm:p-3.5">
-                <Label className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  Guest booking
-                </Label>
+                <div className="flex items-center justify-between">
+                  <Label className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    Guest booking
+                  </Label>
+                  <span className="text-[11px] font-normal text-muted-foreground">(optional)</span>
+                </div>
                 <BookingPaymentSearchField
                   selectedId={paymentForm.bookingId}
                   selectedLabel={selectedBookingLabel}
@@ -948,7 +948,9 @@ export default function PaymentsPage() {
                     <span className="font-medium text-foreground">{selectedBookingLabel}</span>
                   </p>
                 ) : (
-                  <p className="text-xs text-amber-700">Select the guest stay for this payment.</p>
+                  <p className="text-xs text-muted-foreground">
+                    Optional: Search and select a guest stay to link this payment to a booking folio.
+                  </p>
                 )}
               </div>
             )}
@@ -1046,7 +1048,6 @@ export default function PaymentsPage() {
             <Button
               className="min-w-[9rem] bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm"
               disabled={
-                !paymentForm.bookingId ||
                 !paymentForm.amount ||
                 parseFloat(paymentForm.amount) <= 0 ||
                 createPaymentMutation.isPending ||

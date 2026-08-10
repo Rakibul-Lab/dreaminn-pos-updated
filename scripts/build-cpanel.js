@@ -111,9 +111,20 @@ function packageDeploy() {
 
 if (process.platform === 'win32' && process.env.BUILD_CPANEL_LOCAL !== '1') {
   console.error('')
-  console.error('On Windows, build the Linux package via GitHub:')
-  console.error('  Actions → Build cPanel package → Run workflow')
-  console.error('  Download cpanel-deploy.zip and upload to cPanel')
+  console.error('This PC is Windows. A ready-made cPanel package must be built on Linux')
+  console.error('(Prisma/native modules), so plain `npm run build:cpanel` is blocked here.')
+  console.error('')
+  console.error('Options without GitHub Actions:')
+  console.error('  1) Same ready zip as Actions (recommended):')
+  console.error('       Install Docker Desktop → start it → npm run build:cpanel:docker')
+  console.error('     Then upload cpanel-deploy.zip and only Restart the app.')
+  console.error('')
+  console.error('  2) Source upload + build on cPanel:')
+  console.error('       npm run pack:upload')
+  console.error('     Then on server: npm install && npx prisma generate && npm run build')
+  console.error('')
+  console.error('  3) Free GitHub Actions storage (delete old artifacts), then run')
+  console.error('     Actions → Build cPanel package.')
   console.error('')
   process.exit(1)
 }

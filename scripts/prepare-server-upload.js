@@ -2,6 +2,7 @@
  * Creates server-upload/ with only the files needed on cPanel + Passenger.
  * Zip that folder and upload to your server, then run npm install, prisma db push, npm run build.
  */
+const { execSync } = require('child_process')
 const fs = require('fs')
 const path = require('path')
 
@@ -106,6 +107,30 @@ function prepare() {
   console.log('Ready: server-upload/')
   console.log('Zip this folder and upload to your server.')
   console.log('')
+
+  const zipPath = path.join(root, 'server-upload.zip')
+  if (fs.existsSync(zipPath)) fs.rmSync(zipPath)
+  try {
+    if (process.platform === 'win32') {
+      execSync(
+        `powershell -NoProfile -Command "Compress-Archive -Path '${path.join(output, '*')}' -DestinationPath '${zipPath}' -Force"`,
+        { cwd: root, stdio: 'inherit', shell: true }
+      )
+    } else if (fs.existsSync('/usr/bin/zip')) {
+      execSync(`cd "${output}" && zip -rq "${zipPath}" .`, {
+        cwd: root,
+        stdio: 'inherit',
+        shell: true,
+      })
+    }
+    if (fs.existsSync(zipPath)) {
+      console.log(`Zip ready: ${zipPath}`)
+      console.log('Upload that zip to cPanel, extract into your app folder, then build on the server.')
+      console.log('')
+    }
+  } catch (err) {
+    console.warn('Could not create zip automatically — zip the server-upload/ folder yourself.')
+  }
 }
 
 prepare()

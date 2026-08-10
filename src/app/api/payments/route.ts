@@ -73,8 +73,12 @@ export async function GET(request: NextRequest) {
 
     // Role-based access control
     if (user.role === 'HOTEL_STAFF' || user.role === 'HOTEL_FD') {
-      // Hotel staff: booking-linked payments (room charges + room-service / ledger settlements on guest folio)
-      where.bookingId = { not: null };
+      // Hotel staff: show booking-linked payments + standalone hotel payments
+      where.OR = [
+        { bookingId: { not: null } },
+        { paymentType: { not: 'RESTAURANT' } },
+        { receivedBy: user.id },
+      ];
     } else if (user.role === 'RESTAURANT_STAFF') {
       // Restaurant staff: hotel ledger settlements + direct payments on delivered orders
       where.orderId = { not: null };

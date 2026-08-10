@@ -65,23 +65,27 @@ export async function GET(
 
     if (!payment) return notFoundResponse('Payment');
 
-    if (!payment.bookingId || !payment.booking) {
-      return errorResponse('Payment slip is only available for hotel booking payments', 400);
-    }
-
     if (payment.paymentType === 'RESTAURANT') {
       return errorResponse('Use the restaurant receipt for restaurant order payments', 400);
     }
 
     const booking = payment.booking;
-    const roomTotals = computeBookingRoomDue(booking, booking.payments);
-    const latestInvoice = booking.invoices[0] ?? null;
-    const stayTotal =
-      booking.status === 'CHECKED_OUT' && latestInvoice
-        ? latestInvoice.totalAmount
-        : roomTotals.totalWithVat;
-    const totalPaid = sumBookingNetPaid(booking.payments);
-    const balanceDue = resolveBookingDisplayDue(booking, booking.payments, latestInvoice);
+    let stayTotal: number | null = null;
+    let totalPaid: number | null = null;
+    let balanceDue: number | null = null;
+    let hasAccountSummary = false;
+
+    if (booking) {
+      hasAccountSummary = true;
+      const roomTotals = computeBookingRoomDue(booking, booking.payments);
+      const latestInvoice = booking.invoices[0] ?? null;
+      stayTotal =
+        latestInvoice && (booking.status === 'CHECKED_OUT' || latestInvoice.totalAmount > 0)
+          ? latestInvoice.totalAmount
+          : roomTotals.totalWithVat;
+      totalPaid = sumBookingNetPaid(booking.payments);
+      balanceDue = resolveBookingDisplayDue(booking, booking.payments, latestInvoice);
+    }
     const isRefund = payment.paymentType === 'REFUND';
 
     return successResponse({
@@ -101,14 +105,15 @@ export async function GET(
       paidAt: payment.createdAt,
       businessDate: payment.businessDate,
       receivedBy: payment.receiver?.name ?? null,
-      guestName: booking.customer.name,
-      guestPhone: booking.customer.phone ?? null,
-      roomNumber: booking.room?.roomNumber ?? null,
-      confirmationNumber: formatConfirmationNumber(booking),
-      registrationNumber: resolveBookingRegistrationNumber(booking),
-      bookingStatus: booking.status,
-      checkIn: booking.checkIn,
-      checkOut: booking.checkOut,
+      guestName: booking?.customer?.name ?? 'General Payment',
+      guestPhone: booking?.customer?.phone ?? null,
+      roomNumber: booking?.room?.roomNumber ?? null,
+      confirmationNumber: booking ? formatConfirmationNumber(booking) : '—',
+      registrationNumber: booking ? resolveBookingRegistrationNumber(booking) : null,
+      bookingStatus: booking?.status ?? null,
+      checkIn: booking?.checkIn ?? null,
+      checkOut: booking?.checkOut ?? null,
+      hasAccountSummary,
       stayTotal,
       totalPaid,
       balanceDue,

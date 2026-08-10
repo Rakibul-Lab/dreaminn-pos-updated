@@ -710,7 +710,7 @@ export default function PaymentsPage() {
                       </TableCell>
                       {!isRestaurant ? (
                         <TableCell className="font-mono text-[10px] max-w-[120px] truncate">
-                          {payment.bookingId && payment.paymentType !== 'RESTAURANT'
+                          {payment.paymentType !== 'RESTAURANT'
                             ? formatPaymentSlipNumber(payment)
                             : '—'}
                         </TableCell>
@@ -740,7 +740,7 @@ export default function PaymentsPage() {
                       <TableCell className="text-sm">{payment.receiver?.name || 'N/A'}</TableCell>
                       {!isRestaurant ? (
                         <TableCell className="text-right">
-                          {payment.bookingId && payment.paymentType !== 'RESTAURANT' ? (
+                          {payment.paymentType !== 'RESTAURANT' ? (
                             <BookingPaymentSlipButton paymentId={payment.id} iconOnly variant="ghost" />
                           ) : (
                             <span className="text-muted-foreground text-xs">—</span>

@@ -39,9 +39,10 @@ type ReceiptData = {
   roomNumber: string | null
   confirmationNumber: string
   registrationNumber: string | null
-  stayTotal: number
-  totalPaid: number
-  balanceDue: number
+  stayTotal?: number | null
+  totalPaid?: number | null
+  balanceDue?: number | null
+  hasAccountSummary?: boolean
   invoiceNumber: string | null
   checkIn?: string
   checkOut?: string
@@ -322,35 +323,43 @@ export function BookingPaymentThermalReceiptView({
               </div>
             </div>
 
-            <div className="invoice-pdf-summary w-full text-[8.5pt]">
-              <div className="rounded border border-border p-3">
-                <p className="mb-2 text-[8pt] uppercase tracking-wide">Account summary</p>
-                <table className="w-full">
-                  <tbody>
-                    <tr>
-                      <td className="py-1.5 pr-2 whitespace-nowrap">Stay total</td>
-                      <td className="py-1.5 text-right whitespace-nowrap">
-                        {formatBdt(receipt.stayTotal)}
-                      </td>
-                    </tr>
-                    <tr>
-                      <td className="py-1.5 pr-2 whitespace-nowrap">Total paid</td>
-                      <td className="py-1.5 text-right whitespace-nowrap">
-                        {formatBdt(receipt.totalPaid)}
-                      </td>
-                    </tr>
-                    <tr>
-                      <td className="py-1.5 pr-2 text-[9pt] font-bold whitespace-nowrap">
-                        Balance due
-                      </td>
-                      <td className="py-1.5 text-right text-[9pt] font-bold whitespace-nowrap">
-                        {formatBdt(receipt.balanceDue)}
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
+            {receipt.hasAccountSummary && (
+              <div className="invoice-pdf-summary w-full text-[8.5pt]">
+                <div className="rounded border border-border p-3">
+                  <p className="mb-2 text-[8pt] uppercase tracking-wide">Account summary</p>
+                  <table className="w-full">
+                    <tbody>
+                      {receipt.stayTotal != null && (
+                        <tr>
+                          <td className="py-1.5 pr-2 whitespace-nowrap">Stay total</td>
+                          <td className="py-1.5 text-right whitespace-nowrap">
+                            {formatBdt(receipt.stayTotal)}
+                          </td>
+                        </tr>
+                      )}
+                      {receipt.totalPaid != null && (
+                        <tr>
+                          <td className="py-1.5 pr-2 whitespace-nowrap">Total paid</td>
+                          <td className="py-1.5 text-right whitespace-nowrap">
+                            {formatBdt(receipt.totalPaid)}
+                          </td>
+                        </tr>
+                      )}
+                      {receipt.balanceDue != null && (
+                        <tr>
+                          <td className="py-1.5 pr-2 text-[9pt] font-bold whitespace-nowrap">
+                            Balance due
+                          </td>
+                          <td className="py-1.5 text-right text-[9pt] font-bold whitespace-nowrap">
+                            {formatBdt(receipt.balanceDue)}
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
-            </div>
+            )}
 
             <div className="invoice-print-footer mt-8 space-y-4 text-[8pt]">
               <p className="text-center">

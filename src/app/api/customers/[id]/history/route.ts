@@ -18,6 +18,7 @@ export async function GET(
     const { searchParams } = new URL(request.url);
     const dateFrom = searchParams.get('dateFrom');
     const dateTo = searchParams.get('dateTo');
+    const companionId = searchParams.get('companionId')?.trim() || null;
 
     const customer = await db.customer.findUnique({
       where: { id },
@@ -28,6 +29,7 @@ export async function GET(
             room: { include: { type: true } },
             companyLedgerGuest: { select: { registrationNumber: true } },
             sourceReservationEntry: { select: { registrationNumber: true } },
+            companions: { orderBy: { sortOrder: 'asc' } },
             invoices: {
               where: { status: { not: 'CANCELLED' } },
               orderBy: { issuedAt: 'desc' },
@@ -44,10 +46,35 @@ export async function GET(
 
     if (!customer) return notFoundResponse('Customer');
 
+    const companion = companionId
+      ? customer.bookings
+          .flatMap((booking) => booking.companions.map((c) => ({ companion: c, booking })))
+          .find(({ companion: c }) => c.id === companionId) ?? null
+      : null;
+
+    if (companionId && !companion) return notFoundResponse('Companion');
+
+    const isCompanionView = Boolean(companion);
     const filteredBookings = customer.bookings.filter((booking) => {
       if (booking.status === 'CANCELLED') return false;
+      if (companion && booking.id !== companion.booking.id) return false;
       if (!dateFrom && !dateTo) return true;
       return guestStayOverlapsRange(booking, dateFrom, dateTo);
+    });
+
+    const mapCompanion = (c: {
+      id: string
+      name: string
+      phone: string | null
+      email: string | null
+      nationality: string | null
+    }) => ({
+      id: c.id,
+      name: c.name,
+      phone: c.phone,
+      email: c.email,
+      nationality: c.nationality,
+      role: 'companion' as const,
     });
 
     const stays = filteredBookings.map((booking) => {
@@ -59,6 +86,9 @@ export async function GET(
       );
       const invoice = booking.invoices[0] ?? null;
       const registrationNumber = resolveBookingRegistrationNumber(booking);
+      const stayCompanions = booking.companions
+        .filter((c) => c.name.trim())
+        .map(mapCompanion);
 
       return {
         booking: {
@@ -70,53 +100,77 @@ export async function GET(
           checkOut: booking.checkOut,
           actualCheckIn: booking.actualCheckIn,
           actualCheckOut: booking.actualCheckOut,
-          totalRoomCharge: booking.totalRoomCharge,
-          dueAmount: totals.dueAmount,
-          totalWithVat: totals.totalWithVat,
-          paidAmount: totalPaid,
+          totalRoomCharge: isCompanionView ? 0 : booking.totalRoomCharge,
+          dueAmount: isCompanionView ? 0 : totals.dueAmount,
+          totalWithVat: isCompanionView ? 0 : totals.totalWithVat,
+          paidAmount: isCompanionView ? 0 : totalPaid,
           room: booking.room,
         },
-        invoice: invoice
-          ? {
-              id: invoice.id,
-              invoiceNumber: invoice.invoiceNumber,
-              totalAmount: invoice.totalAmount,
-              paidAmount: invoice.paidAmount,
-              dueAmount: invoice.dueAmount,
-              status: invoice.status,
-              issuedAt: invoice.issuedAt,
-            }
-          : null,
-        payments: booking.payments.map((p) => ({
-          id: p.id,
-          amount: p.amount,
-          method: p.method,
-          paymentType: p.paymentType,
-          reference: p.reference,
-          notes: p.notes,
-          createdAt: p.createdAt,
-          receiver: p.receiver,
-        })),
+        companions: stayCompanions,
+        invoice:
+          isCompanionView || !invoice
+            ? null
+            : {
+                id: invoice.id,
+                invoiceNumber: invoice.invoiceNumber,
+                totalAmount: invoice.totalAmount,
+                paidAmount: invoice.paidAmount,
+                dueAmount: invoice.dueAmount,
+                status: invoice.status,
+                issuedAt: invoice.issuedAt,
+              },
+        payments: isCompanionView
+          ? []
+          : booking.payments.map((p) => ({
+              id: p.id,
+              amount: p.amount,
+              method: p.method,
+              paymentType: p.paymentType,
+              reference: p.reference,
+              notes: p.notes,
+              createdAt: p.createdAt,
+              receiver: p.receiver,
+            })),
       };
     });
 
-    const totalDue = stays.reduce((sum, stay) => sum + (stay.booking.dueAmount ?? 0), 0);
+    const totalDue = isCompanionView
+      ? 0
+      : stays.reduce((sum, stay) => sum + (stay.booking.dueAmount ?? 0), 0);
+
+    const guestProfile = companion
+      ? {
+          id: companion.companion.id,
+          name: companion.companion.name,
+          phone: companion.companion.phone ?? '',
+          email: companion.companion.email,
+          nationality: companion.companion.nationality,
+          address: companion.companion.address,
+          idType: companion.companion.idType,
+          idNumber: companion.companion.idNumber,
+          notes: null,
+          role: 'companion' as const,
+          primaryGuestName: customer.name,
+        }
+      : {
+          id: customer.id,
+          name: customer.name,
+          phone: customer.phone,
+          email: customer.email,
+          nationality: customer.nationality,
+          address: customer.address,
+          idType: customer.idType,
+          idNumber: customer.idNumber,
+          notes: customer.notes,
+          role: 'primary' as const,
+          primaryGuestName: null,
+        };
 
     return successResponse({
-      guest: {
-        id: customer.id,
-        name: customer.name,
-        phone: customer.phone,
-        email: customer.email,
-        nationality: customer.nationality,
-        address: customer.address,
-        idType: customer.idType,
-        idNumber: customer.idNumber,
-        notes: customer.notes,
-      },
+      guest: guestProfile,
       stays,
       totalDue,
-      stayCount: customer.bookings.filter((b) => b.status !== 'CANCELLED').length,
+      stayCount: filteredBookings.length,
     });
   } catch (error) {
     console.error('Customer guest history error:', error);

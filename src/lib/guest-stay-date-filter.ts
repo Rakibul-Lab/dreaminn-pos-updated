@@ -63,7 +63,7 @@ export function getGuestDepartureCalendarDay(booking: StayBoundsSource): Date {
  * PMS daily guest visibility:
  * - RESERVED: appears on scheduled check-in business day only (expected arrival).
  * - CHECKED_IN: appears every business day from actual check-in through checkout.
- * - CHECKED_OUT: appears on each day the guest was in-house (historical).
+ * - CHECKED_OUT: appears on each day the guest was in-house, including checkout day.
  */
 export function guestStayOverlapsRange(
   booking: StayBoundsSource,
@@ -86,7 +86,16 @@ export function guestStayOverlapsRange(
   const arrivalDay = getGuestArrivalCalendarDay(booking)
   const departureDay = getGuestDepartureCalendarDay(booking)
 
-  return arrivalDay <= filterEndDay && departureDay >= filterStartDay
+  // Inclusive stay span (arrival through departure/checkout day)
+  if (arrivalDay <= filterEndDay && departureDay >= filterStartDay) return true
+
+  // Same-day checkout edge: still count the checkout calendar day
+  if (booking.status === 'CHECKED_OUT' && booking.actualCheckOut) {
+    const checkoutDay = startOfDay(new Date(booking.actualCheckOut))
+    if (checkoutDay >= filterStartDay && checkoutDay <= filterEndDay) return true
+  }
+
+  return false
 }
 
 export function pickGuestStayBooking<T extends StayBoundsSource>(

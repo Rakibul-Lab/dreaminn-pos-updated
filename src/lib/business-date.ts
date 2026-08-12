@@ -342,6 +342,11 @@ export function buildGuestStayOnBusinessDayWhere(
           { actualCheckOut: { gte: start } },
         ],
       },
+      // Checkout during the open business-day window (may cross calendar midnight)
+      {
+        status: 'CHECKED_OUT',
+        actualCheckOut: { gte: openedAt, lte: closedAt },
+      },
       {
         status: 'CHECKED_OUT',
         OR: [{ actualCheckIn: null }, { actualCheckOut: null }],
@@ -430,6 +435,36 @@ export async function buildGuestStayFilterWhere(
   if (from && to && from === to) {
     const window = await resolveBusinessDayWindowForDate(from)
     return buildGuestStayOnBusinessDayWhere(window.businessDate, window.openedAt, window.closedAt)
+  }
+
+  return buildGuestStayOverlapWhere(from, to)
+}
+
+/**
+ * Guests menu / directory: keep checked-out guests visible for days they stayed
+ * or checked out (including business-day window after midnight).
+ */
+export async function buildGuestDirectoryFilterWhere(
+  dateFrom: string | null | undefined,
+  dateTo: string | null | undefined
+): Promise<Prisma.BookingWhereInput | null> {
+  const from = dateFrom?.trim() || null
+  const to = dateTo?.trim() || null
+  if (!from && !to) return null
+
+  if (from && to && from === to) {
+    const window = await resolveBusinessDayWindowForDate(from)
+    const calendarOverlap = buildGuestStayOverlapWhere(from, to)
+    return {
+      OR: [
+        ...(calendarOverlap ? [calendarOverlap] : []),
+        buildGuestStayOnBusinessDayWhere(window.businessDate, window.openedAt, window.closedAt),
+        {
+          status: 'CHECKED_OUT',
+          actualCheckOut: { gte: window.openedAt, lte: window.closedAt },
+        },
+      ],
+    }
   }
 
   return buildGuestStayOverlapWhere(from, to)

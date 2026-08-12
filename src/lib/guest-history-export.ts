@@ -20,6 +20,7 @@ export type GuestHistoryBooking = BookingListDatetimeFields & {
   totalRoomCharge: number
   totalWithVat?: number
   dueAmount?: number
+  hideAmounts?: boolean
   room?: { roomNumber: string; type?: { name: string } }
 }
 
@@ -31,6 +32,8 @@ export type GuestHistoryExportGuest = {
   nationality?: string | null
   idType?: string | null
   idNumber?: string | null
+  role?: 'primary' | 'companion'
+  primaryGuestName?: string | null
   stay?: BookingListDatetimeFields | null
 }
 
@@ -89,7 +92,8 @@ const PDF_COLUMNS: PdfColumn[] = [
   {
     header: 'Total',
     width: 22,
-    value: (b) => formatBdtForPdf(b.totalWithVat ?? b.totalRoomCharge),
+    value: (b) =>
+      b.hideAmounts ? 'Companion' : formatBdtForPdf(b.totalWithVat ?? b.totalRoomCharge),
   },
 ]
 
@@ -164,12 +168,16 @@ export async function downloadGuestHistoryPdf(
   pdf.setFontSize(9)
   const profileLines = [
     `Name: ${guest.name}`,
+    guest.role === 'companion' ? 'Role: Companion' : 'Role: Primary guest',
+    guest.role === 'companion' && guest.primaryGuestName
+      ? `Primary guest: ${guest.primaryGuestName}`
+      : '',
     `Mobile: ${guest.phone}`,
     `Email: ${guest.email?.trim() || '—'}`,
     `Address: ${guest.address?.trim() || '—'}`,
     `Nationality: ${guest.nationality?.trim() || '—'}`,
     `ID: ${formatGuestId(guest.idType, guest.idNumber)}`,
-  ]
+  ].filter(Boolean)
 
   if (guest.stay) {
     profileLines.push(

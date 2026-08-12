@@ -1,6 +1,8 @@
 'use client'
 
 import { useMemo } from 'react'
+import { Trash2 } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { NationalityField } from '@/components/erp/shared/NationalityField'
@@ -41,6 +43,7 @@ type CompanionGuestFieldsProps = {
   value: CompanionGuestDraft
   requireId?: boolean
   onChange: (patch: Partial<CompanionGuestDraft>) => void
+  onRemove?: () => void
 }
 
 export function CompanionGuestFields({
@@ -48,6 +51,7 @@ export function CompanionGuestFields({
   value,
   requireId = true,
   onChange,
+  onRemove,
 }: CompanionGuestFieldsProps) {
   const idTypeOptions = useMemo(
     () => getIdTypeOptionsForNationality(value.guestNationality),
@@ -56,7 +60,21 @@ export function CompanionGuestFields({
 
   return (
     <div className="rounded-lg border bg-muted/20 p-4 space-y-3">
-      <p className="text-sm font-semibold text-foreground">{label}</p>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-sm font-semibold text-foreground">{label}</p>
+        {onRemove ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-8 text-destructive hover:text-destructive hover:bg-destructive/10"
+            onClick={onRemove}
+          >
+            <Trash2 className="h-3.5 w-3.5 mr-1.5" />
+            Remove
+          </Button>
+        ) : null}
+      </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div className="space-y-1">
           <Label>Full name *</Label>

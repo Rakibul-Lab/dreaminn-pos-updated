@@ -1,5 +1,7 @@
 'use client'
 
+import { Trash2 } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { CompanyLedgerSearchField } from '@/components/erp/hotel/CompanyLedgerSearchField'
@@ -29,6 +31,7 @@ type CorporateCompanionGuestFieldsProps = {
   companyLedgerId?: string
   onCompanyLedgerSelect?: (company: { id: string; name: string }) => void
   onCompanyManualChange?: (name: string) => void
+  onRemove?: () => void
 }
 
 export function CorporateCompanionGuestFields({
@@ -38,6 +41,7 @@ export function CorporateCompanionGuestFields({
   companyLedgerId = '',
   onCompanyLedgerSelect,
   onCompanyManualChange,
+  onRemove,
 }: CorporateCompanionGuestFieldsProps) {
   const handleCompanyManual = (name: string) => {
     onChange({ company: name })
@@ -51,7 +55,21 @@ export function CorporateCompanionGuestFields({
 
   return (
     <div className="rounded-lg border border-violet-200 bg-violet-50/30 p-4 space-y-3">
-      <p className="text-sm font-semibold text-foreground">{label}</p>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-sm font-semibold text-foreground">{label}</p>
+        {onRemove ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-8 text-destructive hover:text-destructive hover:bg-destructive/10"
+            onClick={onRemove}
+          >
+            <Trash2 className="h-3.5 w-3.5 mr-1.5" />
+            Remove
+          </Button>
+        ) : null}
+      </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div className="space-y-1">
           <Label>Full name *</Label>

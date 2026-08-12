@@ -33,7 +33,17 @@ import { ReservationDocumentView } from './ReservationDocumentView'
 import type { IdDocumentType } from '@/lib/id-ocr'
 import type { IdDocumentItem, IdScanResult } from './IdDocumentScanner'
 import { Switch } from '@/components/ui/switch'
-import { CheckCircle2, FilePenLine, LogIn, Plus } from 'lucide-react'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import { CheckCircle2, FilePenLine, LogIn, Plus, Trash2 } from 'lucide-react'
 import {
   computeRoomBookingTotals,
   DEFAULT_VAT_PERCENT,
@@ -277,6 +287,9 @@ export function NewReservationWizard({
   const [editFromReservationEntry, setEditFromReservationEntry] = useState(false)
   const [editBookingStatus, setEditBookingStatus] = useState<'RESERVED' | 'CHECKED_IN' | ''>('')
   const [idEntryStarted, setIdEntryStarted] = useState(isEditMode)
+  const [removePrimaryOpen, setRemovePrimaryOpen] = useState(false)
+  /** True after primary was removed and Person 2 promoted — avoid syncing the old guest profile. */
+  const [primaryGuestReplaced, setPrimaryGuestReplaced] = useState(false)
   const [defaultVatPercent, setDefaultVatPercent] = useState(DEFAULT_VAT_PERCENT)
   const [defaultServicePercent, setDefaultServicePercent] = useState(INVOICE_SERVICE_CHARGE_PERCENT)
   const [paymentLines, setPaymentLines] = useState<ReservationPaymentLine[]>([])
@@ -402,6 +415,147 @@ export function NewReservationWizard({
       stay: { adults: String(nextAdults), children: String(nextChildren) },
       guest: guestPatch,
     })
+  }
+
+  const canRemovePrimaryGuest = (parseInt(adults, 10) || 1) >= 2
+
+  const applyPromotedGuestDraft = (
+    guestPatch: Partial<GuestDraft>,
+    nextAdults: number
+  ) => {
+    const stayPatch = { adults: String(nextAdults) }
+
+    // Existing-guest create uses a separate draft — move promoted state onto "new"
+    // so Person 2 stays visible and is saved as a new primary profile.
+    if (!isEditMode && guestMode === 'existing') {
+      setDrafts((prev) => {
+        const cur = prev.existing
+        const nextDraft: ReservationWizardDraft = {
+          ...cur,
+          stay: { ...cur.stay, ...stayPatch },
+          guest: {
+            ...cur.guest,
+            ...guestPatch,
+            selectedCustomerId: '',
+            existingDocsStatus: 'idle',
+          },
+        }
+        return {
+          ...prev,
+          existing: nextDraft,
+          new: nextDraft,
+        }
+      })
+      setGuestMode('new')
+    } else {
+      patchDraft({
+        stay: stayPatch,
+        guest: guestPatch,
+      })
+    }
+    setPrimaryGuestReplaced(true)
+  }
+
+  const removeCompanionAt = (index: number) => {
+    const adultCount = parseInt(adults, 10) || 1
+    if (adultCount < 2) return
+    const nextAdults = adultCount - 1
+    if (isCorporateGuest) {
+      const remaining = corporateCompanions.filter((_, i) => i !== index)
+      patchDraft({
+        stay: { adults: String(nextAdults) },
+        guest: {
+          corporateCompanions: buildAdultCompanionSlots(nextAdults).map((_, i) => ({
+            ...emptyCorporateCompanionDraft(),
+            ...(remaining[i] ?? {}),
+          })),
+          companions: [],
+        },
+      })
+    } else {
+      const remaining = companions.filter((_, i) => i !== index)
+      patchDraft({
+        stay: { adults: String(nextAdults) },
+        guest: {
+          companions: buildAdultCompanionSlots(nextAdults).map((_, i) => ({
+            ...emptyCompanionDraft(),
+            ...(remaining[i] ?? {}),
+          })),
+          corporateCompanions: [],
+        },
+      })
+    }
+    toast.success(`Person ${index + 2} removed`)
+  }
+
+  const promoteFirstCompanionToPrimary = () => {
+    const adultCount = parseInt(adults, 10) || 1
+    if (adultCount < 2) {
+      toast.error('Add another adult guest before removing the primary guest')
+      return
+    }
+
+    if (isCorporateGuest) {
+      const [nextPrimary, ...rest] = corporateCompanions
+      if (!nextPrimary?.name.trim()) {
+        toast.error('Enter Person 2 details before removing the primary guest')
+        return
+      }
+      const nextAdults = adultCount - 1
+      const nextCompany = nextPrimary.company.trim() || guestCompany
+      applyPromotedGuestDraft(
+        {
+          guestName: nextPrimary.name.trim(),
+          guestPhone: nextPrimary.phone.trim(),
+          guestCompany: nextCompany,
+          guestDesignation: nextPrimary.designation.trim(),
+          guestAddress: nextPrimary.address.trim(),
+          companyLedgerId:
+            nextCompany.trim().toLowerCase() === guestCompany.trim().toLowerCase()
+              ? companyLedgerId
+              : '',
+          corporateCompanions: buildAdultCompanionSlots(nextAdults).map((_, i) => ({
+            ...emptyCorporateCompanionDraft(),
+            ...(rest[i] ?? {}),
+          })),
+          companions: [],
+        },
+        nextAdults
+      )
+      toast.success(`${nextPrimary.name.trim()} is now the primary guest`)
+      return
+    }
+
+    const [nextPrimary, ...rest] = companions
+    if (!nextPrimary?.name.trim()) {
+      toast.error('Enter Person 2 details before removing the primary guest')
+      return
+    }
+    const nextAdults = adultCount - 1
+    const promotedIdNumber = nextPrimary.idNumber.trim()
+    applyPromotedGuestDraft(
+      {
+        guestName: nextPrimary.name.trim(),
+        guestPhone: nextPrimary.phone.trim(),
+        guestNationality: nextPrimary.guestNationality.trim() || DEFAULT_NATIONALITY,
+        idType: nextPrimary.idType,
+        idNumber: promotedIdNumber,
+        guestEmail: '',
+        guestAddress: '',
+        idDocuments: [],
+        existingDocsStatus: 'idle',
+        visaExpiryDate: '',
+        companions: buildAdultCompanionSlots(nextAdults).map((_, i) => ({
+          ...emptyCompanionDraft(),
+          ...(rest[i] ?? {}),
+        })),
+        corporateCompanions: [],
+      },
+      nextAdults
+    )
+    setIdEntryStarted(Boolean(promotedIdNumber))
+    if (promotedIdNumber) setIsInitialFlow(false)
+    toast.success(`${nextPrimary.name.trim()} is now the primary guest`)
   }
 
   const handleNationalityChange = (value: string) => {
@@ -674,6 +828,7 @@ export function NewReservationWizard({
     }
     setGuestMode('existing')
     setIdEntryStarted(true)
+    setPrimaryGuestReplaced(false)
     setEditDraftLoaded(true)
   }, [isEditMode, editBookingData, editDraftLoaded, defaultVatPercent, defaultServicePercent])
 
@@ -769,6 +924,8 @@ export function NewReservationWizard({
     setIsInitialFlow(isEditMode)
     setInitialFlowFieldError(null)
     setIdEntryStarted(isEditMode)
+    setPrimaryGuestReplaced(false)
+    setRemovePrimaryOpen(false)
     setGuestMode(isEditMode ? 'existing' : 'new')
     if (isEditMode) {
       setEditDraftLoaded(false)
@@ -841,6 +998,7 @@ export function NewReservationWizard({
   }
 
   const applyExistingGuest = (selected: GuestSearchResult) => {
+    setPrimaryGuestReplaced(false)
     const idTypeValue =
       selected.idType === 'national_id' ||
       selected.idType === 'passport' ||
@@ -868,6 +1026,7 @@ export function NewReservationWizard({
   }
 
   const clearExistingGuest = () => {
+    setPrimaryGuestReplaced(false)
     patchDraftFor('existing', { guest: emptyGuestDraft({ forExistingGuest: true }) })
   }
 
@@ -1057,6 +1216,12 @@ export function NewReservationWizard({
         return null
       }
 
+      // After promoting Person 2 (or edit save with customer patch), do not overwrite the
+      // previously linked guest master profile with the new primary's details.
+      if (primaryGuestReplaced && isEditMode) {
+        return selectedCustomerId
+      }
+
       if (!(await syncGuestProfile(selectedCustomerId))) {
         return null
       }
@@ -1195,6 +1360,7 @@ export function NewReservationWizard({
           isCorporateGuest,
           nidPhysicallyReceived: isCorporateGuest ? false : nidPhysicallyReceived,
           companions: companionsPayload,
+          replacePrimaryGuest: primaryGuestReplaced || undefined,
           customer: isCorporateGuest
             ? {
                 name: guestName.trim(),
@@ -1578,7 +1744,7 @@ export function NewReservationWizard({
     setIsInitialFlow(true)
     setStep(2)
   }
-  const showGuestDetails = guestMode === 'new' || !!selectedCustomerId
+  const showGuestDetails = guestMode === 'new' || !!selectedCustomerId || isEditMode
 
   const displayStep = completedReservationId ? 5 : step
 
@@ -1715,20 +1881,55 @@ export function NewReservationWizard({
                     <Switch
                       checked={isCorporateGuest}
                       onCheckedChange={(on) => {
+                        const adultCount = parseInt(adults, 10) || 1
+                        const slots = buildAdultCompanionSlots(adultCount)
                         const patch: Partial<GuestDraft> = { isCorporateGuest: on }
                         if (on) {
+                          patch.corporateCompanions = slots.map((_, index) => {
+                            const corporate = corporateCompanions[index]
+                            if (corporate?.name.trim() || corporate?.phone.trim()) {
+                              return {
+                                ...emptyCorporateCompanionDraft(),
+                                ...corporate,
+                              }
+                            }
+                            const regular = companions[index]
+                            if (regular) {
+                              return {
+                                ...emptyCorporateCompanionDraft(),
+                                name: regular.name,
+                                phone: regular.phone,
+                                company:
+                                  guestCompany === DEFAULT_GUEST_COMPANY
+                                    ? ''
+                                    : guestCompany,
+                                designation: guestDesignation,
+                                address: guestAddress,
+                              }
+                            }
+                            return emptyCorporateCompanionDraft()
+                          })
                           patch.companions = []
-                          patch.corporateCompanions = buildAdultCompanionSlots(
-                            parseInt(adults, 10) || 1
-                          ).map((_, index) => ({
-                            ...emptyCorporateCompanionDraft(),
-                            ...(corporateCompanions[index] ?? {}),
-                          }))
                           if (guestCompany === DEFAULT_GUEST_COMPANY) {
                             patch.guestCompany = ''
                           }
                           patch.nidPhysicallyReceived = false
                         } else {
+                          patch.companions = slots.map((_, index) => {
+                            const regular = companions[index]
+                            if (regular?.name.trim() || regular?.phone.trim()) {
+                              return { ...emptyCompanionDraft(), ...regular }
+                            }
+                            const corporate = corporateCompanions[index]
+                            if (corporate) {
+                              return {
+                                ...emptyCompanionDraft(),
+                                name: corporate.name,
+                                phone: corporate.phone,
+                              }
+                            }
+                            return emptyCompanionDraft()
+                          })
                           patch.corporateCompanions = []
                         }
                         patchGuest(patch)
@@ -1752,6 +1953,7 @@ export function NewReservationWizard({
                       setFlowMode('standard')
                       setGuestMode('new')
                       setIsInitialFlow(false)
+                      setPrimaryGuestReplaced(false)
                     }}
                   >
                     New guest
@@ -1765,6 +1967,7 @@ export function NewReservationWizard({
                       setFlowMode('standard')
                       setGuestMode('existing')
                       setIsInitialFlow(false)
+                      setPrimaryGuestReplaced(false)
                     }}
                   >
                     Existing guest
@@ -1865,6 +2068,11 @@ export function NewReservationWizard({
                           })
                         }
                         onCompanyManualChange={() => patchGuest({ companyLedgerId: '' })}
+                        onRemove={
+                          canRemovePrimaryGuest
+                            ? () => setRemovePrimaryOpen(true)
+                            : undefined
+                        }
                         onChange={(patch) =>
                           patchGuest({
                             ...(patch.name !== undefined ? { guestName: patch.name } : {}),
@@ -1886,8 +2094,9 @@ export function NewReservationWizard({
                       {buildAdultCompanionSlots(parseInt(adults, 10) || 1).map((slot, index) => (
                         <CorporateCompanionGuestFields
                           key={`${slot.companionType}-${index}`}
-                          label={`Person ${index + 2} (${slot.label})`}
+                          label={`Person ${index + 2}`}
                           value={corporateCompanions[index] ?? emptyCorporateCompanionDraft()}
+                          onRemove={() => removeCompanionAt(index)}
                           onChange={(patch) => {
                             const next = [...corporateCompanions]
                             next[index] = {
@@ -2019,7 +2228,21 @@ export function NewReservationWizard({
               />
                   )}
 
-              <p className="text-sm font-semibold text-foreground">Person 1 (Primary guest)</p>
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-semibold text-foreground">Person 1 (Primary guest)</p>
+                {canRemovePrimaryGuest ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 text-destructive hover:text-destructive hover:bg-destructive/10"
+                    onClick={() => setRemovePrimaryOpen(true)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5 mr-1.5" />
+                    Remove
+                  </Button>
+                ) : null}
+              </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div className="space-y-1">
@@ -2128,6 +2351,7 @@ export function NewReservationWizard({
                     label={slot.label}
                     value={companions[index] ?? emptyCompanionDraft()}
                     requireId={nidPhysicallyReceived || !hasCompanySelected}
+                    onRemove={() => removeCompanionAt(index)}
                     onChange={(patch) => {
                       const next = [...companions]
                       next[index] = { ...(next[index] ?? emptyCompanionDraft()), ...patch }
@@ -2738,6 +2962,32 @@ export function NewReservationWizard({
           </div>
         </>
       )}
+
+      <AlertDialog open={removePrimaryOpen} onOpenChange={setRemovePrimaryOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove primary guest?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Person 2 becomes the new primary guest for this reservation (new guest, existing
+              guest, corporate, company ledger, or edit). Adults decrease by one and remaining
+              guests shift up. Room, dates, and charges stay the same. ID scans for the current
+              primary on this form are cleared.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                promoteFirstCompanionToPrimary()
+                setRemovePrimaryOpen(false)
+              }}
+            >
+              Remove primary
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

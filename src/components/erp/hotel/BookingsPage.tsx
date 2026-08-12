@@ -54,6 +54,8 @@ import {
   buildBookingsExportQuery,
   downloadBookingsExcel,
   downloadBookingsPdf,
+  expandBookingsToGuestRows,
+  type BookingExportRecord,
 } from '@/lib/bookings-export';
 import { getBookingSourceLabel, isWalkInBooking } from '@/lib/booking-company';
 import { formatBookingListDiscount } from '@/lib/booking-discount';
@@ -105,10 +107,25 @@ interface Booking {
     nationality?: string | null;
     idType?: string | null;
     idNumber?: string | null;
+    visaExpiryDate?: string | null;
     registrationNumber?: string | null;
     company?: string | null;
     designation?: string | null;
   };
+  companions?: Array<{
+    name: string;
+    companionType?: string | null;
+    phone?: string | null;
+    email?: string | null;
+    address?: string | null;
+    nationality?: string | null;
+    idType?: string | null;
+    idNumber?: string | null;
+    visaExpiryDate?: string | null;
+    registrationNumber?: string | null;
+    company?: string | null;
+    designation?: string | null;
+  }> | null;
   room: { id: string; roomNumber: string; totalPrice: number; type: { name: string } };
 }
 
@@ -555,11 +572,15 @@ export function BookingsPage() {
       dateFrom: dateRange.dateFrom,
       dateTo: dateRange.dateTo,
     });
-    const res = await api.get<{ success: boolean; data: Booking[]; meta?: { total: number } }>(url);
+    const res = await api.get<{ success: boolean; data: BookingListItem[]; meta?: { total: number } }>(url);
     if (!res?.success) {
       throw new Error('Failed to fetch reservations for export');
     }
-    return res.data ?? [];
+    return (res.data ?? []).filter(
+      (row): row is Booking & { recordType?: 'booking' } =>
+        (row as ReservationEntryRow).recordType !== 'reservation_entry' &&
+        Boolean((row as Booking).customer && (row as Booking).room)
+    ) as BookingExportRecord[];
   };
 
   const handleExportExcel = async () => {
@@ -571,8 +592,12 @@ export function BookingsPage() {
         toast.error('No reservations match the current filters', { id: toastId });
         return;
       }
+      const guestRows = expandBookingsToGuestRows(rows);
       await downloadBookingsExcel(rows, times, buildExportMeta());
-      toast.success(`Exported ${rows.length} reservation(s) to Excel`, { id: toastId });
+      toast.success(
+        `Exported ${guestRows.length} guest row(s) from ${rows.length} reservation(s) to Excel`,
+        { id: toastId }
+      );
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Export failed';
       toast.error(msg, { id: toastId });
@@ -590,8 +615,12 @@ export function BookingsPage() {
         toast.error('No reservations match the current filters', { id: toastId });
         return;
       }
+      const guestRows = expandBookingsToGuestRows(rows);
       await downloadBookingsPdf(rows, times, buildExportMeta());
-      toast.success(`Exported ${rows.length} reservation(s) to PDF`, { id: toastId });
+      toast.success(
+        `Exported ${guestRows.length} guest row(s) from ${rows.length} reservation(s) to PDF`,
+        { id: toastId }
+      );
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Export failed';
       toast.error(msg, { id: toastId });

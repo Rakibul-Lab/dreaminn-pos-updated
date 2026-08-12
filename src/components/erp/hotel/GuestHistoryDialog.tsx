@@ -53,6 +53,15 @@ import { BookingPaymentSlipButton } from './BookingPaymentSlipButton';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
+type HistoryStayCompanion = {
+  id: string;
+  name: string;
+  phone?: string | null;
+  email?: string | null;
+  nationality?: string | null;
+  role: 'companion';
+};
+
 type HistoryStay = {
   booking: {
     id: string;
@@ -69,6 +78,7 @@ type HistoryStay = {
     paidAmount: number;
     room: { roomNumber: string; type: { name: string } };
   };
+  companions?: HistoryStayCompanion[];
   invoice: {
     id: string;
     invoiceNumber: string;
@@ -101,6 +111,8 @@ type GuestHistoryPayload = {
     idType?: string | null;
     idNumber?: string | null;
     notes?: string | null;
+    role?: 'primary' | 'companion';
+    primaryGuestName?: string | null;
   };
   stays: HistoryStay[];
   totalDue: number;
@@ -115,12 +127,14 @@ function formatPaymentType(type: string): string {
 
 interface GuestHistoryDialogProps {
   customerId: string | null;
+  companionId?: string | null;
   highlightRegistrationNumber?: string;
   onClose: () => void;
 }
 
 export function GuestHistoryDialog({
   customerId,
+  companionId,
   highlightRegistrationNumber,
   onClose,
 }: GuestHistoryDialogProps) {
@@ -132,20 +146,28 @@ export function GuestHistoryDialog({
   const [exportingPdf, setExportingPdf] = useState(false);
 
   const historyQueryKey = useMemo(
-    () => ['customer-guest-history', customerId, dateFilter, customDateFrom, customDateTo],
-    [customerId, dateFilter, customDateFrom, customDateTo]
+    () => [
+      'customer-guest-history',
+      customerId,
+      companionId,
+      dateFilter,
+      customDateFrom,
+      customDateTo,
+    ],
+    [customerId, companionId, dateFilter, customDateFrom, customDateTo]
   );
 
   const historyUrl = useMemo(() => {
     if (!customerId) return '';
     const params: string[] = [];
+    if (companionId) params.push(`companionId=${encodeURIComponent(companionId)}`);
     if (dateFilter === 'custom') {
       if (customDateFrom) params.push(`dateFrom=${encodeURIComponent(customDateFrom)}`);
       if (customDateTo) params.push(`dateTo=${encodeURIComponent(customDateTo)}`);
     }
     const qs = params.length ? `?${params.join('&')}` : '';
     return `/customers/${customerId}/history${qs}`;
-  }, [customerId, dateFilter, customDateFrom, customDateTo]);
+  }, [customerId, companionId, dateFilter, customDateFrom, customDateTo]);
 
   const { data, isLoading, isError } = useQuery({
     queryKey: historyQueryKey,
@@ -156,6 +178,7 @@ export function GuestHistoryDialog({
 
   const history = data?.data;
   const open = !!customerId;
+  const isCompanionView = history?.guest.role === 'companion';
 
   useEffect(() => {
     if (!history?.stays.length || !highlightRegistrationNumber?.trim()) return;
@@ -189,6 +212,7 @@ export function GuestHistoryDialog({
         totalRoomCharge: stay.booking.totalRoomCharge,
         totalWithVat: stay.booking.totalWithVat,
         dueAmount: stay.booking.dueAmount,
+        hideAmounts: isCompanionView,
         room: stay.booking.room,
       }));
       await downloadGuestHistoryPdf(
@@ -200,6 +224,8 @@ export function GuestHistoryDialog({
           nationality: history.guest.nationality,
           idType: history.guest.idType,
           idNumber: history.guest.idNumber,
+          role: history.guest.role,
+          primaryGuestName: history.guest.primaryGuestName,
         },
         bookings,
         times
@@ -244,7 +270,27 @@ export function GuestHistoryDialog({
           ) : (
             <>
               <div className="rounded-lg border bg-muted/30 p-4 space-y-2">
-                <h3 className="text-lg font-semibold">{history.guest.name}</h3>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="text-lg font-semibold">{history.guest.name}</h3>
+                  {isCompanionView ? (
+                    <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide text-sky-800">
+                      Companion
+                    </span>
+                  ) : (
+                    <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide text-amber-800">
+                      Primary guest
+                    </span>
+                  )}
+                </div>
+                {isCompanionView && history.guest.primaryGuestName ? (
+                  <p className="text-sm text-muted-foreground">
+                    Staying with primary guest{' '}
+                    <span className="font-medium text-foreground">
+                      {history.guest.primaryGuestName}
+                    </span>
+                    . Room charges and outstanding are billed to the primary guest.
+                  </p>
+                ) : null}
                 <div className="grid gap-1.5 sm:grid-cols-2 text-sm">
                   <p className="flex items-center gap-2 text-muted-foreground">
                     <Phone className="h-4 w-4 shrink-0" />
@@ -277,7 +323,7 @@ export function GuestHistoryDialog({
                 </div>
                 <p className="text-xs text-muted-foreground pt-1">
                   {history.stayCount} total stay{history.stayCount === 1 ? '' : 's'}
-                  {history.totalDue > 0 ? (
+                  {!isCompanionView && history.totalDue > 0 ? (
                     <>
                       {' '}
                       · Outstanding:{' '}
@@ -406,9 +452,13 @@ export function GuestHistoryDialog({
                                   </p>
                                 </div>
                                 <div className="text-right space-y-1 sm:pt-0.5">
-                                  <p className="font-medium">{formatBdt(b.totalWithVat)}</p>
+                                  {isCompanionView ? (
+                                    <p className="text-xs font-medium text-sky-800">Companion</p>
+                                  ) : (
+                                    <p className="font-medium">{formatBdt(b.totalWithVat)}</p>
+                                  )}
                                   <StatusBadge status={b.status} className="text-xs" />
-                                  {b.dueAmount > 0.009 ? (
+                                  {!isCompanionView && b.dueAmount > 0.009 ? (
                                     <p className="text-xs text-red-600">
                                       Due {formatBdt(b.dueAmount)}
                                     </p>
@@ -419,7 +469,47 @@ export function GuestHistoryDialog({
                           </CollapsibleTrigger>
                           <CollapsibleContent>
                             <div className="border-t px-3 pb-3 pt-2 space-y-3 bg-muted/10">
-                              {stay.invoice ? (
+                              {(stay.companions?.length ?? 0) > 0 ? (
+                                <div>
+                                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">
+                                    Guests on this stay
+                                  </p>
+                                  <ul className="space-y-1 text-sm">
+                                    <li className="flex flex-wrap items-center gap-2">
+                                      <span className="font-medium">
+                                        {isCompanionView
+                                          ? history.guest.primaryGuestName || 'Primary guest'
+                                          : history.guest.name}
+                                      </span>
+                                      <span className="rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-800">
+                                        Primary
+                                      </span>
+                                    </li>
+                                    {stay.companions!.map((person) => (
+                                      <li
+                                        key={person.id}
+                                        className="flex flex-wrap items-center gap-2 text-muted-foreground"
+                                      >
+                                        <span className="text-foreground">{person.name}</span>
+                                        <span className="rounded-full border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-sky-800">
+                                          Companion
+                                        </span>
+                                        {person.phone ? (
+                                          <span className="text-xs">{person.phone}</span>
+                                        ) : null}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              ) : null}
+
+                              {isCompanionView ? (
+                                <p className="text-sm text-muted-foreground rounded-md border bg-background/60 px-3 py-2">
+                                  This guest is a companion on the stay. Outstanding, invoice, and
+                                  payments are recorded against the primary guest.
+                                </p>
+                              ) : null}
+                              {!isCompanionView && stay.invoice ? (
                                 <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
                                   <div>
                                     <span className="text-muted-foreground">Invoice: </span>
@@ -451,6 +541,7 @@ export function GuestHistoryDialog({
                                 </div>
                               ) : null}
 
+                              {!isCompanionView ? (
                               <div>
                                 <div className="flex items-center justify-between mb-1.5">
                                   <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -539,6 +630,7 @@ export function GuestHistoryDialog({
                                   </div>
                                 )}
                               </div>
+                              ) : null}
                             </div>
                           </CollapsibleContent>
                         </Collapsible>

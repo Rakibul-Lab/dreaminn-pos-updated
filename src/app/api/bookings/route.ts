@@ -37,6 +37,7 @@ import { assertRoomAvailableForBooking, listReservationEntries } from '@/lib/res
 const bookingListInclude = {
   customer: true,
   room: { include: { type: true } },
+  companions: { orderBy: { sortOrder: 'asc' as const } },
   companyLedgerGuest: { select: { registrationNumber: true } },
   sourceReservationEntry: { select: { registrationNumber: true } },
   creator: { select: { id: true, name: true, email: true } },

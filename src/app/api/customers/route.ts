@@ -4,8 +4,9 @@ import { requireHotelAccess, requireRole } from '@/lib/auth';
 import { successResponse, paginatedResponse, errorResponse, logActivity } from '@/lib/api-utils';
 import { findCustomerByPhone } from '@/lib/customer-phone';
 import { normalizePhone, isValidPhone } from '@/lib/phone';
-import { buildGuestStayFilterWhere } from '@/lib/business-date';
+import { buildGuestDirectoryFilterWhere } from '@/lib/business-date';
 import {
+  guestStayOverlapsRange,
   parseStayDateRange,
   pickGuestStayBooking,
 } from '@/lib/guest-stay-date-filter';
@@ -76,19 +77,66 @@ export async function GET(request: NextRequest) {
       where.OR = orConditions;
     }
 
-    const stayOverlapFilter = await buildGuestStayFilterWhere(dateFrom, dateTo);
+    const stayOverlapFilter = await buildGuestDirectoryFilterWhere(dateFrom, dateTo);
     if (stayOverlapFilter && !search) {
       where.bookings = { some: stayOverlapFilter };
     }
 
-    const [customers, total] = await Promise.all([
+    const companionWhere: Prisma.BookingCompanionWhereInput = {
+      name: { not: '' },
+    };
+    const companionOr: Prisma.BookingCompanionWhereInput[] = [];
+    if (search) {
+      companionOr.push(
+        { name: { contains: search } },
+        { phone: { contains: search } },
+        { email: { contains: search } },
+        { address: { contains: search } },
+        { idNumber: { contains: search } },
+        { nationality: { contains: search } },
+        { registrationNumber: { contains: search } },
+        { booking: { registrationNumber: { contains: search } } }
+      );
+      const searchDigits = search.replace(/\D/g, '');
+      if (searchDigits.length >= 6) {
+        companionOr.push({ phone: { contains: searchDigits.slice(-10) } });
+      }
+    }
+    if (name) companionOr.push({ name: { contains: name } });
+    if (phone) {
+      companionOr.push({ phone: { contains: phone } });
+      const phoneDigits = phone.replace(/\D/g, '');
+      if (phoneDigits.length >= 6) {
+        companionOr.push({ phone: { contains: phoneDigits.slice(-10) } });
+      }
+    }
+    if (companionOr.length > 0) companionWhere.OR = companionOr;
+    if (stayOverlapFilter && !search) {
+      companionWhere.booking = stayOverlapFilter;
+    }
+
+    const staySelect = {
+      customerId: true,
+      checkIn: true,
+      checkOut: true,
+      actualCheckIn: true,
+      actualCheckOut: true,
+      status: true,
+      room: { select: { roomNumber: true } },
+    } as const;
+
+    const [customers, companions] = await Promise.all([
       db.customer.findMany({
         where,
-        skip,
-        take: limit,
         orderBy: { createdAt: 'desc' },
       }),
-      db.customer.count({ where }),
+      db.bookingCompanion.findMany({
+        where: companionWhere,
+        include: {
+          booking: { select: staySelect },
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
     ]);
 
     const customerIds = customers.map((c) => c.id);
@@ -96,15 +144,7 @@ export async function GET(request: NextRequest) {
       customerIds.length > 0
         ? await db.booking.findMany({
             where: { customerId: { in: customerIds } },
-            select: {
-              customerId: true,
-              checkIn: true,
-              checkOut: true,
-              actualCheckIn: true,
-              actualCheckOut: true,
-              status: true,
-              room: { select: { roomNumber: true } },
-            },
+            select: staySelect,
             orderBy: { checkIn: 'desc' },
           })
         : [];
@@ -118,25 +158,70 @@ export async function GET(request: NextRequest) {
 
     const hasStayDateFilter = !!parseStayDateRange(dateFrom, dateTo);
 
-    const enriched = customers.map((customer) => {
+    const toStay = (stay: {
+      checkIn: Date;
+      checkOut: Date;
+      actualCheckIn: Date | null;
+      actualCheckOut: Date | null;
+      status: string;
+      room: { roomNumber: string } | null;
+    } | null) =>
+      stay
+        ? {
+            checkIn: stay.checkIn,
+            checkOut: stay.checkOut,
+            actualCheckIn: stay.actualCheckIn,
+            actualCheckOut: stay.actualCheckOut,
+            status: stay.status,
+            roomNumber: stay.room?.roomNumber ?? null,
+          }
+        : null;
+
+    const primaryGuests = customers.map((customer) => {
       const list = bookingsByCustomer.get(customer.id) ?? [];
       const stay = pickGuestStayBooking(list, dateFrom, dateTo, hasStayDateFilter);
       return {
         ...customer,
-        stay: stay
-          ? {
-              checkIn: stay.checkIn,
-              checkOut: stay.checkOut,
-              actualCheckIn: stay.actualCheckIn,
-              actualCheckOut: stay.actualCheckOut,
-              status: stay.status,
-              roomNumber: stay.room?.roomNumber ?? null,
-            }
-          : null,
+        source: 'customer' as const,
+        historyCustomerId: customer.id,
+        stay: toStay(stay),
       };
     });
 
-    return paginatedResponse(enriched, total, page, limit);
+    const companionGuests = companions
+      .filter((companion) => companion.name.trim())
+      .filter((companion) => {
+        if (companion.booking.status === 'CANCELLED') return false;
+        // Prisma already applied the directory stay filter when date is set without search.
+        // Avoid a second JS pass that can drop checked-out guests (timezone / window mismatch).
+        if (stayOverlapFilter && !search) return true;
+        if (!hasStayDateFilter) return true;
+        return guestStayOverlapsRange(companion.booking, dateFrom, dateTo);
+      })
+      .map((companion) => ({
+        id: `companion:${companion.id}`,
+        source: 'companion' as const,
+        historyCustomerId: companion.booking.customerId,
+        name: companion.name.trim(),
+        email: companion.email,
+        phone: companion.phone ?? '',
+        address: companion.address,
+        idType: companion.idType,
+        idNumber: companion.idNumber,
+        nationality: companion.nationality,
+        registrationNumber: companion.registrationNumber,
+        notes: null,
+        createdAt: companion.createdAt,
+        stay: toStay(companion.booking),
+      }));
+
+    const merged = [...primaryGuests, ...companionGuests].sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+    const total = merged.length;
+    const paged = merged.slice(skip, skip + limit);
+
+    return paginatedResponse(paged, total, page, limit);
   } catch (error) {
     console.error('Customers list error:', error);
     return errorResponse('Failed to fetch customers', 500);

@@ -15,6 +15,22 @@ import { formatBookingListDiscount } from './booking-discount'
 import { computeBookingDisplayVat } from './booking-totals'
 import { resolveBookingRegistrationNumber } from './booking-registration'
 import { getLogoDataUrl } from './reservation-document-html'
+import { formatGuestId, idTypeLabel } from './id-type-label'
+
+export type BookingExportCompanion = {
+  name: string
+  companionType?: string | null
+  phone?: string | null
+  email?: string | null
+  address?: string | null
+  nationality?: string | null
+  idType?: string | null
+  idNumber?: string | null
+  visaExpiryDate?: string | null
+  registrationNumber?: string | null
+  company?: string | null
+  designation?: string | null
+}
 
 export type BookingExportRecord = {
   id: string
@@ -28,6 +44,8 @@ export type BookingExportRecord = {
   checkOut: string
   actualCheckIn?: string | null
   actualCheckOut?: string | null
+  adults?: number
+  children?: number
   totalRoomCharge: number
   advancePayment: number
   dueAmount: number
@@ -41,14 +59,42 @@ export type BookingExportRecord = {
   serviceChargePercent?: number | null
   totalWithVat?: number
   createdAt?: string
+  recordType?: string
   customer: {
     name: string
     phone: string
     email?: string | null
+    address?: string | null
+    nationality?: string | null
+    idType?: string | null
+    idNumber?: string | null
+    visaExpiryDate?: string | null
     registrationNumber?: string | null
+    company?: string | null
+    designation?: string | null
   }
+  companions?: BookingExportCompanion[] | null
   companyLedgerGuest?: { registrationNumber?: string | null } | null
   room: { roomNumber: string; type: { name: string } }
+}
+
+export type BookingGuestExportRow = {
+  booking: BookingExportRecord
+  guestRole: 'Primary' | 'Companion'
+  guestName: string
+  guestPhone: string
+  guestEmail: string
+  guestAddress: string
+  guestNationality: string
+  guestIdType: string
+  guestIdNumber: string
+  guestIdDisplay: string
+  guestVisaExpiry: string
+  guestCompany: string
+  guestDesignation: string
+  guestRegNo: string
+  /** Financial columns only on the primary guest row to avoid double-counting. */
+  includeFinancials: boolean
 }
 
 export type BookingsExportMeta = {
@@ -107,35 +153,125 @@ function buildExcelTotalsRow(
   })
 }
 
+function isExportableBooking(booking: BookingExportRecord): boolean {
+  if (booking.recordType === 'reservation_entry') return false
+  return Boolean(booking.customer?.name && booking.room?.roomNumber)
+}
+
+/** One export row per guest (primary + companions), each carrying the booking room number. */
+export function expandBookingsToGuestRows(
+  bookings: BookingExportRecord[]
+): BookingGuestExportRow[] {
+  const rows: BookingGuestExportRow[] = []
+
+  for (const booking of bookings) {
+    if (!isExportableBooking(booking)) continue
+
+    const primaryReg =
+      resolveBookingRegistrationNumber(booking) ||
+      booking.customer.registrationNumber?.trim() ||
+      ''
+
+    rows.push({
+      booking,
+      guestRole: 'Primary',
+      guestName: booking.customer.name?.trim() || '',
+      guestPhone: booking.customer.phone?.trim() || '',
+      guestEmail: booking.customer.email?.trim() || '',
+      guestAddress: booking.customer.address?.trim() || '',
+      guestNationality: booking.customer.nationality?.trim() || '',
+      guestIdType: idTypeLabel(booking.customer.idType),
+      guestIdNumber: booking.customer.idNumber?.trim() || '',
+      guestIdDisplay: formatGuestId(booking.customer.idType, booking.customer.idNumber),
+      guestVisaExpiry: booking.customer.visaExpiryDate?.trim() || '',
+      guestCompany: booking.customer.company?.trim() || '',
+      guestDesignation: booking.customer.designation?.trim() || '',
+      guestRegNo: primaryReg,
+      includeFinancials: true,
+    })
+
+    const companions = [...(booking.companions ?? [])]
+      .filter((c) => c?.name?.trim())
+      .sort((a, b) => {
+        const aChild = a.companionType === 'CHILD' ? 1 : 0
+        const bChild = b.companionType === 'CHILD' ? 1 : 0
+        return aChild - bChild
+      })
+
+    for (const companion of companions) {
+      rows.push({
+        booking,
+        guestRole: 'Companion',
+        guestName: companion.name.trim(),
+        guestPhone: companion.phone?.trim() || '',
+        guestEmail: companion.email?.trim() || '',
+        guestAddress: companion.address?.trim() || '',
+        guestNationality: companion.nationality?.trim() || '',
+        guestIdType: idTypeLabel(companion.idType),
+        guestIdNumber: companion.idNumber?.trim() || '',
+        guestIdDisplay: formatGuestId(companion.idType, companion.idNumber),
+        guestVisaExpiry: companion.visaExpiryDate?.trim() || '',
+        guestCompany: companion.company?.trim() || '',
+        guestDesignation: companion.designation?.trim() || '',
+        guestRegNo: companion.registrationNumber?.trim() || '',
+        includeFinancials: false,
+      })
+    }
+  }
+
+  return rows
+}
+
+export function mapBookingGuestToExportRow(
+  row: BookingGuestExportRow,
+  times: HotelTimes
+): Record<string, string | number> {
+  const { booking } = row
+  const vat = computeBookingDisplayVat(booking)
+  const discount = formatBookingListDiscount(booking)
+  const financial = row.includeFinancials
+
+  return {
+    'Confirmation No.': formatConfirmationNumber(booking),
+    Room: financial ? booking.room?.roomNumber ?? '' : '',
+    'Room Type': financial ? booking.room?.type?.name ?? '' : '',
+    Guest: row.guestName,
+    Phone: row.guestPhone,
+    Email: row.guestEmail,
+    'Check-in': financial ? formatListBookingCheckIn(booking, times) : '',
+    'Check-out': financial ? formatListBookingCheckOut(booking, times) : '',
+    Booking: financial ? bookingStatusLabel(booking) : '',
+    Company: financial ? getBookingSourceLabel(booking) : '',
+    'Reg. No.': row.guestRegNo,
+    Discount: financial && discount.amount > 0 ? discount.amount : '',
+    'Discount type': financial && discount.amount > 0 ? discount.label : '',
+    'Total (incl. VAT)': financial ? booking.totalWithVat ?? booking.totalRoomCharge : '',
+    'VAT %': financial ? vat.percent : '',
+    'VAT Amount': financial ? vat.amount : '',
+    'Advance Paid': financial ? booking.advancePayment : '',
+    'Due (incl. VAT)': financial ? booking.dueAmount : '',
+    'Created At':
+      financial && booking.createdAt
+        ? format(new Date(booking.createdAt), 'dd/MM/yyyy HH:mm')
+        : '',
+  }
+}
+
+/** @deprecated Prefer expandBookingsToGuestRows + mapBookingGuestToExportRow */
 export function mapBookingToExportRow(
   booking: BookingExportRecord,
   times: HotelTimes
 ): Record<string, string | number> {
-  const vat = computeBookingDisplayVat(booking)
-  const discount = formatBookingListDiscount(booking)
-  return {
-    'Confirmation No.': formatConfirmationNumber(booking),
-    Guest: booking.customer?.name ?? '',
-    Phone: booking.customer?.phone ?? '',
-    Email: booking.customer?.email ?? '',
-    Room: booking.room?.roomNumber ?? '',
-    'Room Type': booking.room?.type?.name ?? '',
-    'Check-in': formatListBookingCheckIn(booking, times),
-    'Check-out': formatListBookingCheckOut(booking, times),
-    Booking: bookingStatusLabel(booking),
-    Company: getBookingSourceLabel(booking),
-    'Reg. No.': resolveBookingRegistrationNumber(booking) || '',
-    Discount: discount.amount > 0 ? discount.amount : '',
-    'Discount type': discount.amount > 0 ? discount.label : '',
-    'Total (incl. VAT)': booking.totalWithVat ?? booking.totalRoomCharge,
-    'VAT %': vat.percent,
-    'VAT Amount': vat.amount,
-    'Advance Paid': booking.advancePayment,
-    'Due (incl. VAT)': booking.dueAmount,
-    'Created At': booking.createdAt
-      ? format(new Date(booking.createdAt), 'dd/MM/yyyy HH:mm')
-      : '',
+  const [row] = expandBookingsToGuestRows([booking])
+  if (!row) {
+    return {
+      'Confirmation No.': formatConfirmationNumber(booking),
+      Guest: booking.customer?.name ?? '',
+      Phone: booking.customer?.phone ?? '',
+      Room: booking.room?.roomNumber ?? '',
+    }
   }
+  return mapBookingGuestToExportRow(row, times)
 }
 
 export function bookingsExportFileName(ext: 'xlsx' | 'pdf'): string {
@@ -167,13 +303,15 @@ export async function downloadBookingsExcel(
   times: HotelTimes,
   meta: BookingsExportMeta = {}
 ): Promise<void> {
-  if (!bookings.length) {
+  const exportBookings = bookings.filter(isExportableBooking)
+  const guestRows = expandBookingsToGuestRows(exportBookings)
+  if (!guestRows.length) {
     throw new Error('No reservations to export')
   }
-  const rows = bookings.map((b) => mapBookingToExportRow(b, times))
+  const rows = guestRows.map((row) => mapBookingGuestToExportRow(row, times))
   const headers = Object.keys(rows[0])
   const exportedAt = meta.exportedAt ?? new Date()
-  const totals = computeBookingExportTotals(bookings)
+  const totals = computeBookingExportTotals(exportBookings)
   const filters = resolveExportFilters(meta)
   const colCount = headers.length
   const logo = await loadExportLogo()
@@ -225,7 +363,8 @@ export async function downloadBookingsExcel(
     ['Date', filters.date],
     ['Status', filters.status],
     ['Search', filters.search],
-    ['Total records', bookings.length],
+    ['Reservations', exportBookings.length],
+    ['Guest rows', guestRows.length],
   ]
   for (const [label, value] of infoRows) {
     sheet.getCell(row, 1).value = label
@@ -272,67 +411,127 @@ export async function downloadBookingsExcel(
 type PdfColumn = {
   header: string
   width: number
-  value: (booking: BookingExportRecord, times: HotelTimes) => string
+  value: (row: BookingGuestExportRow, times: HotelTimes) => string
 }
 
 const PDF_COLUMNS: PdfColumn[] = [
   {
-    header: 'Confirmation',
-    width: 30,
-    value: (b) => formatConfirmationNumber(b),
+    header: 'Confirmation No.',
+    width: 18,
+    value: (row) => formatConfirmationNumber(row.booking),
   },
-  { header: 'Guest', width: 34, value: (b) => b.customer?.name ?? '' },
-  { header: 'Phone', width: 26, value: (b) => b.customer?.phone ?? '' },
-  { header: 'Room', width: 14, value: (b) => b.room?.roomNumber ?? '' },
+  {
+    header: 'Room',
+    width: 10,
+    value: (row) => (row.includeFinancials ? row.booking.room?.roomNumber ?? '' : ''),
+  },
+  {
+    header: 'Room Type',
+    width: 16,
+    value: (row) => (row.includeFinancials ? row.booking.room?.type?.name ?? '' : ''),
+  },
+  { header: 'Guest', width: 22, value: (row) => row.guestName },
+  { header: 'Phone', width: 16, value: (row) => row.guestPhone || '—' },
+  { header: 'Email', width: 20, value: (row) => row.guestEmail || '—' },
   {
     header: 'Check-in',
-    width: 36,
-    value: (b, t) => formatListBookingCheckIn(b, t),
+    width: 18,
+    value: (row, t) =>
+      row.includeFinancials ? formatListBookingCheckIn(row.booking, t) : '',
   },
   {
     header: 'Check-out',
-    width: 36,
-    value: (b, t) => formatListBookingCheckOut(b, t),
+    width: 18,
+    value: (row, t) =>
+      row.includeFinancials ? formatListBookingCheckOut(row.booking, t) : '',
   },
   {
     header: 'Booking',
-    width: 22,
-    value: (b) => bookingStatusLabel(b),
+    width: 14,
+    value: (row) => (row.includeFinancials ? bookingStatusLabel(row.booking) : ''),
   },
   {
     header: 'Company',
-    width: 24,
-    value: (b) => getBookingSourceLabel(b),
+    width: 14,
+    value: (row) => (row.includeFinancials ? getBookingSourceLabel(row.booking) : ''),
   },
   {
     header: 'Reg. No.',
-    width: 22,
-    value: (b) => resolveBookingRegistrationNumber(b) || '—',
+    width: 12,
+    value: (row) => row.guestRegNo || (row.includeFinancials ? '—' : ''),
   },
   {
     header: 'Discount',
-    width: 18,
-    value: (b) => {
-      const discount = formatBookingListDiscount(b)
+    width: 12,
+    value: (row) => {
+      if (!row.includeFinancials) return ''
+      const discount = formatBookingListDiscount(row.booking)
       return discount.amount > 0 ? formatBdtForPdf(discount.amount) : '—'
     },
   },
   {
-    header: 'Total',
-    width: 22,
-    value: (b) => formatBdtForPdf(b.totalWithVat ?? b.totalRoomCharge),
+    header: 'Discount type',
+    width: 14,
+    value: (row) => {
+      if (!row.includeFinancials) return ''
+      const discount = formatBookingListDiscount(row.booking)
+      return discount.amount > 0 ? discount.label : '—'
+    },
   },
-  { header: 'Due', width: 18, value: (b) => formatBdtForPdf(b.dueAmount) },
+  {
+    header: 'Total (incl. VAT)',
+    width: 16,
+    value: (row) =>
+      row.includeFinancials
+        ? formatBdtForPdf(row.booking.totalWithVat ?? row.booking.totalRoomCharge)
+        : '',
+  },
+  {
+    header: 'VAT %',
+    width: 10,
+    value: (row) =>
+      row.includeFinancials ? String(computeBookingDisplayVat(row.booking).percent) : '',
+  },
+  {
+    header: 'VAT Amount',
+    width: 12,
+    value: (row) =>
+      row.includeFinancials
+        ? formatBdtForPdf(computeBookingDisplayVat(row.booking).amount)
+        : '',
+  },
+  {
+    header: 'Advance Paid',
+    width: 12,
+    value: (row) =>
+      row.includeFinancials ? formatBdtForPdf(row.booking.advancePayment) : '',
+  },
+  {
+    header: 'Due (incl. VAT)',
+    width: 14,
+    value: (row) =>
+      row.includeFinancials ? formatBdtForPdf(row.booking.dueAmount) : '',
+  },
+  {
+    header: 'Created At',
+    width: 16,
+    value: (row) =>
+      row.includeFinancials && row.booking.createdAt
+        ? format(new Date(row.booking.createdAt), 'dd/MM/yyyy HH:mm')
+        : '',
+  },
 ]
 
-const PDF_TOTAL_COL_INDEX = PDF_COLUMNS.findIndex((c) => c.header === 'Total')
-const PDF_DUE_COL_INDEX = PDF_COLUMNS.findIndex((c) => c.header === 'Due')
+const PDF_TOTAL_COL_INDEX = PDF_COLUMNS.findIndex((c) => c.header === 'Total (incl. VAT)')
+const PDF_DUE_COL_INDEX = PDF_COLUMNS.findIndex((c) => c.header === 'Due (incl. VAT)')
 
 const PDF_LINE_HEIGHT = 3.6
 const PDF_CELL_PAD = 1.5
 
 function splitCellLines(pdf: jsPDF, text: string, colWidth: number): string[] {
-  const content = (text || '—').trim() || '—'
+  // Preserve intentional blanks (e.g. companion room cell) — do not force '—'.
+  if (text === '') return ['']
+  const content = text.trim() || '—'
   return pdf.splitTextToSize(content, Math.max(colWidth - PDF_CELL_PAD * 2, 8))
 }
 
@@ -341,7 +540,9 @@ export async function downloadBookingsPdf(
   times: HotelTimes,
   meta: BookingsExportMeta = {}
 ): Promise<void> {
-  if (!bookings.length) {
+  const exportBookings = bookings.filter(isExportableBooking)
+  const guestRows = expandBookingsToGuestRows(exportBookings)
+  if (!guestRows.length) {
     throw new Error('No reservations to export')
   }
 
@@ -349,7 +550,7 @@ export async function downloadBookingsPdf(
   const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'landscape', compress: true })
   const pageWidth = pdf.internal.pageSize.getWidth()
   const pageHeight = pdf.internal.pageSize.getHeight()
-  const marginX = 10
+  const marginX = 8
   const marginTop = 10
   const marginBottom = 10
   const headerRowHeight = 7
@@ -401,14 +602,18 @@ export async function downloadBookingsPdf(
   y += 4
   pdf.text(`Search: ${filters.search}`, marginX, y)
   y += 4
-  pdf.text(`Total records: ${bookings.length}`, marginX, y)
+  pdf.text(
+    `Reservations: ${exportBookings.length} · Guest rows: ${guestRows.length}`,
+    marginX,
+    y
+  )
   y += 6
 
   const drawTableHeader = () => {
     pdf.setFillColor(245, 245, 245)
     pdf.rect(marginX, y - 4.5, pageWidth - marginX * 2, headerRowHeight, 'F')
     pdf.setFont('helvetica', 'bold')
-    pdf.setFontSize(7)
+    pdf.setFontSize(6.5)
     let x = marginX + PDF_CELL_PAD
     for (const col of PDF_COLUMNS) {
       const headerLines = splitCellLines(pdf, col.header, col.width)
@@ -421,11 +626,11 @@ export async function downloadBookingsPdf(
   drawTableHeader()
 
   pdf.setFont('helvetica', 'normal')
-  pdf.setFontSize(6.5)
+  pdf.setFontSize(6)
 
-  for (const booking of bookings) {
+  for (const guestRow of guestRows) {
     const cellLines = PDF_COLUMNS.map((col) =>
-      splitCellLines(pdf, col.value(booking, times), col.width)
+      splitCellLines(pdf, col.value(guestRow, times), col.width)
     )
     const maxLines = Math.max(...cellLines.map((lines) => lines.length), 1)
     const rowHeight = maxLines * PDF_LINE_HEIGHT + 1.5
@@ -435,7 +640,7 @@ export async function downloadBookingsPdf(
       y = marginTop
       drawTableHeader()
       pdf.setFont('helvetica', 'normal')
-      pdf.setFontSize(6.5)
+      pdf.setFontSize(6)
     }
 
     let x = marginX + PDF_CELL_PAD
@@ -446,7 +651,7 @@ export async function downloadBookingsPdf(
     y += rowHeight
   }
 
-  const totals = computeBookingExportTotals(bookings)
+  const totals = computeBookingExportTotals(exportBookings)
   const totalsRowHeight = PDF_LINE_HEIGHT + 3
 
   if (y + totalsRowHeight > pageHeight - marginBottom) {

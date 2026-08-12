@@ -43,6 +43,13 @@ import {
   resolveBookingDateRangeWithBusinessDate,
   type BookingDatePreset,
 } from '@/lib/booking-date-filter';
+
+const GUESTS_DATE_PRESET_OPTIONS: { value: BookingDatePreset; label: string }[] =
+  BOOKING_DATE_PRESET_OPTIONS.map((opt) =>
+    opt.value === 'today'
+      ? { ...opt, label: 'Business today (incl. checked out)' }
+      : opt
+  );
 import { useBusinessDate } from '@/hooks/use-business-date';
 import {
   buildGuestsExportQuery,
@@ -71,6 +78,8 @@ interface Customer {
   nationality?: string | null;
   notes?: string | null;
   createdAt: string;
+  source?: 'customer' | 'companion';
+  historyCustomerId?: string | null;
   stay?: GuestStay | null;
 }
 
@@ -106,6 +115,7 @@ export function CustomersPage() {
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [historyCustomerId, setHistoryCustomerId] = useState<string | null>(null);
+  const [historyCompanionId, setHistoryCompanionId] = useState<string | null>(null);
 
   const [formName, setFormName] = useState('');
   const [formPhone, setFormPhone] = useState('');
@@ -342,7 +352,7 @@ export function CustomersPage() {
             <SelectValue placeholder="Date" />
           </SelectTrigger>
           <SelectContent>
-            {BOOKING_DATE_PRESET_OPTIONS.map((opt) => (
+            {GUESTS_DATE_PRESET_OPTIONS.map((opt) => (
               <SelectItem key={opt.value} value={opt.value}>
                 {opt.label}
               </SelectItem>
@@ -471,7 +481,14 @@ export function CustomersPage() {
                         variant="outline"
                         size="sm"
                         className="h-7 gap-1 px-2 text-xs"
-                        onClick={() => setHistoryCustomerId(customer.id)}
+                        onClick={() => {
+                          setHistoryCustomerId(customer.historyCustomerId || customer.id);
+                          setHistoryCompanionId(
+                            customer.source === 'companion' && customer.id.startsWith('companion:')
+                              ? customer.id.slice('companion:'.length)
+                              : null
+                          );
+                        }}
                       >
                         <History className="h-3.5 w-3.5" />
                         History
@@ -637,8 +654,12 @@ export function CustomersPage() {
 
       <GuestHistoryDialog
         customerId={historyCustomerId}
+        companionId={historyCompanionId}
         highlightRegistrationNumber={searchQuery.trim() || undefined}
-        onClose={() => setHistoryCustomerId(null)}
+        onClose={() => {
+          setHistoryCustomerId(null);
+          setHistoryCompanionId(null);
+        }}
       />
     </div>
   );

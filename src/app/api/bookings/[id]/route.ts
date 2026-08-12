@@ -25,7 +25,8 @@ import { assertRoomAvailableForBooking } from '@/lib/reservation-entry';
 import { resolveCompanyLedgerBooking, ensureCompanyLedgerGuestFromCustomer } from '@/lib/company-ledger-billing';
 import { readCurrentBusinessDateString } from '@/lib/business-date';
 import { isArrivalOnOrBeforeBusinessDate } from '@/lib/room-effective-status';
-import { isolateBookingCustomer } from '@/lib/booking-customer-isolation';
+import { isolateBookingCustomer, reassignBookingPrimaryCustomer } from '@/lib/booking-customer-isolation';
+import { isValidPhone } from '@/lib/phone';
 
 export async function GET(
   request: NextRequest,
@@ -329,16 +330,95 @@ export async function PUT(
     }
 
     const customerPatch = body.customer as Record<string, unknown> | undefined;
+    const replacePrimaryGuest = body.replacePrimaryGuest === true;
     const willMutateCustomer =
-      Boolean(customerPatch) ||
-      Array.isArray(body.idDocumentPaths) ||
-      body.isInitialReservation === false ||
-      (typeof body.companyLedgerId === 'string' && body.companyLedgerId.trim() !== '');
+      !replacePrimaryGuest &&
+      (Boolean(customerPatch) ||
+        Array.isArray(body.idDocumentPaths) ||
+        body.isInitialReservation === false ||
+        (typeof body.companyLedgerId === 'string' && body.companyLedgerId.trim() !== ''));
 
     // Guest profiles may be shared across bookings. Fork before mutating so
     // edits on this stay do not rewrite guest data on other reservations.
     let workingCustomerId = existing.customerId;
-    if (typeof body.customerId === 'string' && body.customerId.trim()) {
+    if (replacePrimaryGuest) {
+      if (!customerPatch) {
+        return errorResponse('New primary guest details are required');
+      }
+      const nextName = String(customerPatch.name ?? '').trim();
+      const nextPhone = String(customerPatch.phone ?? '').trim();
+      if (!nextName || !nextPhone) {
+        return errorResponse('New primary guest name and phone are required');
+      }
+      if (!isValidPhone(nextPhone)) {
+        return errorResponse('Please enter a valid phone number for the new primary guest');
+      }
+      if (customerPatch.email !== undefined) {
+        const emailValue = customerPatch.email ? String(customerPatch.email).trim() : null;
+        const emailError = getEmailValidationError(emailValue, true);
+        if (emailError) return errorResponse(emailError);
+      }
+      try {
+        workingCustomerId = await reassignBookingPrimaryCustomer(
+          id,
+          existing.customerId,
+          {
+            name: nextName,
+            phone: nextPhone,
+            email:
+              customerPatch.email !== undefined
+                ? customerPatch.email
+                  ? String(customerPatch.email).trim()
+                  : null
+                : null,
+            address:
+              customerPatch.address !== undefined
+                ? customerPatch.address
+                  ? String(customerPatch.address).trim()
+                  : null
+                : null,
+            company:
+              customerPatch.company !== undefined
+                ? customerPatch.company
+                  ? String(customerPatch.company).trim()
+                  : null
+                : null,
+            designation:
+              customerPatch.designation !== undefined
+                ? customerPatch.designation
+                  ? String(customerPatch.designation).trim()
+                  : null
+                : null,
+            nationality:
+              customerPatch.nationality !== undefined
+                ? customerPatch.nationality
+                  ? String(customerPatch.nationality).trim()
+                  : null
+                : null,
+            idType:
+              customerPatch.idType !== undefined ? String(customerPatch.idType || '') || null : null,
+            idNumber:
+              customerPatch.idNumber !== undefined
+                ? customerPatch.idNumber
+                  ? String(customerPatch.idNumber).trim()
+                  : null
+                : null,
+            visaExpiryDate:
+              customerPatch.visaExpiryDate !== undefined
+                ? customerPatch.visaExpiryDate
+                  ? String(customerPatch.visaExpiryDate).trim()
+                  : null
+                : null,
+            idDocPath:
+              customerPatch.idDocPath !== undefined ? (customerPatch.idDocPath as string | null) : null,
+          }
+        );
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : 'Failed to assign new primary guest';
+        return errorResponse(message);
+      }
+    } else if (typeof body.customerId === 'string' && body.customerId.trim()) {
       const requestedCustomerId = body.customerId.trim();
       if (requestedCustomerId !== existing.customerId) {
         const targetCustomer = await db.customer.findUnique({
@@ -359,7 +439,7 @@ export async function PUT(
       workingCustomerId = await isolateBookingCustomer(id, workingCustomerId);
     }
 
-    if (customerPatch) {
+    if (customerPatch && !replacePrimaryGuest) {
       const customerUpdate: Record<string, unknown> = {};
       if (customerPatch.name !== undefined) customerUpdate.name = String(customerPatch.name).trim();
       if (customerPatch.phone !== undefined) customerUpdate.phone = String(customerPatch.phone).trim();

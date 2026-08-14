@@ -26,6 +26,20 @@ export type BookingPaymentSearchResult = {
   sourceReservationEntry?: { registrationNumber?: string | null } | null
 }
 
+/** The bookings list can also return reservation entries, which carry no room/customer relation. */
+function isPayableBooking(row: unknown): row is BookingPaymentSearchResult {
+  if (!row || typeof row !== 'object') return false
+  const candidate = row as Partial<BookingPaymentSearchResult> & { recordType?: string }
+  if (candidate.recordType && candidate.recordType !== 'booking') return false
+  return Boolean(candidate.id && candidate.room?.roomNumber && candidate.customer?.name)
+}
+
+function formatStayDate(value: string | null | undefined): string {
+  if (!value) return '—'
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? '—' : format(date, 'dd MMM yyyy')
+}
+
 type BookingPaymentSearchFieldProps = {
   selectedId: string
   selectedLabel?: string
@@ -70,13 +84,13 @@ export function BookingPaymentSearchField({
   const { data, isFetching } = useQuery({
     queryKey: ['bookings-payment-search', debouncedQuery],
     queryFn: () =>
-      api.get<{ success: boolean; data: BookingPaymentSearchResult[] }>(
-        `/bookings?search=${encodeURIComponent(debouncedQuery)}&limit=15`
+      api.get<{ success: boolean; data: unknown[] }>(
+        `/bookings?search=${encodeURIComponent(debouncedQuery)}&limit=15&records=bookings`
       ),
     enabled: open && debouncedQuery.length >= 1,
   })
 
-  const results = data?.data ?? []
+  const results = (data?.data ?? []).filter(isPayableBooking)
   const showList = open && debouncedQuery.length > 0
   const canNavigate = showList && results.length > 0 && !isFetching
 
@@ -132,8 +146,8 @@ export function BookingPaymentSearchField({
     const regNo = resolveBookingRegistrationNumber(booking)
     const confNo = formatConfirmationNumber(booking)
     const parts = [
-      `Room ${booking.room.roomNumber}`,
-      booking.customer.name,
+      `Room ${booking.room?.roomNumber ?? '—'}`,
+      booking.customer?.name ?? 'Guest',
       regNo ? `Reg. ${regNo}` : null,
       confNo,
     ].filter(Boolean)
@@ -220,12 +234,11 @@ export function BookingPaymentSearchField({
                 >
                   <p className="text-sm font-medium text-foreground">{formatBookingLine(booking)}</p>
                   <p className="text-xs text-muted-foreground">
-                    {format(new Date(booking.checkIn), 'dd MMM yyyy')} –{' '}
-                    {format(new Date(booking.checkOut), 'dd MMM yyyy')}
+                    {formatStayDate(booking.checkIn)} – {formatStayDate(booking.checkOut)}
                     {' · '}
                     Due {formatBdt(booking.dueAmount ?? 0)}
                     {' · '}
-                    {booking.status.replace(/_/g, ' ')}
+                    {(booking.status ?? '').replace(/_/g, ' ')}
                   </p>
                 </button>
               </li>

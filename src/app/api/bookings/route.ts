@@ -87,8 +87,6 @@ export async function GET(request: NextRequest) {
     const authResult = await requireHotelAccess(request);
     if (authResult instanceof Response) return authResult;
 
-    await processAllOverdueStayExtensions(db);
-
     const { searchParams } = new URL(request.url);
     const page = parseInt(searchParams.get('page') || '1');
     const limit = parseInt(searchParams.get('limit') || '20');
@@ -98,6 +96,12 @@ export async function GET(request: NextRequest) {
     const dateFrom = searchParams.get('dateFrom');
     const dateTo = searchParams.get('dateTo');
     const search = searchParams.get('search')?.trim();
+    // Lookup callers (payment/booking pickers) need real bookings only, never reservation entries.
+    const bookingsOnly = searchParams.get('records') === 'bookings';
+
+    if (!bookingsOnly) {
+      await processAllOverdueStayExtensions(db);
+    }
 
     const skip = (page - 1) * limit;
 
@@ -134,7 +138,7 @@ export async function GET(request: NextRequest) {
       where.AND = [...existingAnd, stayOverlapFilter];
     }
 
-    const includeReservationEntries = !status;
+    const includeReservationEntries = !status && !bookingsOnly;
 
     if (includeReservationEntries) {
       const entryScope =

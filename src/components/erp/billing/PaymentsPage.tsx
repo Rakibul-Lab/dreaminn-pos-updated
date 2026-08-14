@@ -934,7 +934,7 @@ export default function PaymentsPage() {
                   onSelect={(booking: BookingPaymentSearchResult) => {
                     setPaymentForm((f) => ({ ...f, bookingId: booking.id }))
                     setSelectedBookingLabel(
-                      `${booking.customer.name} · Room ${booking.room.roomNumber}`
+                      `${booking.customer?.name ?? 'Guest'} · Room ${booking.room?.roomNumber ?? '—'}`
                     )
                   }}
                   onClear={() => {

@@ -7,7 +7,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { StatusBadge } from '../shared/StatusBadge'
 import { formatBdt } from '@/lib/currency'
 import { formatBookingDateOnly } from '@/lib/hotel-times'
-import { formatPaymentMethod, formatPaymentTypeLabel } from '@/lib/payment-method'
+import { formatPaymentMethod, formatPaymentCategoryLabel } from '@/lib/payment-method'
 import { sumBookingNetPaid } from '@/lib/booking-totals'
 import { resolveBookingRegistrationNumber } from '@/lib/booking-registration'
 import { BookingPaymentSlipButton } from './BookingPaymentSlipButton'
@@ -29,6 +29,7 @@ type BookingPayment = {
   amount: number
   method: string
   paymentType: string
+  categoryLabel?: string | null
   notes?: string | null
   createdAt: string
 }
@@ -67,8 +68,8 @@ type BookingGuestDetail = {
   payments: BookingPayment[]
 }
 
-function formatPaymentType(type: string): string {
-  return formatPaymentTypeLabel(type)
+function formatPaymentType(type: string, categoryLabel?: string | null) {
+  return formatPaymentCategoryLabel(type, categoryLabel)
 }
 
 function InfoRow({ label, value }: { label: string; value?: string | null }) {
@@ -272,7 +273,7 @@ export function RoomBookingGuestPanel({ bookingId }: { bookingId: string }) {
                       <td className="p-2 whitespace-nowrap">
                         {format(new Date(payment.createdAt), 'dd MMM yyyy')}
                       </td>
-                      <td className="p-2">{formatPaymentType(payment.paymentType)}</td>
+                      <td className="p-2">{formatPaymentType(payment.paymentType, payment.categoryLabel)}</td>
                       <td className="p-2">{formatPaymentMethod(payment.method)}</td>
                       <td
                         className={`p-2 text-right font-medium ${

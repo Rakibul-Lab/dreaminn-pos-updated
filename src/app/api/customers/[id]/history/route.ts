@@ -2,7 +2,13 @@ import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { requireHotelAccess } from '@/lib/auth';
 import { successResponse, errorResponse, notFoundResponse } from '@/lib/api-utils';
-import { bookingVatOptions, computeRoomBookingTotals, sumBookingNetPaid } from '@/lib/booking-totals';
+import {
+  bookingVatOptions,
+  computeRoomBookingTotals,
+  sumBookingFolioRestaurant,
+  sumBookingNetPaid,
+  sumBookingPostedExtras,
+} from '@/lib/booking-totals';
 import { guestStayOverlapsRange } from '@/lib/guest-stay-date-filter';
 import { resolveBookingRegistrationNumber } from '@/lib/booking-registration';
 
@@ -38,6 +44,15 @@ export async function GET(
             payments: {
               orderBy: { createdAt: 'desc' },
               include: { receiver: { select: { id: true, name: true } } },
+            },
+            charges: { select: { chargeType: true, amount: true, quantity: true } },
+            restaurantOrders: {
+              select: {
+                status: true,
+                billingDisposition: true,
+                totalAmount: true,
+                companyLedgerBill: { select: { id: true } },
+              },
             },
           },
         },
@@ -84,6 +99,8 @@ export async function GET(
         totalPaid,
         bookingVatOptions(booking)
       );
+      const extraChargesTotal = sumBookingPostedExtras(booking.charges, booking.payments);
+      const restaurantChargesTotal = sumBookingFolioRestaurant(booking.restaurantOrders);
       const invoice = booking.invoices[0] ?? null;
       const registrationNumber = resolveBookingRegistrationNumber(booking);
       const stayCompanions = booking.companions
@@ -102,7 +119,9 @@ export async function GET(
           actualCheckOut: booking.actualCheckOut,
           totalRoomCharge: isCompanionView ? 0 : booking.totalRoomCharge,
           dueAmount: isCompanionView ? 0 : totals.dueAmount,
-          totalWithVat: isCompanionView ? 0 : totals.totalWithVat,
+          totalWithVat: isCompanionView
+            ? 0
+            : totals.totalWithVat + extraChargesTotal + restaurantChargesTotal,
           paidAmount: isCompanionView ? 0 : totalPaid,
           room: booking.room,
         },

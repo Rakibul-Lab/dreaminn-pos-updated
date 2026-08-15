@@ -26,6 +26,8 @@ model User {
   restaurantOrders  RestaurantOrder[]
   hotelDeposits     HotelDeposit[]
   hotelClearedBills CompanyLedgerBill[] @relation("HotelClearedBills")
+  recordedRoomCharges RoomCharge[]      @relation("RoomChargesRecorded")
+  createdPaymentCategories PaymentCategory[] @relation("PaymentCategoriesCreated")
   dayCloses         DayClose[]
   hotelBeverageSales HotelBeverageSale[]
   transportSales     TransportSale[]
@@ -346,19 +348,24 @@ model RoomCharge {
   bookingId           String
   chargeType          ChargeType         @default(ROOM_RATE)
   description         String
+  notes               String?
   amount              Float
   quantity            Int                @default(1)
   chargeDate          DateTime           @default(now())
   hotelBeverageSaleId String?            @map("hotel_beverage_sale_id")
   transportSaleId     String?            @map("transport_sale_id")
+  /** Set only for charges posted from Payments → Send to Room. */
+  recordedBy          String?            @map("recorded_by")
   createdAt           DateTime           @default(now())
   booking             Booking            @relation(fields: [bookingId], references: [id])
   hotelBeverageSale   HotelBeverageSale? @relation(fields: [hotelBeverageSaleId], references: [id], onDelete: SetNull)
   transportSale       TransportSale?     @relation(fields: [transportSaleId], references: [id], onDelete: SetNull)
+  recorder            User?              @relation("RoomChargesRecorded", fields: [recordedBy], references: [id])
 
   @@index([bookingId], map: "room_charges_bookingId_fkey")
   @@index([hotelBeverageSaleId], map: "room_charges_hotel_beverage_sale_id_fkey")
   @@index([transportSaleId], map: "room_charges_transport_sale_id_fkey")
+  @@index([recordedBy], map: "room_charges_recorded_by_fkey")
   @@map("room_charges")
 }
 
@@ -488,6 +495,8 @@ model Payment {
   reference        String?
   accountLastFour  String?                     @map("account_last_four")
   notes            String?
+  /** Label of the user-defined payment type; null for the built-in types. */
+  categoryLabel    String?                     @map("category_label")
   settlementSource RestaurantSettlementSource? @map("settlement_source")
   businessDate     String?                     @map("business_date")
   receivedBy       String
@@ -682,6 +691,19 @@ model Setting {
   group String?
 
   @@map("settings")
+}
+
+/** User-defined payment types offered next to the built-in ones in Record New Payment. */
+model PaymentCategory {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  active    Boolean  @default(true)
+  createdBy String?  @map("created_by")
+  createdAt DateTime @default(now()) @map("created_at")
+  creator   User?    @relation("PaymentCategoriesCreated", fields: [createdBy], references: [id])
+
+  @@index([createdBy], map: "payment_categories_created_by_fkey")
+  @@map("payment_categories")
 }
 
 model DayClose {

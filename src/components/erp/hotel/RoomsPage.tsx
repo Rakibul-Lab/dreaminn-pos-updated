@@ -17,7 +17,7 @@ import {
 import { StatusBadge } from '../shared/StatusBadge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from 'sonner';
-import { FileDown, Grid3X3, List, Loader2, LogIn, LogOut, Plus, Search, SprayCan, CalendarPlus, CreditCard, CheckCircle2, Play, Users, UtensilsCrossed, CalendarRange, Wrench, FilePenLine } from 'lucide-react';
+import { FileDown, Grid3X3, List, Loader2, LogIn, LogOut, Plus, Search, SprayCan, CalendarPlus, CreditCard, CheckCircle2, Play, Users, UtensilsCrossed, CalendarRange, Wrench, FilePenLine, Receipt } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuthStore, canManageRoomInventory, isHotelFrontDesk, isRoomsViewOnly, canPerformRoomCleaning, isHousekeeper } from '@/lib/auth-store';
 import { downloadRoomsPdf, type RoomExportRecord } from '@/lib/rooms-export';
@@ -311,6 +311,29 @@ export function RoomsPage() {
       setCheckInPaymentLines([]);
     },
     onError: () => toast.error('Failed to check in'),
+  });
+
+  const generateInvoiceMutation = useMutation({
+    mutationFn: (bookingId: string) =>
+      api.post<{ success?: boolean; data?: { id?: string }; error?: string; message?: string }>(
+        '/invoices',
+        { bookingId }
+      ),
+    onSuccess: (res) => {
+      if (!res?.success) {
+        toast.error(res?.error || res?.message || 'Failed to open invoice');
+        return;
+      }
+      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      const invoiceId = res.data?.id;
+      if (!invoiceId) {
+        toast.error('Invoice was created but could not be opened');
+        return;
+      }
+      window.open(`/invoice/${invoiceId}`, '_blank', 'noopener,noreferrer');
+      toast.success('Invoice ready');
+    },
+    onError: (err: Error) => toast.error(err.message || 'Failed to open invoice'),
   });
 
   const createHousekeepingTaskMutation = useMutation({
@@ -695,6 +718,25 @@ export function RoomsPage() {
           >
             <CreditCard className="w-3 h-3 mr-1" />
             Pay
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className={cn('border-amber-500 text-amber-700 hover:bg-amber-50 bg-white/90', btnClass)}
+            onClick={(e) => {
+              e.stopPropagation();
+              generateInvoiceMutation.mutate(booking.id);
+            }}
+            disabled={generateInvoiceMutation.isPending}
+            title="Open invoice"
+          >
+            {generateInvoiceMutation.isPending ? (
+              <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+            ) : (
+              <Receipt className="w-3 h-3 mr-1" />
+            )}
+            Invoice
           </Button>
           <Button
             type="button"

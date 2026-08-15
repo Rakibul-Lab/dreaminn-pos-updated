@@ -364,11 +364,11 @@
 .bookings-list-table .col-total { width: 8%; }
 .bookings-list-table .col-due { width: 7%; }
 .bookings-list-table .col-actions {
-  width: 240px;
-  min-width: 240px;
-  max-width: 240px;
-  padding-left: 6px;
-  padding-right: 8px;
+  width: 220px;
+  min-width: 220px;
+  max-width: 220px;
+  padding-left: 4px;
+  padding-right: 6px;
   overflow: visible;
 }
 
@@ -385,10 +385,10 @@
 
 .bookings-list-table .col-actions .bl-actions {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   justify-content: flex-end;
-  gap: 6px;
+  gap: 3px;
   width: 100%;
   max-width: 100%;
   margin-left: auto;
@@ -400,18 +400,26 @@
 
 /* Icon-only row actions — do not force width on labeled buttons (Convert, Cancel). */
 .bookings-list-table .col-actions .bl-actions button.h-7.w-7 {
-  height: 1.75rem;
-  width: 1.75rem;
+  height: 1.4rem;
+  width: 1.4rem;
+  min-height: 1.4rem;
+  min-width: 1.4rem;
   padding: 0;
+}
+
+.bookings-list-table .col-actions .bl-actions button.h-7.w-7 svg {
+  width: 0.7rem;
+  height: 0.7rem;
 }
 
 .bookings-list-table .col-actions .bl-actions button:not(.h-7.w-7) {
   height: auto;
-  min-height: 1.75rem;
+  min-height: 1.4rem;
   width: auto;
   white-space: nowrap;
-  padding-left: 0.625rem;
+  padding-left: 0.5rem;
   padding-right: 0.625rem;
+  font-size: 11px;
 }
 
 .bookings-list-table thead th.col-actions,

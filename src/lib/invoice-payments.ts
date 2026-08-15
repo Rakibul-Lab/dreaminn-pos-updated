@@ -1,12 +1,13 @@
 import type { InvoiceStatus, PaymentType, PrismaClient } from '@prisma/client'
 import { sumBookingNetPaid } from '@/lib/booking-totals'
-import { formatPaymentTypeLabel, isManualRecordPaymentType } from '@/lib/payment-method'
+import { formatPaymentCategoryLabel, isManualRecordPaymentType } from '@/lib/payment-method'
 
 export type FolioPaymentRow = {
   id: string
   amount: number
   method: string
   paymentType: string
+  categoryLabel?: string | null
   createdAt: Date | string
   reference?: string | null
   accountLastFour?: string | null
@@ -102,11 +103,12 @@ export async function appendManualChargeInvoiceLine(
     paymentType: PaymentType
     amount: number
     notes?: string | null
+    categoryLabel?: string | null
   }
 ): Promise<void> {
   if (!isManualRecordPaymentType(input.paymentType)) return
 
-  const label = formatPaymentTypeLabel(input.paymentType)
+  const label = formatPaymentCategoryLabel(input.paymentType, input.categoryLabel)
 
   await client.invoiceItem.create({
     data: {

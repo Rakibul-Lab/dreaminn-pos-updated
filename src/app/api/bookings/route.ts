@@ -15,7 +15,9 @@ import {
   computeBookingRoomDue,
   computeRoomBookingTotals,
   resolveBookingDisplayDue,
+  sumBookingFolioRestaurant,
   sumBookingNetPaid,
+  sumBookingPostedExtras,
 } from '@/lib/booking-totals';
 import { formatGuestCompany } from '@/lib/reservation-terms';
 import {
@@ -42,6 +44,15 @@ const bookingListInclude = {
   sourceReservationEntry: { select: { registrationNumber: true } },
   creator: { select: { id: true, name: true, email: true } },
   payments: { select: { amount: true, paymentType: true } },
+  charges: { select: { chargeType: true, amount: true, quantity: true } },
+  restaurantOrders: {
+    select: {
+      status: true,
+      billingDisposition: true,
+      totalAmount: true,
+      companyLedgerBill: { select: { id: true } },
+    },
+  },
   invoices: {
     where: { status: { not: 'CANCELLED' as const } },
     orderBy: { createdAt: 'desc' as const },
@@ -57,14 +68,25 @@ function enrichBookingListRow(booking: BookingListRow) {
   const latestInvoice = booking.invoices[0] ?? null;
   const totals = computeBookingRoomDue(booking, booking.payments);
   const dueAmount = resolveBookingDisplayDue(booking, booking.payments, latestInvoice);
-  const { payments: _payments, invoices: _invoices, _count, ...rest } = booking;
+  const extraChargesTotal = sumBookingPostedExtras(booking.charges, booking.payments);
+  const restaurantChargesTotal = sumBookingFolioRestaurant(booking.restaurantOrders);
+  const {
+    payments: _payments,
+    invoices: _invoices,
+    charges: _charges,
+    restaurantOrders: _restaurantOrders,
+    _count,
+    ...rest
+  } = booking;
   return {
     ...rest,
     recordType: 'booking' as const,
     idDocumentCount: _count.idDocuments,
     vatPercent: totals.vatPercent,
     vatAmount: totals.vatAmount,
-    totalWithVat: totals.totalWithVat,
+    extraChargesTotal,
+    restaurantChargesTotal,
+    totalWithVat: totals.totalWithVat + extraChargesTotal + restaurantChargesTotal,
     discountAmount: totals.discountAmount,
     dueAmount,
   };

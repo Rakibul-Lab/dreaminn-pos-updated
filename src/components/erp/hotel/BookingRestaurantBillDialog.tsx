@@ -28,7 +28,7 @@ import { toast } from 'sonner'
 import { Loader2, UtensilsCrossed } from 'lucide-react'
 import { formatBdt } from '@/lib/currency'
 import { format } from 'date-fns'
-import { PAYMENT_METHOD_OPTIONS_WITH_PAYMENT } from '@/lib/payment-method'
+import { PAYMENT_METHOD_OPTIONS } from '@/lib/payment-method'
 import { parseBookingRestaurantBillNotes } from '@/lib/booking-restaurant-bill-notes'
 import {
   GUEST_FOLIO_RESTAURANT_VAT_PERCENT,
@@ -64,7 +64,7 @@ export function BookingRestaurantBillDialog({
 }: BookingRestaurantBillDialogProps) {
   const queryClient = useQueryClient()
   const [billNo, setBillNo] = useState('')
-  const [paymentMethod, setPaymentMethod] = useState('CASH')
+  const [paymentMethod, setPaymentMethod] = useState('NONE')
   const [amount, setAmount] = useState('')
   const [discount, setDiscount] = useState('0')
   const [vatApplied, setVatApplied] = useState(true)
@@ -93,7 +93,7 @@ export function BookingRestaurantBillDialog({
   useEffect(() => {
     if (!open) return
     setBillNo('')
-    setPaymentMethod('CASH')
+    setPaymentMethod('NONE')
     setAmount('')
     setDiscount('0')
     setVatApplied(true)
@@ -125,7 +125,7 @@ export function BookingRestaurantBillDialog({
       queryClient.invalidateQueries({ queryKey: ['bookings'] })
       queryClient.invalidateQueries({ queryKey: ['booking-restaurant-bill-due', bookingId] })
       setBillNo('')
-      setPaymentMethod('CASH')
+      setPaymentMethod('NONE')
       setAmount('')
       setDiscount('0')
       setNotes('')
@@ -199,13 +199,16 @@ export function BookingRestaurantBillDialog({
                 />
               </div>
               <div className="space-y-2">
-                <Label>Payment method *</Label>
+                <Label>
+                  Payment method{' '}
+                  <span className="font-normal text-muted-foreground">(optional)</span>
+                </Label>
                 <Select value={paymentMethod} onValueChange={setPaymentMethod}>
                   <SelectTrigger>
                     <SelectValue placeholder="Select method" />
                   </SelectTrigger>
                   <SelectContent>
-                    {PAYMENT_METHOD_OPTIONS_WITH_PAYMENT.map((option) => (
+                    {PAYMENT_METHOD_OPTIONS.map((option) => (
                       <SelectItem key={option.value} value={option.value}>
                         {option.label}
                       </SelectItem>

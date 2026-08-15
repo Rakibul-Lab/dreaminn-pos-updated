@@ -146,6 +146,8 @@ async function handleAdminDashboard() {
   const businessDayInvoices = await db.invoice.findMany({
     where: {
       status: { not: 'CANCELLED' },
+      // A folio previewed while the guest is in house is not a sale yet.
+      booking: { status: 'CHECKED_OUT' },
       OR: [
         { businessDate },
         {

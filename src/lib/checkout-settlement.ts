@@ -13,11 +13,32 @@ import {
 } from '@/lib/booking-stay'
 import { filterGuestFolioRestaurantOrders } from '@/lib/restaurant-order-billing'
 import { computeOrderFolioBalance } from '@/lib/restaurant-order-dues'
+import { parseBookingRestaurantBillNotes } from '@/lib/booking-restaurant-bill-notes'
 
 type BookingCharge = {
   chargeType: string
+  description?: string | null
   amount: number
   quantity: number
+}
+
+export type PostedExtraChargeLine = {
+  label: string
+  amount: number
+}
+
+const POSTED_CHARGE_TYPE_LABELS: Record<string, string> = {
+  MINIBAR: 'Beverage / minibar',
+  LAUNDRY: 'Laundry',
+  EXTRA_SERVICE: 'Extra Charges',
+  EARLY_CHECKOUT: 'Early checkout fee',
+  OTHER: 'Others',
+}
+
+function postedChargeLabel(charge: BookingCharge): string {
+  const description = charge.description?.trim()
+  if (description) return description
+  return POSTED_CHARGE_TYPE_LABELS[charge.chargeType] ?? charge.chargeType.replace(/_/g, ' ')
 }
 
 type RestaurantOrderRow = {
@@ -69,6 +90,8 @@ export type CheckoutSettlementResult = {
   includeExtraCharges: boolean
   /** Minibar, laundry, and other posted folio charges (always on invoice). */
   postedExtraCharges: number
+  /** Same posted charges itemised by their folio description, for checkout display. */
+  postedExtraChargeLines: PostedExtraChargeLine[]
   extraChargesStored: number
   lateCheckoutCharge: number
   extraChargesIfIncluded: number
@@ -103,6 +126,70 @@ function sumNonRoomCharges(charges: BookingCharge[], excludeLate = false): numbe
         (!excludeLate || c.chargeType !== 'LATE_CHECKOUT')
     )
     .reduce((sum, c) => sum + c.amount * c.quantity, 0)
+}
+
+function groupPostedExtraCharges(charges: BookingCharge[]): PostedExtraChargeLine[] {
+  const byLabel = new Map<string, number>()
+  for (const charge of charges) {
+    if (
+      charge.chargeType === 'ROOM_RATE' ||
+      charge.chargeType === 'DAMAGE' ||
+      charge.chargeType === 'LATE_CHECKOUT'
+    ) {
+      continue
+    }
+    const label = postedChargeLabel(charge)
+    byLabel.set(label, (byLabel.get(label) ?? 0) + charge.amount * charge.quantity)
+  }
+  return Array.from(byLabel, ([label, amount]) => ({ label, amount })).filter(
+    (line) => Math.abs(line.amount) > 0.005
+  )
+}
+
+export type SentToRoomCharge = BookingCharge & { recordedBy?: string | null }
+
+/**
+ * Folio charges posted through Payments → Send to room, grouped by the label the
+ * cashier picked. Charges posted by other flows (minibar, housekeeping laundry)
+ * carry no recorder and stay out of this list.
+ */
+export function groupSentToRoomCharges(charges: SentToRoomCharge[]): PostedExtraChargeLine[] {
+  return groupPostedExtraCharges(charges.filter((charge) => !!charge.recordedBy)).filter(
+    (line) => line.amount > 0.005
+  )
+}
+
+export type FolioRestaurantOrderRow = RestaurantOrderRow & {
+  orderNumber?: string | null
+  notes?: string | null
+  companyLedgerBill?: { id: string } | null
+}
+
+/**
+ * Restaurant bills still owed on the room folio, one line per bill so each one can
+ * be settled — and slipped — separately at check-out.
+ */
+export function groupFolioRestaurantCharges(
+  orders: FolioRestaurantOrderRow[]
+): PostedExtraChargeLine[] {
+  const byLabel = new Map<string, number>()
+
+  for (const order of filterGuestFolioRestaurantOrders(orders)) {
+    const { folioDue } = computeOrderFolioBalance(order)
+    if (folioDue <= 0.005) continue
+
+    const billNo = parseBookingRestaurantBillNotes(order.notes ?? null).billNo
+    const label =
+      billNo !== '—'
+        ? `Restaurant · Bill ${billNo}`
+        : order.orderNumber
+          ? `Restaurant · Order ${order.orderNumber}`
+          : 'Restaurant'
+
+    byLabel.set(label, (byLabel.get(label) ?? 0) + folioDue)
+  }
+
+  return Array.from(byLabel, ([label, amount]) => ({ label, amount }))
 }
 
 function sumLateFromCharges(charges: BookingCharge[]): number {
@@ -150,6 +237,7 @@ export function computeCheckoutSettlement(
   const lateInDb = sumLateFromCharges(booking.charges)
   const damageInDb = sumDamageFromCharges(booking.charges)
   const postedExtraCharges = sumNonRoomCharges(booking.charges, true)
+  const postedExtraChargeLines = groupPostedExtraCharges(booking.charges)
   const manualLate =
     params.lateCheckoutAmount != null ? Math.max(0, params.lateCheckoutAmount) : null
   const lateWouldBe = lateInDb > 0 ? lateInDb : includeExtraCharges ? (manualLate ?? 0) : 0
@@ -204,6 +292,7 @@ export function computeCheckoutSettlement(
     stayAdjusted,
     includeExtraCharges,
     postedExtraCharges,
+    postedExtraChargeLines,
     extraChargesStored: postedExtraCharges,
     lateCheckoutCharge: lateWouldBe,
     extraChargesIfIncluded,

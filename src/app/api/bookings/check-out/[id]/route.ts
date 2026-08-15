@@ -13,6 +13,8 @@ import { getRoomNightlyTotal } from '@/lib/room-pricing';
 import { sumCheckoutBookingPaid } from '@/lib/booking-totals';
 import {
   computeCheckoutSettlement,
+  groupFolioRestaurantCharges,
+  groupSentToRoomCharges,
 } from '@/lib/checkout-settlement';
 import { buildInvoiceLineItems, replaceInvoiceLineItems } from '@/lib/invoice-line-items';
 import {
@@ -28,6 +30,8 @@ import { postCompanyLedgerBill, ensureCompanyLedgerGuestFromCustomer, resolveCom
 import { DEFAULT_GUEST_COMPANY } from '@/lib/reservation-terms';
 import { processAllOverdueStayExtensions, extendOverdueCheckedInBooking } from '@/lib/auto-stay-extension';
 import { bookingDiscountPrefill, resolveCheckoutDiscount } from '@/lib/checkout-discount';
+import { stampCurrentBusinessDate } from '@/lib/business-date';
+import { recordFolioSettlementPayments, subtractSettledCharges } from '@/lib/folio-settlement';
 
 async function loadCheckoutBooking(id: string) {
   return db.booking.findUnique({
@@ -477,7 +481,7 @@ export async function POST(
     });
     let bookingPayments = await db.payment.findMany({
       where: { bookingId: id },
-      select: { amount: true, paymentType: true },
+      select: { amount: true, paymentType: true, categoryLabel: true },
     });
 
     const primarySettlement = computeCheckoutSettlement({
@@ -637,32 +641,34 @@ export async function POST(
       );
     }
 
-    for (const row of checkoutPaymentRows) {
-      const amount = Math.max(0, Number(row.amount || 0));
-      if (amount <= 0) continue;
-      const method = parsePaymentMethod(row.method, 'CASH');
-      const reference = row.reference ? String(row.reference).trim() : null;
-      const accountLastFour = row.accountLastFour ? String(row.accountLastFour).trim() : null;
-      const notes = row.notes ? String(row.notes).trim() : 'Final payment at check-out';
+    // Charges sent to the room stay open on the folio until they are paid for, so any
+    // money still being taken here clears those first. Payments the guest already made
+    // on the check-out screen settled their share, so subtract those.
+    const pendingRoomCharges = subtractSettledCharges(
+      [...groupSentToRoomCharges(booking.charges), ...groupFolioRestaurantCharges(restaurantOrders)],
+      bookingPayments
+    );
+    const currentBusinessDate = await stampCurrentBusinessDate();
 
-      await db.payment.create({
-        data: {
-          amount,
-          method,
-          paymentType: 'FINAL',
-          bookingId: id,
-          receivedBy: authUser.id,
-          reference: paymentRequiresReference(method) ? reference : null,
-          accountLastFour: paymentRequiresLastFour(method) ? accountLastFour : null,
-          notes,
-        },
-      });
-    }
+    await recordFolioSettlementPayments(db, {
+      bookingId: id,
+      receivedBy: authUser.id,
+      businessDate: currentBusinessDate,
+      pendingCharges: pendingRoomCharges,
+      rows: checkoutPaymentRows.map((row) => ({
+        amount: Math.max(0, Number(row.amount || 0)),
+        method: parsePaymentMethod(row.method, 'CASH'),
+        reference: row.reference ? String(row.reference).trim() : null,
+        accountLastFour: row.accountLastFour ? String(row.accountLastFour).trim() : null,
+        notes: row.notes ? String(row.notes).trim() : null,
+      })),
+      defaultNotes: 'Final payment at check-out',
+    });
 
     if (totalFinalPayment > 0) {
       bookingPayments = await db.payment.findMany({
         where: { bookingId: id },
-        select: { amount: true, paymentType: true },
+        select: { amount: true, paymentType: true, categoryLabel: true },
       });
     }
 
@@ -761,6 +767,9 @@ export async function POST(
     const companyLedgerDue = isCompanyLedgerCheckout ? invoiceDue : 0;
 
     const invoicePayload = {
+      // An invoice pre-generated while the guest was in house carries that day's
+      // business date; re-stamp it so the bill lands on the check-out day's report.
+      businessDate: currentBusinessDate,
       roomCharges,
       foodCharges,
       extraCharges,

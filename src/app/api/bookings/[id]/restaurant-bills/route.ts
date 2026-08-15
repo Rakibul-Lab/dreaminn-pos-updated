@@ -46,7 +46,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       id,
       {
         billNo: String(body.billNo ?? ''),
-        paymentMethod: parsePaymentMethod(body.paymentMethod),
+        paymentMethod: parsePaymentMethod(body.paymentMethod, 'NONE'),
         amount: Number(body.amount),
         discount: body.discount !== undefined ? Number(body.discount) : 0,
         vatPercent: body.vatPercent !== undefined ? Number(body.vatPercent) : undefined,

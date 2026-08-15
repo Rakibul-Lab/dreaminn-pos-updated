@@ -120,6 +120,9 @@ const MBANKING_METHODS = new Set(['MOBILE_BANKING', 'BKASH', 'NAGAD', 'UPAY', 'B
 function invoiceWindowWhere(businessDate: string, openedAt: Date, closedAt: Date) {
   return {
     status: { not: 'CANCELLED' as const },
+    // An invoice viewed or generated while the guest is still in house is only a
+    // preview of the folio — the bill becomes a sale on the day the guest checks out.
+    booking: { status: 'CHECKED_OUT' as const },
     OR: [
       { businessDate },
       {
@@ -869,6 +872,9 @@ export async function buildDailySalesDetailReport(
   for (const order of restaurantOrders) {
     if (!isGuestFolioManualRestaurantBill(order)) continue
     if (order.bookingId && checkoutBookingIds.has(order.bookingId)) continue
+    // Posting the bill raises the room due instead of taking money, so it is not a
+    // sale yet — it reaches the report through the invoice on the check-out day.
+    if (order.booking && order.booking.status !== 'CHECKED_OUT') continue
 
     const parsed = parseBookingRestaurantBillNotes(order.notes ?? null)
     const booking = order.booking

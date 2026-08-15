@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import Image from 'next/image'
 import { format } from 'date-fns'
@@ -44,6 +44,7 @@ export interface CheckoutPreview {
   bookedRoomCharge: number
   extraChargesIfIncluded?: number
   postedExtraCharges?: number
+  postedExtraChargeLines?: Array<{ label: string; amount: number }>
   roomCharges: number
   foodCharges: number
   extraCharges: number
@@ -301,16 +302,53 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
     checkoutCompanyLedgerTouched,
   ])
 
+  // The preview already accounts for every payment banked against this stay, so the
+  // remaining balance comes straight from the server rather than from local bookkeeping.
   const checkOutDue =
     isBillTransferOut ? 0 : (checkoutPreview?.dueBeforeSettlement ?? 0)
   const checkOutCredit = checkoutPreview?.creditAmount ?? 0
   const totalCheckoutPayments = checkoutPaymentLines.reduce((sum, line) => sum + line.amount, 0)
   const checkOutPaymentAmount = parseFloat(checkOutPayment) || 0
-  const checkOutRemaining = Math.max(checkOutDue - totalCheckoutPayments, 0)
+  const checkOutRemaining = Math.max(checkOutDue, 0)
   const showPaymentReference =
     checkOutPaymentAmount > 0 && paymentRequiresReference(checkOutPaymentMethod)
   const showPaymentLastFour =
     checkOutPaymentAmount > 0 && paymentRequiresLastFour(checkOutPaymentMethod)
+
+  const recordPaymentMutation = useMutation({
+    mutationFn: (line: Omit<CheckoutPaymentLine, 'id'>) =>
+      api.post<{ success?: boolean; message?: string; error?: string }>(
+        `/bookings/${bookingId}/checkout-payment`,
+        {
+          amount: line.amount,
+          method: line.method,
+          reference: line.reference,
+          accountLastFour: line.accountLastFour,
+          notes: line.notes,
+        }
+      ),
+    onSuccess: (res, line) => {
+      if (!res?.success) {
+        toast.error(res?.error || res?.message || 'Failed to record payment')
+        return
+      }
+      setCheckoutPaymentLines((prev) => [...prev, { ...line, id: `${Date.now()}-${prev.length}` }])
+      setCheckOutPayment('0')
+      setCheckOutPaymentReference('')
+      setCheckOutPaymentLastFour('')
+      setCheckOutPaymentNotes('')
+      queryClient.invalidateQueries({ queryKey: ['checkout-preview'] })
+      queryClient.invalidateQueries({ queryKey: ['payments'] })
+      queryClient.invalidateQueries({ queryKey: ['bookings'] })
+      queryClient.invalidateQueries({ queryKey: ['rooms'] })
+      queryClient.invalidateQueries({ queryKey: ['invoices'] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+      toast.success(res.message || 'Payment recorded')
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || 'Failed to record payment')
+    },
+  })
 
   const handleRecordCheckoutPayment = () => {
     const amount = checkOutPaymentAmount
@@ -318,8 +356,8 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
       toast.error('Enter a payment amount greater than zero.')
       return
     }
-    if (totalCheckoutPayments + amount > checkOutDue + 0.01) {
-      toast.error(`Payment total cannot exceed due amount (${formatBdt(checkOutDue)}).`)
+    if (amount > checkOutDue + 0.01) {
+      toast.error(`Payment cannot exceed the remaining due (${formatBdt(checkOutDue)}).`)
       return
     }
     if (showPaymentReference && !checkOutPaymentReference.trim()) {
@@ -333,22 +371,13 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
       toast.error('Enter the last 4 digits for this payment method.')
       return
     }
-    setCheckoutPaymentLines((prev) => [
-      ...prev,
-      {
-        id: `${Date.now()}-${prev.length}`,
-        amount,
-        method: checkOutPaymentMethod,
-        reference: checkOutPaymentReference.trim() || undefined,
-        accountLastFour: checkOutPaymentLastFour.trim() || undefined,
-        notes: checkOutPaymentNotes.trim() || undefined,
-      },
-    ])
-    setCheckOutPayment('0')
-    setCheckOutPaymentReference('')
-    setCheckOutPaymentLastFour('')
-    setCheckOutPaymentNotes('')
-    toast.success('Payment recorded')
+    recordPaymentMutation.mutate({
+      amount,
+      method: checkOutPaymentMethod,
+      reference: checkOutPaymentReference.trim() || undefined,
+      accountLastFour: checkOutPaymentLastFour.trim() || undefined,
+      notes: checkOutPaymentNotes.trim() || undefined,
+    })
   }
 
   const handlePaymentMethodChange = (method: string) => {
@@ -360,9 +389,7 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
       setCheckOutPaymentLastFour('')
     }
   }
-  const companyLedgerDue = isCompanyLedgerCheckout
-    ? Math.max(0, checkOutDue - totalCheckoutPayments)
-    : 0
+  const companyLedgerDue = isCompanyLedgerCheckout ? Math.max(0, checkOutDue) : 0
 
   // Use the value the user actually typed (not the 400ms-debounced one), so a
   // room-charge edit is never lost when Checkout is clicked right after typing.
@@ -376,15 +403,9 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
   const checkOutMutation = useMutation({
     mutationFn: () =>
       api.post(`/bookings/check-out/${bookingId}`, {
-        checkoutPayments: isBillTransferOut
-          ? []
-          : checkoutPaymentLines.map((line) => ({
-              amount: line.amount,
-              method: line.method,
-              reference: line.reference,
-              accountLastFour: line.accountLastFour,
-              notes: line.notes,
-            })),
+        // Payments taken on this screen are banked as they are entered, so there is
+        // nothing left to settle here.
+        checkoutPayments: [],
         includeExtraCharges: extraChargesEnabled,
         lateCheckoutAmount: extraChargesEnabled ? debouncedLateCheckoutAmount : 0,
         includeDamageCharge: damageChargesEnabled,
@@ -773,14 +794,22 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
               <p className="font-medium text-right">{formatBdt(checkoutPreview?.roomCharges ?? 0)}</p>
               <p className="text-muted-foreground">Restaurant</p>
               <p className="font-medium text-right">{formatBdt(checkoutPreview?.foodCharges ?? 0)}</p>
-              {(checkoutPreview?.postedExtraCharges ?? 0) > 0 && (
-                <>
-                  <p className="text-muted-foreground">Beverage / folio charges</p>
-                  <p className="font-medium text-right">
-                    {formatBdt(checkoutPreview?.postedExtraCharges ?? 0)}
-                  </p>
-                </>
-              )}
+              {(checkoutPreview?.postedExtraCharges ?? 0) > 0 &&
+                (checkoutPreview?.postedExtraChargeLines?.length
+                  ? checkoutPreview.postedExtraChargeLines.map((line) => (
+                      <Fragment key={line.label}>
+                        <p className="text-muted-foreground">{line.label}</p>
+                        <p className="font-medium text-right">{formatBdt(line.amount)}</p>
+                      </Fragment>
+                    ))
+                  : (
+                      <>
+                        <p className="text-muted-foreground">Beverage / folio charges</p>
+                        <p className="font-medium text-right">
+                          {formatBdt(checkoutPreview?.postedExtraCharges ?? 0)}
+                        </p>
+                      </>
+                    ))}
               <p className="text-muted-foreground">Late checkout / other fees</p>
               <p
                 className={cn(
@@ -919,8 +948,9 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
                 type="button"
                 className="h-10 w-full bg-emerald-600 hover:bg-emerald-700 text-white sm:w-auto sm:min-w-[5.5rem]"
                 onClick={handleRecordCheckoutPayment}
+                disabled={recordPaymentMutation.isPending || checkOutPaymentAmount <= 0}
               >
-                Pay
+                {recordPaymentMutation.isPending ? 'Saving…' : 'Pay'}
               </Button>
             </div>
             <p className="text-xs text-muted-foreground">
@@ -976,7 +1006,7 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
           )}
           {checkoutPaymentLines.length > 0 && (
             <div className="rounded-lg border border-emerald-200 bg-emerald-50/40 p-3 space-y-2">
-              <p className="text-sm font-semibold text-emerald-900">Payments to apply at checkout</p>
+              <p className="text-sm font-semibold text-emerald-900">Payments taken on this screen</p>
               {checkoutPaymentLines.map((line) => (
                 <div key={line.id} className="flex justify-between text-sm">
                   <span>{formatPaymentMethod(line.method)}</span>
@@ -984,7 +1014,7 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
                 </div>
               ))}
               <div className="flex justify-between text-sm font-semibold border-t border-emerald-200 pt-2">
-                <span>Total paying now</span>
+                <span>Total taken</span>
                 <span>{formatBdt(totalCheckoutPayments)}</span>
               </div>
             </div>
@@ -1005,16 +1035,13 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
           className="bg-slate-800 hover:bg-slate-900 text-white"
           disabled={
             checkOutMutation.isPending ||
+            recordPaymentMutation.isPending ||
             !bookingId ||
             checkoutPreviewFetching ||
             (debouncedRoomCharge != null && debouncedRoomCharge <= 0) ||
             (damageChargesEnabled && parsedDamageAmount <= 0) ||
             (discountEnabled && parsedDiscountValue <= 0) ||
-            (roomCreditTransferEnabled && !billTransferTargetId) ||
-            (!isBillTransferOut &&
-              !isCompanyLedgerCheckout &&
-              checkOutDue > 0 &&
-              totalCheckoutPayments + 0.01 < checkOutDue)
+            (roomCreditTransferEnabled && !billTransferTargetId)
           }
           onClick={() => {
             if (debouncedRoomCharge != null && debouncedRoomCharge <= 0) {
@@ -1037,17 +1064,10 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
               toast.error('Press Pay to record the entered payment before completing checkout.')
               return
             }
-            if (
-              !isBillTransferOut &&
-              !isCompanyLedgerCheckout &&
-              checkOutDue > 0 &&
-              totalCheckoutPayments + 0.01 < checkOutDue
-            ) {
-              toast.error('Record payments until the full due amount is covered, then complete checkout.')
-              return
-            }
-            if (isCompanyLedgerCheckout && totalCheckoutPayments > checkOutDue + 0.01) {
-              toast.error('Payment cannot exceed the current due amount.')
+            if (!isBillTransferOut && !isCompanyLedgerCheckout && checkOutDue > 0.01) {
+              toast.error(
+                `Due of ${formatBdt(checkOutDue)} is still open. Take the payment above, then complete checkout.`
+              )
               return
             }
             if (checkOutPaymentAmount > 0 && showPaymentReference && !checkOutPaymentReference.trim()) {

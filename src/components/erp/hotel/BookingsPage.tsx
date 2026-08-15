@@ -1185,12 +1185,12 @@ export function BookingsPage() {
                       >
                         <FileText className="w-3 h-3" />
                       </Button>
-                      {booking.status === 'CHECKED_OUT' && (
+                      {(booking.status === 'CHECKED_IN' || booking.status === 'CHECKED_OUT') && (
                         <Button
                           variant="outline"
                           size="icon"
                           className="h-7 w-7 shrink-0 border-amber-500 text-amber-700 hover:bg-amber-50"
-                          title="Generate invoice"
+                          title="Open invoice"
                           onClick={() => generateInvoiceMutation.mutate(booking.id)}
                           disabled={generateInvoiceMutation.isPending}
                         >

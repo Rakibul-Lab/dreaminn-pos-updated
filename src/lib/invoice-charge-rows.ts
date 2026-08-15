@@ -13,7 +13,7 @@ import {
   GUEST_FOLIO_RESTAURANT_VAT_PERCENT,
   isGuestFolioManualRestaurantBill,
 } from '@/lib/booking-restaurant-bill.shared'
-import { formatPaymentTypeLabel, isManualRecordPaymentType } from '@/lib/payment-method'
+import { formatPaymentCategoryLabel, isManualRecordPaymentType } from '@/lib/payment-method'
 
 const HOTEL_CHARGE_TYPES = new Set(['room_charge', 'extra_service', 'discount'])
 const RESTAURANT_CHARGE_TYPES = new Set(['food_order'])
@@ -63,7 +63,13 @@ type BuildRowsContext = {
   defaultRestaurantVatPercent: number | null
   manualChargePaymentsById?: Map<
     string,
-    { paymentType: string; amount: number; notes?: string | null; createdAt: string }
+    {
+      paymentType: string
+      amount: number
+      notes?: string | null
+      createdAt: string
+      categoryLabel?: string | null
+    }
   >
 }
 
@@ -90,21 +96,6 @@ function resolveRestaurantRowVatPercent(
       : GUEST_FOLIO_RESTAURANT_VAT_PERCENT
   }
   return ctx.resolveOrderVatPercent(description) ?? INVOICE_VAT_PERCENT
-}
-
-function lineItemCategory(type: string) {
-  switch (type) {
-    case 'room_charge':
-      return 'Room Rent'
-    case 'extra_service':
-      return 'Service'
-    case 'food_order':
-      return 'F&B'
-    case 'discount':
-      return 'Discount'
-    default:
-      return type.replace(/_/g, ' ')
-  }
 }
 
 /**
@@ -248,23 +239,29 @@ function buildHotelRowsFromLineItems(ctx: BuildRowsContext): InvoiceChargeDispla
     const base = Math.abs(item.total)
     const isBeverage = item.description.toLowerCase().includes('beverage')
     const isLateCheckout = item.description.toLowerCase().includes('late checkout')
+    const folioChargeLabel = item.description.trim() || 'Extra Charges'
     rows.push(
       buildChargeDisplayRow({
         id: item.id,
         date,
         time,
         category: isManualCharge
-          ? formatPaymentTypeLabel(manualPayment.paymentType)
+          ? formatPaymentCategoryLabel(
+              manualPayment.paymentType,
+              manualPayment.categoryLabel ?? item.description
+            )
           : isBeverage
             ? 'Hotel Beverage'
             : isLateCheckout
               ? item.description
-              : lineItemCategory('extra_service'),
+              : folioChargeLabel,
         description: isManualCharge
           ? ''
           : isLateCheckout
             ? ''
-            : item.description,
+            : isBeverage
+              ? item.description
+              : '',
         roomRent: base,
         sdAmount: 0,
         vatAmount: 0,
@@ -303,7 +300,7 @@ function appendOrphanManualChargeRows(
         id: `manual-charge-${paymentId}`,
         date,
         time,
-        category: formatPaymentTypeLabel(payment.paymentType),
+        category: formatPaymentCategoryLabel(payment.paymentType, payment.categoryLabel),
         description: '',
         roomRent: Math.abs(payment.amount),
         sdAmount: 0,
@@ -330,8 +327,8 @@ function buildFallbackHotelRows(ctx: BuildRowsContext): InvoiceChargeDisplayRow[
         id: 'fb-extra',
         date: ctx.stayDateTime.date,
         time: ctx.stayDateTime.time,
-        category: 'Service',
-        description: 'Extra / service charges',
+        category: 'Extra Charges',
+        description: '',
         roomRent: ctx.extraBill,
         sdAmount: 0,
         vatAmount: 0,

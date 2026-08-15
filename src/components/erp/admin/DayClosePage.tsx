@@ -8,6 +8,16 @@ import { useToast } from '@/hooks/use-toast'
 import { useBusinessDate } from '@/hooks/use-business-date'
 import type { DailySalesBalances } from '@/lib/daily-sales-balance'
 import { BusinessDaySummarySection } from '@/components/erp/admin/BusinessDaySummarySection'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -62,6 +72,7 @@ export default function DayClosePage() {
   const [notes, setNotes] = useState('')
   const [openingBalance, setOpeningBalance] = useState('')
   const [openingLoaded, setOpeningLoaded] = useState(false)
+  const [confirmCloseOpen, setConfirmCloseOpen] = useState(false)
   const { data: bdRes } = useBusinessDate()
 
   const { data, isLoading, refetch, isFetching } = useQuery({
@@ -191,9 +202,11 @@ export default function DayClosePage() {
       setNotes('')
       setOpeningBalance('')
       setOpeningLoaded(false)
+      setConfirmCloseOpen(false)
     },
     onError: (err: Error) => {
       toast({ title: 'Day close failed', description: err.message, variant: 'destructive' })
+      setConfirmCloseOpen(false)
     },
   })
 
@@ -343,12 +356,45 @@ export default function DayClosePage() {
           <Button
             className="bg-amber-600 hover:bg-amber-700 text-white"
             disabled={closeMutation.isPending}
-            onClick={() => closeMutation.mutate()}
+            onClick={() => setConfirmCloseOpen(true)}
           >
             {closeMutation.isPending ? 'Closing…' : `Close business day ${businessDate || ''}`}
           </Button>
         </CardContent>
       </Card>
+
+      <AlertDialog
+        open={confirmCloseOpen}
+        onOpenChange={(open) => {
+          if (!closeMutation.isPending) setConfirmCloseOpen(open)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Close business day {businessDate || ''}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to close the day? The daily sales report will be locked
+              as it stands now and cannot be reopened.
+              {status?.cashClosingBalancePreview != null
+                ? ` Cash on hand carried to the next day: ৳${status.cashClosingBalancePreview.toLocaleString()}.`
+                : ''}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={closeMutation.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-amber-600 hover:bg-amber-700 text-white"
+              disabled={closeMutation.isPending}
+              onClick={(event) => {
+                event.preventDefault()
+                closeMutation.mutate()
+              }}
+            >
+              {closeMutation.isPending ? 'Closing…' : 'Yes, close the day'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

@@ -8,7 +8,9 @@ import { readCurrentBusinessDateString } from '@/lib/business-date';
 import {
   bookingVatOptions,
   computeRoomBookingTotals,
+  sumBookingFolioRestaurant,
   sumBookingNetPaid,
+  sumBookingPostedExtras,
 } from '@/lib/booking-totals';
 import {
   computeRoomDisplayStatus,
@@ -187,14 +189,14 @@ export async function GET(request: NextRequest) {
       const reflectLiveRoomState = roomsView.arrivalCutoff <= businessDate
 
       const roomIds = rooms.map((room) => room.id);
-      const activeBookingWhere = reflectLiveRoomState
+      const activeBookingWhere: Prisma.BookingWhereInput = reflectLiveRoomState
         ? {
             roomId: { in: roomIds },
-            status: { in: ['RESERVED', 'CHECKED_IN'] as const },
+            status: { in: ['RESERVED', 'CHECKED_IN'] },
           }
         : {
             roomId: { in: roomIds },
-            status: { in: ['RESERVED', 'CHECKED_IN'] as const },
+            status: { in: ['RESERVED', 'CHECKED_IN'] },
             checkIn: { lt: viewStayCheckOutDate },
             checkOut: { gt: viewStayCheckInDate },
           };
@@ -220,6 +222,15 @@ export async function GET(request: NextRequest) {
                 nidPhysicallyReceived: true,
                 customer: { select: { name: true } },
                 payments: { select: { amount: true, paymentType: true } },
+                charges: { select: { chargeType: true, amount: true, quantity: true } },
+                restaurantOrders: {
+                  select: {
+                    status: true,
+                    billingDisposition: true,
+                    totalAmount: true,
+                    companyLedgerBill: { select: { id: true } },
+                  },
+                },
               },
               orderBy: [{ status: 'desc' }, { checkIn: 'asc' }],
             })
@@ -308,12 +319,15 @@ export async function GET(request: NextRequest) {
 
         const bookingSnapshot = activeBookingRecord
           ? (() => {
-              const { payments, ...bookingRest } = activeBookingRecord;
+              const { payments, charges, restaurantOrders, ...bookingRest } =
+                activeBookingRecord;
               const totals = computeRoomBookingTotals(
                 bookingRest.totalRoomCharge,
                 sumBookingNetPaid(payments),
                 bookingVatOptions(bookingRest)
               );
+              const extraChargesTotal = sumBookingPostedExtras(charges, payments);
+              const restaurantChargesTotal = sumBookingFolioRestaurant(restaurantOrders);
               return {
                 id: bookingRest.id,
                 status: bookingRest.status,
@@ -326,7 +340,10 @@ export async function GET(request: NextRequest) {
                 advancePayment: bookingRest.advancePayment,
                 vatPercent: totals.vatPercent,
                 vatAmount: totals.vatAmount,
-                totalWithVat: totals.totalWithVat,
+                extraChargesTotal,
+                restaurantChargesTotal,
+                totalWithVat:
+                  totals.totalWithVat + extraChargesTotal + restaurantChargesTotal,
                 dueAmount: totals.dueAmount,
                 isInitialReservation: bookingRest.isInitialReservation,
                 nidPhysicallyReceived: bookingRest.nidPhysicallyReceived,

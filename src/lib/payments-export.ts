@@ -7,6 +7,7 @@ import {
   formatPaymentLastFourDisplay,
   formatPaymentMethod,
   formatPaymentReferenceDisplay,
+  formatPaymentCategoryLabel,
 } from './payment-method'
 import {
   formatBookingDateFilterLabel,
@@ -22,6 +23,7 @@ export type PaymentExportRecord = {
   amount: number
   method: string
   paymentType: string
+  categoryLabel?: string | null
   settlementSource?: string | null
   reference?: string | null
   accountLastFour?: string | null
@@ -66,7 +68,7 @@ function mapPaymentRow(payment: PaymentExportRecord): Record<string, string> {
   return {
     Date: format(at, 'dd MMM yyyy'),
     Time: format(at, 'HH:mm'),
-    Type: payment.paymentType,
+    Type: formatPaymentCategoryLabel(payment.paymentType, payment.categoryLabel),
     Method: formatPaymentMethod(payment.method),
     Amount: formatBdtForPdf(payment.amount),
     Reference: formatPaymentReferenceDisplay(payment.method, payment.reference),

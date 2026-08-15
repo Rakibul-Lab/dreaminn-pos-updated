@@ -75,6 +75,7 @@ export interface InvoicePrintData {
     amount: number
     method: string
     paymentType: string
+    categoryLabel?: string | null
     createdAt: string
     notes?: string | null
   }>
@@ -356,6 +357,7 @@ export function InvoicePrintView({
         payment.id,
         {
           paymentType: payment.paymentType,
+          categoryLabel: payment.categoryLabel,
           amount: payment.amount,
           notes: payment.notes,
           createdAt: payment.createdAt,
@@ -475,7 +477,7 @@ export function InvoicePrintView({
             <th className="invoice-charge-date py-2 pr-1 font-semibold">Date</th>
             <th className="invoice-charge-category py-2 pr-1 font-semibold">Category</th>
             <th className="invoice-charge-num py-2 pr-1 font-semibold text-right">
-              Room Rent
+              Rental charge
             </th>
             <th className="invoice-charge-discount py-2 px-1 font-semibold text-right">
               {discountColumnHeading}

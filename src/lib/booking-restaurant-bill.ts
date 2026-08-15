@@ -79,7 +79,7 @@ export async function createBookingRestaurantBill(
     throw new Error('Bill number is required')
   }
 
-  const paymentMethod = parsePaymentMethod(input.paymentMethod, 'CASH')
+  const paymentMethod = parsePaymentMethod(input.paymentMethod, 'NONE')
 
   const inclusiveAmount = Math.max(0, Number(input.amount) || 0)
   if (inclusiveAmount <= 0) {

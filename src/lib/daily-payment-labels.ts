@@ -53,6 +53,7 @@ export type PaymentLabelInput = {
   amount: number
   method: string
   paymentType: string
+  categoryLabel?: string | null
   notes?: string | null
   reference?: string | null
   settlementSource?: string | null
@@ -121,9 +122,13 @@ export function resolvePaymentSourceLabel(payment: PaymentLabelInput): string {
       case 'INITIAL':
         label = `Initial payment${roomSuffix}`
         break
-      case 'FINAL':
-        label = `Final payment${roomSuffix}`
+      case 'FINAL': {
+        // Check-out splits the settlement across the folio charges it clears, so name
+        // the charge to keep the day report rows apart.
+        const settled = payment.categoryLabel?.trim()
+        label = `Final payment${settled ? ` · ${settled}` : ''}${roomSuffix}`
         break
+      }
       case 'EXTRA_CHARGES':
         label = `Extra charges${roomSuffix}`
         break

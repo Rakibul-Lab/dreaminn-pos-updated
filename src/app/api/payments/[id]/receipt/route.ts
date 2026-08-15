@@ -7,7 +7,7 @@ import { resolveBookingRegistrationNumber } from '@/lib/booking-registration';
 import { sumBookingNetPaid, computeBookingRoomDue, resolveBookingDisplayDue } from '@/lib/booking-totals';
 import {
   formatPaymentMethod,
-  formatPaymentTypeLabel,
+  formatPaymentCategoryLabel,
   formatPaymentAccountDetail,
 } from '@/lib/payment-method';
 import { formatPaymentSlipNumber } from '@/lib/booking-payment-slip';
@@ -75,7 +75,14 @@ export async function GET(
     let balanceDue: number | null = null;
     let hasAccountSummary = false;
 
-    if (booking) {
+    // Only the slip that settles the stay at check-out carries the account summary.
+    // Every other slip — an advance, a single folio charge, a refund, or a check-out row
+    // raised against one named charge — covers a single amount, so the stay balance
+    // belongs on the invoice rather than on the slip.
+    const isCheckoutSettlementSlip =
+      payment.paymentType === 'FINAL' && !payment.categoryLabel?.trim();
+
+    if (booking && isCheckoutSettlementSlip) {
       hasAccountSummary = true;
       const roomTotals = computeBookingRoomDue(booking, booking.payments);
       const latestInvoice = booking.invoices[0] ?? null;
@@ -98,7 +105,10 @@ export async function GET(
       method: payment.method,
       methodLabel: formatPaymentMethod(payment.method),
       paymentType: payment.paymentType,
-      paymentTypeLabel: formatPaymentTypeLabel(payment.paymentType),
+      paymentTypeLabel: formatPaymentCategoryLabel(
+        payment.paymentType,
+        payment.categoryLabel
+      ),
       reference: payment.reference,
       accountDetail: formatPaymentAccountDetail(payment.method, payment.accountLastFour),
       notes: payment.notes,

@@ -47,7 +47,7 @@ import { formatListBookingCheckIn, formatListBookingCheckOut } from '@/lib/hotel
 import { useHotelTimes } from '@/hooks/use-hotel-times';
 import { formatConfirmationNumber } from '@/lib/confirmation-number';
 import { formatInvoiceNumberDisplay } from '@/lib/invoice-number';
-import { formatPaymentMethod, formatPaymentTypeLabel } from '@/lib/payment-method';
+import { formatPaymentMethod, formatPaymentCategoryLabel } from '@/lib/payment-method';
 import { downloadGuestHistoryPdf } from '@/lib/guest-history-export';
 import { BookingPaymentSlipButton } from './BookingPaymentSlipButton';
 import { toast } from 'sonner';
@@ -93,6 +93,7 @@ type HistoryStay = {
     amount: number;
     method: string;
     paymentType: string;
+    categoryLabel?: string | null;
     reference?: string | null;
     notes?: string | null;
     createdAt: string;
@@ -121,8 +122,8 @@ type GuestHistoryPayload = {
 
 type HistoryDateFilter = 'all' | 'custom';
 
-function formatPaymentType(type: string): string {
-  return formatPaymentTypeLabel(type);
+function formatPaymentType(type: string, categoryLabel?: string | null) {
+  return formatPaymentCategoryLabel(type, categoryLabel);
 }
 
 interface GuestHistoryDialogProps {
@@ -591,7 +592,7 @@ export function GuestHistoryDialog({
                                               {format(new Date(p.createdAt), 'dd/MM/yyyy HH:mm')}
                                             </td>
                                             <td className="py-2 px-2 capitalize">
-                                              {formatPaymentType(p.paymentType)}
+                                              {formatPaymentType(p.paymentType, p.categoryLabel)}
                                             </td>
                                             <td className="py-2 px-2">
                                               {formatPaymentMethod(p.method)}

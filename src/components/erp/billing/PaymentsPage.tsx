@@ -8,7 +8,7 @@ import { useToast } from '@/hooks/use-toast'
 import { format } from 'date-fns'
 import {
   CreditCard, Plus, Filter, RefreshCw, Wallet, TrendingUp, Calendar, CalendarRange, FileDown, Loader2, Landmark, AlertCircle, Search,
-  Sparkles, Wrench, CircleEllipsis, Receipt,
+  Receipt, BedDouble, Tags, Trash2,
 } from 'lucide-react'
 import {
   BOOKING_DATE_PRESET_OPTIONS,
@@ -24,9 +24,12 @@ import {
   formatPaymentLastFourDisplay,
   formatPaymentMethod,
   formatPaymentReferenceDisplay,
-  formatPaymentTypeLabel,
+  formatPaymentCategoryLabel,
   isValidPaymentAccountLastFour,
   MANUAL_RECORD_PAYMENT_TYPE_OPTIONS,
+  PAYMENT_CATEGORY_OPTION_PREFIX,
+  parseCustomPaymentTypeValue,
+  PAYMENT_METHOD_OPTIONS,
   PAYMENT_METHOD_OPTIONS_WITH_PAYMENT,
   paymentRequiresLastFour,
   paymentRequiresReference,
@@ -88,6 +91,18 @@ interface Payment {
   } | null
   receiver: { id: string; name: string; role?: string }
   settlementSource?: string | null
+  recordType?: 'payment' | 'room_charge'
+  chargeStatus?: 'SENT_TO_ROOM' | 'PAID'
+  categoryLabel?: string | null
+}
+
+function isRoomChargeRow(payment: Payment) {
+  return payment.recordType === 'room_charge'
+}
+
+interface PaymentCategory {
+  id: string
+  name: string
 }
 
 const paymentTypeColors: Record<string, string> = {
@@ -101,12 +116,6 @@ const paymentTypeColors: Record<string, string> = {
   RESTAURANT: 'bg-purple-50 text-purple-700 border-purple-200',
   REFUND: 'bg-red-50 text-red-700 border-red-200',
 }
-
-const manualPaymentTypeIcons = {
-  EXTRA_CHARGES: Sparkles,
-  DAMAGE_CHARGES: Wrench,
-  OTHERS: CircleEllipsis,
-} as const
 
 export default function PaymentsPage() {
   const { user } = useAuthStore()
@@ -132,19 +141,114 @@ export default function PaymentsPage() {
   const [exporting, setExporting] = useState(false)
   const [showNewPaymentDialog, setShowNewPaymentDialog] = useState(false)
   const [selectedBookingLabel, setSelectedBookingLabel] = useState('')
+  const [selectedBookingStatus, setSelectedBookingStatus] = useState('')
   const [paymentForm, setPaymentForm] = useState({
     paymentType: 'EXTRA_CHARGES',
     bookingId: '',
     orderId: '',
     amount: '',
-    method: 'CASH',
+    method: 'NONE',
     reference: '',
     accountLastFour: '',
     notes: '',
   })
 
+  const [showPaymentTypesDialog, setShowPaymentTypesDialog] = useState(false)
+  const [newPaymentTypeName, setNewPaymentTypeName] = useState('')
+  // Set when opened from the record modal, so a newly added type gets selected there.
+  const [selectAddedPaymentType, setSelectAddedPaymentType] = useState(false)
+
   const showFormReference = paymentRequiresReference(paymentForm.method)
   const showFormLastFour = paymentRequiresLastFour(paymentForm.method)
+
+  const { data: paymentCategoriesData } = useQuery({
+    queryKey: ['payment-categories'],
+    queryFn: () =>
+      api.get<{ success: boolean; data: PaymentCategory[] }>('/payment-categories'),
+    enabled: canRecordPayment,
+  })
+  const paymentCategories = paymentCategoriesData?.data || []
+
+  const selectedPaymentTypePayload = useMemo(() => {
+    const customId = parseCustomPaymentTypeValue(paymentForm.paymentType)
+    return customId
+      ? { paymentCategoryId: customId }
+      : { paymentType: paymentForm.paymentType }
+  }, [paymentForm.paymentType])
+
+  const openPaymentTypesDialog = (selectAfterAdd: boolean) => {
+    setNewPaymentTypeName('')
+    setSelectAddedPaymentType(selectAfterAdd)
+    setShowPaymentTypesDialog(true)
+  }
+
+  const removePaymentTypeMutation = useMutation({
+    mutationFn: async (categoryId: string) =>
+      api.delete<{ success?: boolean; message?: string; error?: string }>(
+        `/payment-categories/${categoryId}`
+      ),
+    onSuccess: (res, categoryId) => {
+      if (!res?.success) {
+        toast({
+          title: 'Error',
+          description: res?.error || res?.message || 'Failed to remove payment type',
+          variant: 'destructive',
+        })
+        return
+      }
+      queryClient.invalidateQueries({ queryKey: ['payment-categories'] })
+      setPaymentForm((f) =>
+        parseCustomPaymentTypeValue(f.paymentType) === categoryId
+          ? { ...f, paymentType: 'EXTRA_CHARGES' }
+          : f
+      )
+      toast({ title: 'Payment type removed' })
+    },
+    onError: (err: Error) => {
+      toast({
+        title: 'Error',
+        description: err.message || 'Failed to remove payment type',
+        variant: 'destructive',
+      })
+    },
+  })
+
+  const addPaymentTypeMutation = useMutation({
+    mutationFn: async () =>
+      api.post<{
+        success?: boolean
+        message?: string
+        error?: string
+        data?: PaymentCategory
+      }>('/payment-categories', { name: newPaymentTypeName.trim() }),
+    onSuccess: (res) => {
+      if (!res?.success || !res.data) {
+        toast({
+          title: 'Error',
+          description: res?.error || res?.message || 'Failed to add payment type',
+          variant: 'destructive',
+        })
+        return
+      }
+      const created = res.data
+      queryClient.invalidateQueries({ queryKey: ['payment-categories'] })
+      if (selectAddedPaymentType) {
+        setPaymentForm((f) => ({
+          ...f,
+          paymentType: `${PAYMENT_CATEGORY_OPTION_PREFIX}${created.id}`,
+        }))
+      }
+      setNewPaymentTypeName('')
+      toast({ title: 'Payment type added', description: `"${created.name}" is now selectable` })
+    },
+    onError: (err: Error) => {
+      toast({
+        title: 'Error',
+        description: err.message || 'Failed to add payment type',
+        variant: 'destructive',
+      })
+    },
+  })
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -158,6 +262,7 @@ export default function PaymentsPage() {
     setPaymentForm((f) => ({
       ...f,
       amount: '',
+      method: 'NONE',
       reference: '',
       accountLastFour: '',
       notes: '',
@@ -166,12 +271,13 @@ export default function PaymentsPage() {
 
   const resetPaymentForm = () => {
     setSelectedBookingLabel('')
+    setSelectedBookingStatus('')
     setPaymentForm({
       paymentType: 'EXTRA_CHARGES',
       bookingId: '',
       orderId: '',
       amount: '',
-      method: 'CASH',
+      method: 'NONE',
       reference: '',
       accountLastFour: '',
       notes: '',
@@ -190,6 +296,9 @@ export default function PaymentsPage() {
   const validatePaymentForm = (): string | null => {
     if (!paymentForm.amount || parseFloat(paymentForm.amount) <= 0) {
       return 'Enter a valid payment amount.'
+    }
+    if (paymentForm.method === 'NONE') {
+      return 'Select a payment method before recording the payment.'
     }
     if (showFormReference && !paymentForm.reference.trim()) {
       return 'Payment reference is required for this payment method.'
@@ -303,7 +412,7 @@ export default function PaymentsPage() {
       const payload: Record<string, unknown> = {
         amount: parseFloat(paymentForm.amount),
         method: paymentForm.method,
-        paymentType: paymentForm.paymentType,
+        ...selectedPaymentTypePayload,
         reference: showFormReference ? paymentForm.reference.trim() : null,
         accountLastFour: showFormLastFour ? paymentForm.accountLastFour.trim() : null,
         notes: paymentForm.notes || null,
@@ -337,6 +446,42 @@ export default function PaymentsPage() {
     },
   })
 
+  const sendToRoomMutation = useMutation({
+    mutationFn: async () =>
+      api.post<{ success?: boolean; message?: string; error?: string }>('/payments', {
+        amount: parseFloat(paymentForm.amount),
+        ...selectedPaymentTypePayload,
+        bookingId: paymentForm.bookingId,
+        notes: paymentForm.notes || null,
+        sendToRoom: true,
+      }),
+    onSuccess: (res) => {
+      if (!res?.success) {
+        toast({
+          title: 'Error',
+          description: res?.error || res?.message || 'Failed to send charge to room',
+          variant: 'destructive',
+        })
+        return
+      }
+      queryClient.invalidateQueries({ queryKey: ['payments'] })
+      queryClient.invalidateQueries({ queryKey: ['bookings'] })
+      queryClient.invalidateQueries({ queryKey: ['invoices'] })
+      toast({
+        title: 'Sent to Room',
+        description: res.message || 'Charge added to the room folio',
+      })
+      resetPaymentEntryFields()
+    },
+    onError: (err: Error) => {
+      toast({
+        title: 'Error',
+        description: err.message || 'Failed to send charge to room',
+        variant: 'destructive',
+      })
+    },
+  })
+
   const payments = paymentsData?.data || []
   const totalPages = Math.max(paymentsData?.meta?.totalPages || 1, 1)
   const filteredSum = paymentsData?.meta?.sumAmount ?? 0
@@ -356,12 +501,17 @@ export default function PaymentsPage() {
         dateTo: searchQuery ? undefined : dateRange.dateTo,
         search: searchQuery || undefined,
       })
-      const res = await api.get<{ success: boolean; data: PaymentExportRecord[] }>(url)
-      if (!res?.success || !res.data?.length) {
+      const res = await api.get<{
+        success: boolean
+        data: (PaymentExportRecord & { recordType?: string })[]
+      }>(url)
+      // Folio charges sent to a room are not collected money, so they stay out of the export.
+      const exportRows = (res?.data || []).filter((row) => row.recordType !== 'room_charge')
+      if (!res?.success || !exportRows.length) {
         toast({ title: 'No payments', description: 'No payments to export for the selected filters', variant: 'destructive' })
         return
       }
-      await downloadPaymentsPdf(res.data, {
+      await downloadPaymentsPdf(exportRows, {
         exportedAt: new Date(),
         generatedBy: user ? { name: user.name, email: user.email, role: user.role } : undefined,
         datePreset,
@@ -413,13 +563,19 @@ export default function PaymentsPage() {
             Export PDF
           </Button>
           {canRecordPayment && (
-            <Button
-              onClick={() => setShowNewPaymentDialog(true)}
-              className="bg-amber-600 hover:bg-amber-700 text-white"
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Record Payment
-            </Button>
+            <>
+              <Button variant="outline" onClick={() => openPaymentTypesDialog(false)}>
+                <Tags className="h-4 w-4 mr-2" />
+                Payment Types
+              </Button>
+              <Button
+                onClick={() => setShowNewPaymentDialog(true)}
+                className="bg-amber-600 hover:bg-amber-700 text-white"
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Record Payment
+              </Button>
+            </>
           )}
         </div>
       </div>
@@ -608,6 +764,14 @@ export default function PaymentsPage() {
                   <SelectItem value="EXTRA_CHARGES">Extra Charges</SelectItem>
                   <SelectItem value="DAMAGE_CHARGES">Damage Charges</SelectItem>
                   <SelectItem value="OTHERS">Others</SelectItem>
+                  {paymentCategories.map((category) => (
+                    <SelectItem
+                      key={category.id}
+                      value={`${PAYMENT_CATEGORY_OPTION_PREFIX}${category.id}`}
+                    >
+                      {category.name}
+                    </SelectItem>
+                  ))}
                   <SelectItem value="RESTAURANT">Restaurant</SelectItem>
                 </SelectContent>
               </Select>
@@ -654,6 +818,7 @@ export default function PaymentsPage() {
                 <TableRow>
                   <TableHead>Date</TableHead>
                   <TableHead>{isRestaurant ? 'Source' : 'Type'}</TableHead>
+                  {!isRestaurant ? <TableHead>Status</TableHead> : null}
                   <TableHead>Method</TableHead>
                   <TableHead className="text-right">Amount</TableHead>
                   {!isRestaurant ? <TableHead>Slip No.</TableHead> : null}
@@ -669,20 +834,23 @@ export default function PaymentsPage() {
                 {isLoading ? (
                   Array.from({ length: 5 }).map((_, i) => (
                     <TableRow key={i}>
-                      {Array.from({ length: isRestaurant ? 9 : 11 }).map((_, j) => (
+                      {Array.from({ length: isRestaurant ? 9 : 12 }).map((_, j) => (
                         <TableCell key={j}><Skeleton className="h-4 w-20" /></TableCell>
                       ))}
                     </TableRow>
                   ))
                 ) : payments.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={isRestaurant ? 9 : 11} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={isRestaurant ? 9 : 12} className="text-center py-8 text-muted-foreground">
                       No payments found
                     </TableCell>
                   </TableRow>
                 ) : (
                   payments.map((payment) => (
-                    <TableRow key={payment.id} className="hover:bg-muted">
+                    <TableRow
+                      key={`${payment.recordType ?? 'payment'}-${payment.id}`}
+                      className="hover:bg-muted"
+                    >
                       <TableCell className="text-sm">
                         {format(new Date(payment.createdAt), 'MMM dd, yyyy HH:mm')}
                       </TableCell>
@@ -700,26 +868,61 @@ export default function PaymentsPage() {
                           </Badge>
                         ) : (
                           <Badge variant="outline" className={paymentTypeColors[payment.paymentType] || ''}>
-                            {formatPaymentTypeLabel(payment.paymentType)}
+                            {formatPaymentCategoryLabel(payment.paymentType, payment.categoryLabel)}
                           </Badge>
                         )}
                       </TableCell>
-                      <TableCell className="text-sm">{formatPaymentMethod(payment.method)}</TableCell>
-                      <TableCell className="text-right font-semibold text-emerald-600">
+                      {!isRestaurant ? (
+                        <TableCell>
+                          {isRoomChargeRow(payment) ? (
+                            <Badge
+                              variant="outline"
+                              className={
+                                payment.chargeStatus === 'PAID'
+                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                  : 'bg-amber-50 text-amber-700 border-amber-200'
+                              }
+                            >
+                              {payment.chargeStatus === 'PAID' ? 'Paid' : 'Sent to room'}
+                            </Badge>
+                          ) : (
+                            <Badge
+                              variant="outline"
+                              className="bg-emerald-50 text-emerald-700 border-emerald-200"
+                            >
+                              Paid
+                            </Badge>
+                          )}
+                        </TableCell>
+                      ) : null}
+                      <TableCell className="text-sm">
+                        {isRoomChargeRow(payment) ? '—' : formatPaymentMethod(payment.method)}
+                      </TableCell>
+                      <TableCell
+                        className={`text-right font-semibold ${
+                          isRoomChargeRow(payment) && payment.chargeStatus !== 'PAID'
+                            ? 'text-amber-600'
+                            : 'text-emerald-600'
+                        }`}
+                      >
                         ৳{payment.amount.toLocaleString()}
                       </TableCell>
                       {!isRestaurant ? (
                         <TableCell className="font-mono text-[10px] max-w-[120px] truncate">
-                          {payment.paymentType !== 'RESTAURANT'
-                            ? formatPaymentSlipNumber(payment)
-                            : '—'}
+                          {isRoomChargeRow(payment) || payment.paymentType === 'RESTAURANT'
+                            ? '—'
+                            : formatPaymentSlipNumber(payment)}
                         </TableCell>
                       ) : null}
                       <TableCell className="font-mono text-xs max-w-[140px] truncate">
-                        {formatPaymentReferenceDisplay(payment.method, payment.reference)}
+                        {isRoomChargeRow(payment)
+                          ? '—'
+                          : formatPaymentReferenceDisplay(payment.method, payment.reference)}
                       </TableCell>
                       <TableCell className="font-mono text-xs">
-                        {formatPaymentLastFourDisplay(payment.method, payment.accountLastFour)}
+                        {isRoomChargeRow(payment)
+                          ? '—'
+                          : formatPaymentLastFourDisplay(payment.method, payment.accountLastFour)}
                       </TableCell>
                       <TableCell className="text-sm max-w-[160px] truncate">
                         {payment.notes || '—'}
@@ -740,7 +943,7 @@ export default function PaymentsPage() {
                       <TableCell className="text-sm">{payment.receiver?.name || 'N/A'}</TableCell>
                       {!isRestaurant ? (
                         <TableCell className="text-right">
-                          {payment.paymentType !== 'RESTAURANT' ? (
+                          {!isRoomChargeRow(payment) && payment.paymentType !== 'RESTAURANT' ? (
                             <BookingPaymentSlipButton paymentId={payment.id} iconOnly variant="ghost" />
                           ) : (
                             <span className="text-muted-foreground text-xs">—</span>
@@ -864,59 +1067,46 @@ export default function PaymentsPage() {
           </div>
 
           <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-4 py-3 sm:space-y-4 sm:px-5 sm:py-4">
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               <Label className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                 Payment type
               </Label>
-              <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
-                {MANUAL_RECORD_PAYMENT_TYPE_OPTIONS.map((option) => {
-                  const Icon = manualPaymentTypeIcons[option.value]
-                  const selected = paymentForm.paymentType === option.value
-                  return (
-                    <button
-                      key={option.value}
-                      type="button"
-                      onClick={() => setPaymentForm((f) => ({ ...f, paymentType: option.value }))}
-                      className={cn(
-                        'rounded-lg border p-2 text-center transition-all sm:rounded-xl sm:p-2.5 sm:text-left',
-                        selected
-                          ? 'border-emerald-500 bg-emerald-50/80 shadow-sm ring-1 ring-emerald-500/30'
-                          : 'border-border bg-card hover:border-emerald-200 hover:bg-muted/40'
-                      )}
-                    >
-                      <div className="flex flex-col items-center gap-1.5 sm:flex-row sm:items-start sm:gap-2">
-                        <div
-                          className={cn(
-                            'flex h-7 w-7 shrink-0 items-center justify-center rounded-md sm:h-8 sm:w-8 sm:rounded-lg',
-                            selected ? 'bg-emerald-600 text-white' : 'bg-muted text-muted-foreground'
-                          )}
-                        >
-                          <Icon className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                        </div>
-                        <div className="min-w-0">
-                          <p
-                            className={cn(
-                              'text-[11px] font-semibold leading-tight sm:text-sm',
-                              selected && 'text-emerald-900'
-                            )}
-                          >
-                            <span className="sm:hidden">
-                              {option.value === 'EXTRA_CHARGES'
-                                ? 'Extra'
-                                : option.value === 'DAMAGE_CHARGES'
-                                  ? 'Damage'
-                                  : 'Other'}
-                            </span>
-                            <span className="hidden sm:inline">{option.label}</span>
-                          </p>
-                          <p className="mt-0.5 hidden text-xs leading-snug text-muted-foreground sm:block">
-                            {option.description}
-                          </p>
-                        </div>
-                      </div>
-                    </button>
-                  )
-                })}
+              <div className="flex items-center gap-2">
+                <Select
+                  value={paymentForm.paymentType}
+                  onValueChange={(value) =>
+                    setPaymentForm((f) => ({ ...f, paymentType: value }))
+                  }
+                >
+                  <SelectTrigger className="h-10 flex-1">
+                    <SelectValue placeholder="Select payment type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {MANUAL_RECORD_PAYMENT_TYPE_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                    {paymentCategories.map((category) => (
+                      <SelectItem
+                        key={category.id}
+                        value={`${PAYMENT_CATEGORY_OPTION_PREFIX}${category.id}`}
+                      >
+                        {category.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-10 shrink-0 gap-1.5"
+                  onClick={() => openPaymentTypesDialog(true)}
+                >
+                  <Plus className="h-4 w-4" />
+                  <span className="hidden sm:inline">Add payment type</span>
+                  <span className="sm:hidden">Add</span>
+                </Button>
               </div>
             </div>
 
@@ -933,6 +1123,7 @@ export default function PaymentsPage() {
                   selectedLabel={selectedBookingLabel}
                   onSelect={(booking: BookingPaymentSearchResult) => {
                     setPaymentForm((f) => ({ ...f, bookingId: booking.id }))
+                    setSelectedBookingStatus(booking.status)
                     setSelectedBookingLabel(
                       `${booking.customer?.name ?? 'Guest'} · Room ${booking.room?.roomNumber ?? '—'}`
                     )
@@ -940,13 +1131,21 @@ export default function PaymentsPage() {
                   onClear={() => {
                     setPaymentForm((f) => ({ ...f, bookingId: '' }))
                     setSelectedBookingLabel('')
+                    setSelectedBookingStatus('')
                   }}
                 />
                 {selectedBookingLabel ? (
-                  <p className="truncate text-xs text-muted-foreground">
-                    Recording for{' '}
-                    <span className="font-medium text-foreground">{selectedBookingLabel}</span>
-                  </p>
+                  <>
+                    <p className="truncate text-xs text-muted-foreground">
+                      Recording for{' '}
+                      <span className="font-medium text-foreground">{selectedBookingLabel}</span>
+                    </p>
+                    {selectedBookingStatus !== 'CHECKED_IN' && (
+                      <p className="text-xs font-medium text-amber-700">
+                        Send to room is available only for checked-in guests.
+                      </p>
+                    )}
+                  </>
                 ) : (
                   <p className="text-xs text-muted-foreground">
                     Optional: Search and select a guest stay to link this payment to a booking folio.
@@ -979,7 +1178,7 @@ export default function PaymentsPage() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {PAYMENT_METHOD_OPTIONS_WITH_PAYMENT.map((opt) => (
+                    {PAYMENT_METHOD_OPTIONS.map((opt) => (
                       <SelectItem key={opt.value} value={opt.value}>
                         {opt.label}
                       </SelectItem>
@@ -1042,35 +1241,161 @@ export default function PaymentsPage() {
           </div>
 
           <DialogFooter className="shrink-0 gap-2 border-t bg-muted/20 px-4 py-3 sm:flex-row sm:justify-between sm:px-5 sm:py-3.5">
-            <Button variant="ghost" onClick={() => setShowNewPaymentDialog(false)}>
-              Cancel
-            </Button>
             <Button
-              className="min-w-[9rem] bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm"
-              disabled={
-                !paymentForm.amount ||
-                parseFloat(paymentForm.amount) <= 0 ||
-                createPaymentMutation.isPending ||
-                (showFormReference && !paymentForm.reference.trim()) ||
-                (showFormLastFour && !isValidPaymentAccountLastFour(paymentForm.accountLastFour))
-              }
+              variant="ghost"
               onClick={() => {
-                const err = validatePaymentForm()
-                if (err) {
-                  toast({ title: 'Validation', description: err, variant: 'destructive' })
-                  return
-                }
-                createPaymentMutation.mutate()
+                resetPaymentForm()
+                setShowNewPaymentDialog(false)
               }}
             >
-              {createPaymentMutation.isPending ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Recording…
-                </>
-              ) : (
-                'Record Payment'
+              Cancel
+            </Button>
+            <div className="flex flex-col-reverse gap-2 sm:flex-row">
+              <Button
+                variant="outline"
+                className="min-w-[9rem] border-sky-300 text-sky-700 hover:bg-sky-50 hover:text-sky-800"
+                disabled={
+                  !paymentForm.bookingId ||
+                  selectedBookingStatus !== 'CHECKED_IN' ||
+                  !paymentForm.amount ||
+                  parseFloat(paymentForm.amount) <= 0 ||
+                  createPaymentMutation.isPending ||
+                  sendToRoomMutation.isPending
+                }
+                onClick={() => sendToRoomMutation.mutate()}
+              >
+                {sendToRoomMutation.isPending ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Sending…
+                  </>
+                ) : (
+                  <>
+                    <BedDouble className="mr-2 h-4 w-4" />
+                    Send to Room
+                  </>
+                )}
+              </Button>
+              <Button
+                className="min-w-[9rem] bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm"
+                disabled={
+                  !paymentForm.amount ||
+                  parseFloat(paymentForm.amount) <= 0 ||
+                  paymentForm.method === 'NONE' ||
+                  createPaymentMutation.isPending ||
+                  sendToRoomMutation.isPending ||
+                  (showFormReference && !paymentForm.reference.trim()) ||
+                  (showFormLastFour && !isValidPaymentAccountLastFour(paymentForm.accountLastFour))
+                }
+                onClick={() => {
+                  const err = validatePaymentForm()
+                  if (err) {
+                    toast({ title: 'Validation', description: err, variant: 'destructive' })
+                    return
+                  }
+                  createPaymentMutation.mutate()
+                }}
+              >
+                {createPaymentMutation.isPending ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Recording…
+                  </>
+                ) : (
+                  'Record Payment'
+                )}
+              </Button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showPaymentTypesDialog} onOpenChange={setShowPaymentTypesDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Payment types</DialogTitle>
+            <DialogDescription>
+              Types you add here appear in the Record New Payment dropdown.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label className="text-sm">Add a type</Label>
+              <div className="flex items-center gap-2">
+                <Input
+                  autoFocus
+                  maxLength={40}
+                  placeholder="e.g. Laundry"
+                  value={newPaymentTypeName}
+                  onChange={(e) => setNewPaymentTypeName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (
+                      e.key === 'Enter' &&
+                      newPaymentTypeName.trim() &&
+                      !addPaymentTypeMutation.isPending
+                    ) {
+                      e.preventDefault()
+                      addPaymentTypeMutation.mutate()
+                    }
+                  }}
+                />
+                <Button
+                  className="shrink-0 bg-emerald-600 text-white hover:bg-emerald-700"
+                  disabled={!newPaymentTypeName.trim() || addPaymentTypeMutation.isPending}
+                  onClick={() => addPaymentTypeMutation.mutate()}
+                >
+                  {addPaymentTypeMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Plus className="h-4 w-4" />
+                  )}
+                  <span className="ml-1.5">Add</span>
+                </Button>
+              </div>
+            </div>
+
+            <div className="max-h-64 space-y-1 overflow-y-auto rounded-lg border p-1.5">
+              {MANUAL_RECORD_PAYMENT_TYPE_OPTIONS.map((option) => (
+                <div
+                  key={option.value}
+                  className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5"
+                >
+                  <span className="truncate text-sm">{option.label}</span>
+                  <Badge variant="outline" className="shrink-0 text-[10px]">
+                    Built-in
+                  </Badge>
+                </div>
+              ))}
+              {paymentCategories.map((category) => (
+                <div
+                  key={category.id}
+                  className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5 hover:bg-muted/60"
+                >
+                  <span className="truncate text-sm">{category.name}</span>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 shrink-0 text-muted-foreground hover:text-red-600"
+                    title="Remove payment type"
+                    disabled={removePaymentTypeMutation.isPending}
+                    onClick={() => removePaymentTypeMutation.mutate(category.id)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              ))}
+              {paymentCategories.length === 0 && (
+                <p className="px-2 py-1.5 text-xs text-muted-foreground">
+                  No custom types yet.
+                </p>
               )}
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowPaymentTypesDialog(false)}>
+              Done
             </Button>
           </DialogFooter>
         </DialogContent>

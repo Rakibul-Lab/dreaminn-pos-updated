@@ -7,6 +7,7 @@ import {
   decomposeGrossAfterDiscount,
   INVOICE_SERVICE_CHARGE_PERCENT,
 } from '@/lib/invoice-display'
+import { filterGuestFolioRestaurantOrders } from '@/lib/restaurant-order-billing'
 
 export const DEFAULT_VAT_PERCENT = 15
 
@@ -222,6 +223,55 @@ export function applyBookingChargeToStoredDue(storedDue: number, chargeAmount: n
 }
 
 export type BookingPaymentRow = { amount: number; paymentType: string }
+
+export type BookingChargeRow = { chargeType: string; amount: number; quantity: number }
+
+/** Charge types recorded from Payments → Record New Payment (money taken for a folio extra). */
+const MANUAL_CHARGE_PAYMENT_TYPES = new Set(['EXTRA_CHARGES', 'DAMAGE_CHARGES', 'OTHERS'])
+
+/**
+ * Extras posted on a stay, from both places they can originate:
+ * - `RoomCharge` rows (Send to Room, beverage, laundry, late checkout, damage)
+ * - manual charge payments recorded on the Payments page, which post an invoice
+ *   line instead of a `RoomCharge`
+ *
+ * The two sources never describe the same charge, so they simply add up.
+ */
+export function sumBookingPostedExtras(
+  charges: BookingChargeRow[] = [],
+  payments: BookingPaymentRow[] = []
+): number {
+  const fromCharges = charges
+    .filter((charge) => charge.chargeType !== 'ROOM_RATE')
+    .reduce((sum, charge) => sum + charge.amount * (charge.quantity || 1), 0)
+
+  const fromManualPayments = payments
+    .filter((payment) => MANUAL_CHARGE_PAYMENT_TYPES.has(payment.paymentType))
+    .reduce((sum, payment) => sum + Math.max(0, payment.amount), 0)
+
+  return fromCharges + fromManualPayments
+}
+
+export type BookingFolioRestaurantRow = {
+  status?: string
+  billingDisposition?: string | null
+  companyLedgerBill?: { id: string } | null
+  totalAmount: number
+}
+
+/**
+ * Restaurant bills sitting on the room folio. They raise the stay due the moment
+ * they are posted, so they belong in the stay total as well. Bills settled at the
+ * counter or billed to a company ledger never reach the guest folio.
+ */
+export function sumBookingFolioRestaurant(
+  orders: BookingFolioRestaurantRow[] = []
+): number {
+  return filterGuestFolioRestaurantOrders(orders).reduce(
+    (sum, order) => sum + order.totalAmount,
+    0
+  )
+}
 
 /** Net amount collected on a booking (payments minus refunds). */
 export function sumBookingNetPaid(payments: BookingPaymentRow[]): number {

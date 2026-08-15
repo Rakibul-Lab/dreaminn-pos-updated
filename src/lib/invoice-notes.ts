@@ -1,7 +1,20 @@
 const GENERIC_PAYMENT_NOTES = new Set([
   'Advance payment at booking creation',
   'Final payment at check-out',
+  'Payment at check-out',
 ])
+
+/**
+ * Notes the settlement flow writes for its own bookkeeping, such as
+ * "laundry settled at check-out". The charge they name is already an invoice line,
+ * so only a note the user actually typed belongs in the notes section.
+ */
+const GENERIC_PAYMENT_NOTE_PATTERNS = [/\bsettled at check-out\.?$/i]
+
+function isGenericPaymentNote(note: string): boolean {
+  if (GENERIC_PAYMENT_NOTES.has(note)) return true
+  return GENERIC_PAYMENT_NOTE_PATTERNS.some((pattern) => pattern.test(note))
+}
 
 /** System-generated booking note lines that must never appear on invoices. */
 const SYSTEM_NOTE_PATTERNS = [
@@ -49,7 +62,7 @@ export function collectInvoiceNotes(input: InvoiceNotesInput): string[] {
 
   for (const note of input.paymentNotes ?? []) {
     const trimmed = note?.trim()
-    if (!trimmed || GENERIC_PAYMENT_NOTES.has(trimmed)) continue
+    if (!trimmed || isGenericPaymentNote(trimmed)) continue
     add(trimmed)
   }
 

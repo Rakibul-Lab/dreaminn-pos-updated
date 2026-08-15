@@ -114,6 +114,7 @@ export async function GET(
                 amount: true,
                 method: true,
                 paymentType: true,
+                categoryLabel: true,
                 createdAt: true,
                 reference: true,
                 accountLastFour: true,
@@ -147,7 +148,10 @@ export async function GET(
       bookingNotes: invoice.booking.notes,
       customerNotes: invoice.booking.customer.notes,
       companyLedgerGuestNotes: invoice.booking.companyLedgerGuest?.notes,
-      paymentNotes: folioPayments.map((payment) => formatManualChargeInvoiceNote(payment)),
+      paymentNotes: [
+        ...folioPayments.map((payment) => formatManualChargeInvoiceNote(payment)),
+        ...invoice.booking.charges.map((charge) => charge.notes),
+      ],
     })
 
     return successResponse({

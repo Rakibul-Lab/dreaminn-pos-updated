@@ -3,7 +3,12 @@ import { db } from '@/lib/db';
 import { requireHotelAccess, requireRole } from '@/lib/auth';
 import { successResponse, errorResponse, notFoundResponse, logActivity } from '@/lib/api-utils';
 import { ensureConfirmationNumber } from '@/lib/confirmation-number.server';
-import { computeBookingRoomDue, resolveBookingDisplayDue } from '@/lib/booking-totals';
+import {
+  computeBookingRoomDue,
+  resolveBookingDisplayDue,
+  sumBookingFolioRestaurant,
+  sumBookingPostedExtras,
+} from '@/lib/booking-totals';
 import { formatFormOfPayment, getAdvancePaymentMethod } from '@/lib/payment-method';
 import { RoleType } from '@prisma/client';
 import { resolveBookingCheckInOut } from '@/lib/app-settings';
@@ -48,7 +53,12 @@ export async function GET(
         creator: { select: { id: true, name: true, email: true, phone: true, role: true } },
         charges: true,
         payments: true,
-        restaurantOrders: { include: { items: { include: { menuItem: true } } } },
+        restaurantOrders: {
+          include: {
+            items: { include: { menuItem: true } },
+            companyLedgerBill: { select: { id: true } },
+          },
+        },
         invoices: true,
         idDocuments: { orderBy: { sortOrder: 'asc' } },
         companions: { orderBy: { sortOrder: 'asc' } },
@@ -70,11 +80,15 @@ export async function GET(
       latestInvoice
     );
     const advanceMethod = getAdvancePaymentMethod(booking.payments);
+    const extraChargesTotal = sumBookingPostedExtras(booking.charges, booking.payments);
+    const restaurantChargesTotal = sumBookingFolioRestaurant(booking.restaurantOrders);
     const enriched = {
       ...booking,
       vatPercent: totals.vatPercent,
       vatAmount: totals.vatAmount,
-      totalWithVat: totals.totalWithVat,
+      extraChargesTotal,
+      restaurantChargesTotal,
+      totalWithVat: totals.totalWithVat + extraChargesTotal + restaurantChargesTotal,
       dueAmount,
       formOfPayment: formatFormOfPayment(booking.advancePayment, advanceMethod),
     };

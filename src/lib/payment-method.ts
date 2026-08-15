@@ -151,5 +151,26 @@ export function formatPaymentTypeLabel(type: string): string {
   return PAYMENT_TYPE_LABELS[type] ?? type.replace(/_/g, ' ')
 }
 
+/** User-defined types are stored as OTHERS plus their own label. */
+export function formatPaymentCategoryLabel(
+  type: string,
+  categoryLabel?: string | null
+): string {
+  const custom = categoryLabel?.trim()
+  return custom || formatPaymentTypeLabel(type)
+}
+
+export const PAYMENT_CATEGORY_OPTION_PREFIX = 'custom:'
+
+export function isCustomPaymentTypeValue(value: string): boolean {
+  return value.startsWith(PAYMENT_CATEGORY_OPTION_PREFIX)
+}
+
+export function parseCustomPaymentTypeValue(value: string): string | null {
+  return isCustomPaymentTypeValue(value)
+    ? value.slice(PAYMENT_CATEGORY_OPTION_PREFIX.length) || null
+    : null
+}
+
 /** @deprecated Use formatPaymentAccountDetail */
 export const formatPaymentMethodDetail = formatPaymentAccountDetail

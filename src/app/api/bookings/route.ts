@@ -22,6 +22,7 @@ import {
 import { formatGuestCompany } from '@/lib/reservation-terms';
 import {
   ensureCompanyLedgerGuestFromCustomer,
+  postCompanyLedgerBill,
   resolveCompanyLedgerBooking,
 } from '@/lib/company-ledger-billing';
 import { resolveBookingCheckInOut } from '@/lib/app-settings';
@@ -446,7 +447,7 @@ export async function POST(request: NextRequest) {
       ? Math.max(0, parseFloat(String(discountValue ?? 0)) || 0)
       : 0;
 
-    const { dueAmount } = computeRoomBookingTotals(
+    const { dueAmount, totalWithVat } = computeRoomBookingTotals(
       totalRoomCharge,
       advance,
       {
@@ -562,6 +563,22 @@ export async function POST(request: NextRequest) {
           receivedBy: authResult.id,
           notes: 'Advance payment at booking creation',
         },
+      });
+    }
+
+    // A stay booked against a company ledger reaches the ledger immediately, the same
+    // way a reservation entry does. Checkout re-posts this bill with final amounts.
+    if (resolvedCompanyLedgerId) {
+      await postCompanyLedgerBill(db, {
+        companyLedgerId: resolvedCompanyLedgerId,
+        bookingId: booking.id,
+        invoiceId: null,
+        guestName: booking.customer.name,
+        roomNumber: booking.room.roomNumber,
+        totalAmount: totalWithVat,
+        paidAmount: advance,
+        dueAmount,
+        notes,
       });
     }
 

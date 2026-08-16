@@ -27,7 +27,11 @@ import { ensureCustomerRegistrationNumber, ensureBookingRegistrationNumber } fro
 import { getRoomNightlyTotal } from '@/lib/room-pricing';
 import { getEmailValidationError } from '@/lib/email-validation';
 import { assertRoomAvailableForBooking } from '@/lib/reservation-entry';
-import { resolveCompanyLedgerBooking, ensureCompanyLedgerGuestFromCustomer } from '@/lib/company-ledger-billing';
+import {
+  resolveCompanyLedgerBooking,
+  ensureCompanyLedgerGuestFromCustomer,
+  postCompanyLedgerBill,
+} from '@/lib/company-ledger-billing';
 import { readCurrentBusinessDateString } from '@/lib/business-date';
 import { isArrivalOnOrBeforeBusinessDate } from '@/lib/room-effective-status';
 import { isolateBookingCustomer, reassignBookingPrimaryCustomer } from '@/lib/booking-customer-isolation';
@@ -739,6 +743,50 @@ export async function PUT(
         id,
         (body.companions as CompanionInput[]) ?? []
       );
+    }
+
+    // Attaching a ledger to an existing stay has to reach the ledger straight away,
+    // the way a converted reservation entry does. Re-posting is safe: the bill is
+    // keyed on the booking and checkout later refreshes it with final amounts.
+    if (booking.companyLedgerId) {
+      const forLedger = await db.booking.findUnique({
+        where: { id },
+        include: {
+          payments: true,
+          charges: true,
+          restaurantOrders: {
+            include: { companyLedgerBill: { select: { id: true } } },
+          },
+          invoices: true,
+        },
+      });
+      if (forLedger) {
+        const latestInvoice =
+          forLedger.invoices
+            ?.filter((invoice) => invoice.status !== 'CANCELLED')
+            .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0] ?? null;
+        const roomTotals = computeBookingRoomDue(forLedger, forLedger.payments);
+        const totalAmount =
+          roomTotals.totalWithVat +
+          sumBookingPostedExtras(forLedger.charges, forLedger.payments) +
+          sumBookingFolioRestaurant(forLedger.restaurantOrders);
+        const dueAmount = resolveBookingDisplayDue(
+          forLedger,
+          forLedger.payments,
+          latestInvoice
+        );
+        await postCompanyLedgerBill(db, {
+          companyLedgerId: booking.companyLedgerId,
+          bookingId: id,
+          invoiceId: null,
+          guestName: booking.customer.name,
+          roomNumber: booking.room.roomNumber,
+          totalAmount,
+          paidAmount: Math.max(0, totalAmount - dueAmount),
+          dueAmount,
+          notes: booking.notes,
+        });
+      }
     }
 
     const bookingWithCompanions =

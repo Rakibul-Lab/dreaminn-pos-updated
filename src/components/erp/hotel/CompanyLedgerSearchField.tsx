@@ -61,12 +61,16 @@ export function CompanyLedgerSearchField({
   const [highlightedIndex, setHighlightedIndex] = useState(-1)
 
   const isManualOrLedger = mode === 'manual-or-ledger'
-  const isWalkIn = !isManualOrLedger && !selectedLedgerId
+  const trimmedLabel = selectedLabel.trim()
+  // A booking can carry a plain company name without a ledger link (typed on the
+  // reservation entry). Showing walk-in in that case hides a real company.
+  const hasPlainCompanyName = Boolean(trimmedLabel) && trimmedLabel !== DEFAULT_GUEST_COMPANY
+  const isWalkIn = !isManualOrLedger && !selectedLedgerId && !hasPlainCompanyName
   const closedDisplay = isManualOrLedger
-    ? manualValue.trim() || selectedLabel.trim()
+    ? manualValue.trim() || trimmedLabel
     : isWalkIn
       ? DEFAULT_GUEST_COMPANY
-      : selectedLabel
+      : trimmedLabel
   const searchQuery = inputValue.trim()
 
   useEffect(() => {

@@ -1529,8 +1529,12 @@ export function NewReservationWizard({
     idDocuments.length === 0 &&
     !hasIdActivity
 
-  const validateGuestStep = (options?: { forInitialSave?: boolean }): string | null => {
+  const validateGuestStep = (options?: {
+    forInitialSave?: boolean
+    allowPendingId?: boolean
+  }): string | null => {
     const forInitialSave = options?.forInitialSave === true
+    const allowPendingId = options?.allowPendingId === true
 
     if (isCorporateGuest) {
       const corporateMissing = getCorporateGuestMissingFields(corporateGuestFields())
@@ -1565,6 +1569,7 @@ export function NewReservationWizard({
     }
 
     if (nidPhysicallyReceived) {
+      if (allowPendingId) return null
       const physicalMissing = getPhysicalIdMissingFields({
         idNumber,
         idType,
@@ -1575,6 +1580,8 @@ export function NewReservationWizard({
       }
       return null
     }
+
+    if (allowPendingId) return null
 
     if (!forInitialSave && !hasCompanySelected && idDocuments.length === 0) {
       return 'Upload or scan at least one ID image, or turn on “ID documents physically received”'
@@ -1647,6 +1654,9 @@ export function NewReservationWizard({
       forInitialSave:
         (options.asInitial === true && options.completeInitial !== true) ||
         (isEditMode && isInitialFlow && !options.completeInitial),
+      // Editing stay/billing details of an existing booking must not be blocked by
+      // guest-profile completion rules; those are enforced on check-in instead.
+      allowPendingId: isEditMode && !options.completeInitial && !options.withCheckIn,
     })
     if (guestError) return guestError
 
@@ -1684,6 +1694,7 @@ export function NewReservationWizard({
   }) => {
     const guestError = validateGuestStep({
       forInitialSave: options?.asInitial === true && options?.completeInitial !== true,
+      allowPendingId: isEditMode && !options?.completeInitial && !options?.withCheckIn,
     })
     if (guestError) {
       setStep(1)
@@ -1699,7 +1710,12 @@ export function NewReservationWizard({
   }
 
   const getCurrentStepValidationError = (): string | null => {
-    if (step === 1) return validateGuestStep({ forInitialSave: isInitialFlow })
+    if (step === 1) {
+      return validateGuestStep({
+        forInitialSave: isInitialFlow,
+        allowPendingId: isEditMode && !isInitialFlow,
+      })
+    }
     if (step === 2) return validateStayStep()
     if (step === 3) return validatePaymentStep()
     return null

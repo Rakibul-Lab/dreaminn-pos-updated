@@ -42,28 +42,28 @@ export function getPhysicalIdMissingFields(guest: {
 
 /** Fields required for one corporate guest person (primary or companion). */
 export function getCorporatePersonMissingFields(person: {
-  name: string
-  company: string
-  phone: string
-  designation: string
-  address: string
+  name: string | null | undefined
+  company: string | null | undefined
+  phone: string | null | undefined
+  designation: string | null | undefined
+  address: string | null | undefined
 }): string[] {
   const missing: string[] = []
-  if (!person.name.trim()) missing.push('Full name')
-  if (!person.company.trim()) missing.push('Company name')
-  if (!person.phone.trim()) missing.push('Phone')
-  if (!person.designation.trim()) missing.push('Designation')
-  if (!person.address.trim()) missing.push('Address')
+  if (!person.name?.trim()) missing.push('Full name')
+  if (!person.company?.trim()) missing.push('Company name')
+  if (!person.phone?.trim()) missing.push('Phone')
+  if (!person.designation?.trim()) missing.push('Designation')
+  if (!person.address?.trim()) missing.push('Address')
   return missing
 }
 
 /** Fields required for a corporate guest reservation primary guest. */
 export function getCorporateGuestMissingFields(guest: {
-  guestName: string
-  guestCompany: string
-  guestPhone: string
-  guestDesignation: string
-  guestAddress: string
+  guestName: string | null | undefined
+  guestCompany: string | null | undefined
+  guestPhone: string | null | undefined
+  guestDesignation: string | null | undefined
+  guestAddress: string | null | undefined
 }): string[] {
   return getCorporatePersonMissingFields({
     name: guest.guestName,

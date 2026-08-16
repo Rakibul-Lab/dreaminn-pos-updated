@@ -702,7 +702,8 @@ export async function PUT(
             address: customerForLedger.address,
             idType: customerForLedger.idType,
             idNumber: customerForLedger.idNumber,
-          }
+          },
+          existing.companyLedgerGuestId
         );
       }
     }

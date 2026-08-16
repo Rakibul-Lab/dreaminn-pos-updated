@@ -571,11 +571,10 @@ export async function convertReservationEntry(input: {
     input.receivedBy
   )
 
-  if (entry.companyLedgerBill && resolvedCompanyLedgerId) {
-    const convertedTotal = createdBookings.reduce((sum, row) => sum + row.totalWithVat, 0)
-    const convertedPaid = createdBookings.reduce((sum, row) => sum + row.advanceShare, 0)
-    const convertedDue = createdBookings.reduce((sum, row) => sum + row.dueAmount, 0)
-
+  // Every converted room on a company ledger gets its own ledger bill. This must not
+  // depend on the entry still holding a bill of its own, or the stay never reaches
+  // the ledger at all.
+  if (resolvedCompanyLedgerId) {
     for (const row of createdBookings) {
       await postCompanyLedgerBill(db, {
         companyLedgerId: resolvedCompanyLedgerId,
@@ -590,26 +589,33 @@ export async function convertReservationEntry(input: {
       })
     }
 
-    const refreshed = await db.reservationEntry.findUnique({
-      where: { id: entry.id },
-      include: {
-        lines: { include: { lineBookings: { select: { id: true } } } },
-        companyLedgerBill: true,
-      },
-    })
+    if (entry.companyLedgerBill) {
+      const convertedTotal = createdBookings.reduce((sum, row) => sum + row.totalWithVat, 0)
+      const convertedPaid = createdBookings.reduce((sum, row) => sum + row.advanceShare, 0)
+      const convertedDue = createdBookings.reduce((sum, row) => sum + row.dueAmount, 0)
 
-    const stillUnfulfilled = refreshed?.lines.some((line) => countUnfulfilledSlots(line) > 0) ?? false
+      const refreshed = await db.reservationEntry.findUnique({
+        where: { id: entry.id },
+        include: {
+          lines: { include: { lineBookings: { select: { id: true } } } },
+          companyLedgerBill: true,
+        },
+      })
 
-    await reduceReservationEntryLedgerBill(
-      db,
-      entry.companyLedgerBill,
-      {
-        totalAmount: convertedTotal,
-        paidAmount: convertedPaid,
-        dueAmount: convertedDue,
-      },
-      !stillUnfulfilled
-    )
+      const stillUnfulfilled =
+        refreshed?.lines.some((line) => countUnfulfilledSlots(line) > 0) ?? false
+
+      await reduceReservationEntryLedgerBill(
+        db,
+        entry.companyLedgerBill,
+        {
+          totalAmount: convertedTotal,
+          paidAmount: convertedPaid,
+          dueAmount: convertedDue,
+        },
+        !stillUnfulfilled
+      )
+    }
   }
 
   const refreshedEntry = await db.reservationEntry.findUnique({

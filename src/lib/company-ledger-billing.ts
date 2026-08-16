@@ -208,11 +208,27 @@ function mergeGuestData(
 export async function ensureCompanyLedgerGuestFromCustomer(
   db: BillingDb,
   companyLedgerId: string,
-  source: CompanyLedgerGuestSource
+  source: CompanyLedgerGuestSource,
+  currentGuestId?: string | null
 ): Promise<string> {
   const data = guestDataFromSource(source)
   if (!data.guestName) {
     throw new Error('Guest name is required for company ledger')
+  }
+
+  // A booking already linked to a ledger guest renames that row in place. Otherwise
+  // filling in real details on a placeholder guest would strand the original entry.
+  if (currentGuestId) {
+    const current = await db.companyLedgerGuest.findFirst({
+      where: { id: currentGuestId, companyLedgerId },
+    })
+    if (current) {
+      await db.companyLedgerGuest.update({
+        where: { id: current.id },
+        data: mergeGuestData(current, data),
+      })
+      return current.id
+    }
   }
 
   if (data.phone) {

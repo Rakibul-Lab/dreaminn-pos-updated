@@ -1216,9 +1216,10 @@ export function NewReservationWizard({
         return null
       }
 
-      // After promoting Person 2 (or edit save with customer patch), do not overwrite the
-      // previously linked guest master profile with the new primary's details.
-      if (primaryGuestReplaced && isEditMode) {
+      // Editing a booking sends the guest fields with the booking update, which forks a
+      // shared profile first. Writing them here as well would hit the master profile
+      // before that fork and reject phones already used by another guest.
+      if (isEditMode) {
         return selectedCustomerId
       }
 
@@ -1319,23 +1320,26 @@ export function NewReservationWizard({
 
     const skipId =
       isCorporateGuest || asInitial || nidPhysicallyReceived || hasCompanySelected
-    const customerId = await resolveCustomerId({ skipIdRequirement: skipId })
-    if (!customerId) return
-    if (!selectedRoomId) {
-      toast.error('Please select a room')
-      return
-    }
-    if (!checkInDate || !checkOutDate) {
-      toast.error('Check-in and check-out dates are required')
-      return
-    }
-
-    const companionsPayload = isCorporateGuest
-      ? buildCorporateCompanionsPayload()
-      : buildCompanionsPayload()
 
     setIsSubmitting(true)
     try {
+      // Guest resolution performs API calls that reject on failure, so it has to run
+      // inside the handler that surfaces the message.
+      const customerId = await resolveCustomerId({ skipIdRequirement: skipId })
+      if (!customerId) return
+      if (!selectedRoomId) {
+        toast.error('Please select a room')
+        return
+      }
+      if (!checkInDate || !checkOutDate) {
+        toast.error('Check-in and check-out dates are required')
+        return
+      }
+
+      const companionsPayload = isCorporateGuest
+        ? buildCorporateCompanionsPayload()
+        : buildCompanionsPayload()
+
       const idPaths =
         idDocuments.length > 0 ? idDocuments.map((d) => d.path) : undefined
 
@@ -1372,6 +1376,7 @@ export function NewReservationWizard({
             : {
                 name: guestName.trim(),
                 phone: guestPhone.trim(),
+                company: formatGuestCompany(guestCompany),
                 email: guestEmail.trim() || null,
                 address: guestAddress.trim() || null,
                 nationality: guestNationality.trim() || DEFAULT_NATIONALITY,

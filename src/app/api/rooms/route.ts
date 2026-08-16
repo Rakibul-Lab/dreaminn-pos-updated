@@ -137,6 +137,26 @@ export async function GET(request: NextRequest) {
       rooms = filterSellableRooms(rooms);
     }
 
+    if (forBooking && excludeBookingId) {
+      // The room this booking already occupies must stay selectable while editing
+      // it, even when a reservation entry holds it or housekeeping flagged it.
+      const editedBooking = await db.booking.findUnique({
+        where: { id: excludeBookingId },
+        select: { roomId: true },
+      });
+      if (editedBooking && !rooms.some((room) => room.id === editedBooking.roomId)) {
+        const currentRoom = await db.room.findUnique({
+          where: { id: editedBooking.roomId },
+          include: { type: true },
+        });
+        if (currentRoom) {
+          rooms = [...rooms, currentRoom].sort(
+            (a, b) => a.floor - b.floor || a.roomNumber.localeCompare(b.roomNumber)
+          );
+        }
+      }
+    }
+
     let categoryCapacity: Awaited<ReturnType<typeof computeCategoryCapacityForStayDates>> = [];
     if (forBooking && checkIn && checkOut) {
       try {

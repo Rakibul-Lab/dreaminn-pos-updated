@@ -504,7 +504,19 @@ export async function assertRoomAvailableForBooking(
   if (!room) {
     return 'Selected room not found'
   }
-  if (isRoomStatusBlockedForSale(room.status)) {
+
+  // Category inventory and entry holds gate rooms being newly assigned. A booking
+  // that already occupies this room keeps it on edit, so those checks must not run.
+  const retainsCurrentRoom = excludeBookingId
+    ? (
+        await db.booking.findUnique({
+          where: { id: excludeBookingId },
+          select: { roomId: true },
+        })
+      )?.roomId === roomId
+    : false
+
+  if (!retainsCurrentRoom && isRoomStatusBlockedForSale(room.status)) {
     return roomBlockedForSaleMessage(room.roomNumber, room.status)
   }
   if (room.typeId !== roomTypeId) {
@@ -519,6 +531,10 @@ export async function assertRoomAvailableForBooking(
   )
   if (bookingOverlap > 0) {
     return `Room ${room.roomNumber} already has a booking in this date range`
+  }
+
+  if (retainsCurrentRoom) {
+    return null
   }
 
   const entryLines = await fetchActiveReservationEntryLinesForRange(

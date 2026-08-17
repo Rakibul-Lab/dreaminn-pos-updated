@@ -1,4 +1,5 @@
 import { countHotelStayNights } from '@/lib/hotel-times'
+import { getRoomNightlyTotal, type RoomPricingFields } from '@/lib/room-pricing'
 
 export type BookingDiscountType = 'PERCENTAGE' | 'FIXED'
 
@@ -10,6 +11,7 @@ export type BookingStayNightsInput = {
   checkIn?: Date | string | null
   checkOut?: Date | string | null
   nights?: number | null
+  totalRoomCharge?: number | null
 }
 
 function normalizeNights(value: unknown): number {
@@ -24,6 +26,36 @@ function toStayDate(value: Date | string | null | undefined): Date | null {
 }
 
 /**
+ * Nightly rate off a booking's room when it carries one. Bookings reach these
+ * helpers in many shapes (Prisma rows, list rows, export records), most of which
+ * do not type the room, so it is read structurally.
+ */
+function readRoomNightlyRate(input: unknown): number {
+  if (!input || typeof input !== 'object') return 0
+  const room = (input as { room?: unknown }).room
+  if (!room || typeof room !== 'object') return 0
+  return getRoomNightlyTotal(room as RoomPricingFields)
+}
+
+/**
+ * Nights paid for, read back from the room charge. The charge is always the
+ * nightly rate times the nights billed, so it stays right when a stay is cut
+ * short or extended — the booking keeps its original dates in those cases.
+ * Returns 0 when the charge is not a clean multiple of the rate (custom rate or
+ * hand-edited charge), so the caller falls back to the stay dates.
+ */
+function resolveBilledNightsFromRoomCharge(input?: BookingStayNightsInput | null): number {
+  const nightlyRate = readRoomNightlyRate(input)
+  const roomCharge = Math.max(0, Number(input?.totalRoomCharge) || 0)
+  if (nightlyRate <= 0 || roomCharge <= 0) return 0
+
+  const nights = roomCharge / nightlyRate
+  const rounded = Math.round(nights)
+  if (rounded < 1 || Math.abs(nights - rounded) > 0.02) return 0
+  return rounded
+}
+
+/**
  * Nights a fixed discount repeats over. A fixed discount is a cut on the nightly
  * rate, so ৳1,000 off a 2-night stay takes ৳2,000 off the room charge.
  */
@@ -32,6 +64,8 @@ export function resolveDiscountNights(
 ): number {
   if (typeof input === 'number') return normalizeNights(input)
   if (input?.nights != null) return normalizeNights(input.nights)
+  const billedNights = resolveBilledNightsFromRoomCharge(input)
+  if (billedNights > 0) return billedNights
   const checkIn = toStayDate(input?.checkIn)
   const checkOut = toStayDate(input?.checkOut)
   if (!checkIn || !checkOut) return 1

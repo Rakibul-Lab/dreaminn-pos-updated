@@ -533,6 +533,24 @@ type InvoiceBillMix = {
   roomCharges: number
   foodCharges: number
   extraCharges: number
+  totalAmount: number
+  items: Array<{ itemType: string; total: number }>
+}
+
+const RESTAURANT_INVOICE_ITEM_TYPES = new Set(['food_order', 'vat_restaurant'])
+
+/**
+ * What the restaurant billed on a checkout invoice, VAT included. `foodCharges`
+ * holds the net only — the restaurant VAT sits inside the invoice VAT total — so
+ * the invoice lines are the honest source and keep restaurant VAT out of hotel sales.
+ */
+function invoiceRestaurantGross(invoice: InvoiceBillMix): number {
+  const fromItems = invoice.items.reduce(
+    (sum, item) => (RESTAURANT_INVOICE_ITEM_TYPES.has(item.itemType) ? sum + item.total : sum),
+    0
+  )
+  if (fromItems > 0) return Number(fromItems.toFixed(2))
+  return Math.max(0, invoice.foodCharges)
 }
 
 /**
@@ -542,9 +560,14 @@ type InvoiceBillMix = {
  */
 function invoiceRestaurantShare(invoice: InvoiceBillMix | undefined): number {
   if (!invoice) return 0
-  const chargeBase = invoice.roomCharges + invoice.foodCharges + invoice.extraCharges
-  if (chargeBase <= 0 || invoice.foodCharges <= 0) return 0
-  return Math.min(1, invoice.foodCharges / chargeBase)
+  const restaurantGross = invoiceRestaurantGross(invoice)
+  if (restaurantGross <= 0) return 0
+  const base =
+    invoice.totalAmount > 0
+      ? invoice.totalAmount
+      : invoice.roomCharges + invoice.extraCharges + restaurantGross
+  if (base <= 0) return 0
+  return Math.min(1, restaurantGross / base)
 }
 
 function computeReportBillBreakdown(
@@ -628,6 +651,7 @@ export async function buildDailySalesDetailReport(
     db.invoice.findMany({
       where: invoiceWindowWhere(businessDate, openedAt, closedAt),
       include: {
+        items: { select: { itemType: true, total: true } },
         booking: {
           include: {
             customer: { select: { name: true, registrationNumber: true, company: true } },
@@ -832,13 +856,14 @@ export async function buildDailySalesDetailReport(
       booking.customer.company ??
       ledgerBill?.companyLedger.name ??
       null
+    const restaurantGross = invoiceRestaurantGross(invoice)
     const restaurantBillRemark =
-      invoice.foodCharges > 0
+      restaurantGross > 0
         ? buildCheckoutRestaurantBillRemark(booking.id, restaurantOrders)
         : null
 
     const sortAt = (invoice.issuedAt ?? invoice.createdAt).toISOString()
-    const foodExtra = invoice.foodCharges + invoice.extraCharges
+    const foodExtra = restaurantGross + invoice.extraCharges
     const guestName = booking.customer.name
     const room = booking.room.roomNumber
     const regNo = resolveBookingRegistrationNumber(booking) || null
@@ -899,7 +924,7 @@ export async function buildDailySalesDetailReport(
         remark: buildCheckoutInvoiceFoodRemark(invoice.invoiceNumber, restaurantBillRemark),
         total: foodLineTotal,
         restaurantAmount: Number(
-          (foodLineTotal * (invoice.foodCharges / foodExtra)).toFixed(2)
+          (foodLineTotal * (restaurantGross / foodExtra)).toFixed(2)
         ),
         reference: invoice.invoiceNumber,
         sortAt,

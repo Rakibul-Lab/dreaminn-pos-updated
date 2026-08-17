@@ -3,7 +3,7 @@ import { bookingVatOptions, computeRoomBookingTotals } from '@/lib/booking-total
 
 const inHouseBookingDiscountInclude = {
   customer: { select: { name: true } },
-  room: { select: { roomNumber: true } },
+  room: { select: { roomNumber: true, totalPrice: true } },
   companyLedger: { select: { name: true } },
   sourceReservationEntry: { select: { registrationNumber: true } },
   companyLedgerGuest: { select: { registrationNumber: true } },

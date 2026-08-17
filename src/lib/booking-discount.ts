@@ -41,18 +41,13 @@ function readRoomNightlyRate(input: unknown): number {
  * Nights paid for, read back from the room charge. The charge is always the
  * nightly rate times the nights billed, so it stays right when a stay is cut
  * short or extended — the booking keeps its original dates in those cases.
- * Returns 0 when the charge is not a clean multiple of the rate (custom rate or
- * hand-edited charge), so the caller falls back to the stay dates.
+ * Same rule checkout settles on, so the list and the folio never disagree.
  */
 function resolveBilledNightsFromRoomCharge(input?: BookingStayNightsInput | null): number {
   const nightlyRate = readRoomNightlyRate(input)
   const roomCharge = Math.max(0, Number(input?.totalRoomCharge) || 0)
   if (nightlyRate <= 0 || roomCharge <= 0) return 0
-
-  const nights = roomCharge / nightlyRate
-  const rounded = Math.round(nights)
-  if (rounded < 1 || Math.abs(nights - rounded) > 0.02) return 0
-  return rounded
+  return normalizeNights(roomCharge / nightlyRate)
 }
 
 /**
@@ -102,7 +97,12 @@ export function computeHotelDiscountAmount(
   if (!enabled || value <= 0 || roomChargeBase <= 0) return 0
   if (type === 'FIXED') {
     const perNight = Math.max(0, value)
-    return Math.min(roomChargeBase, perNight * normalizeNights(nights))
+    const overStay = perNight * normalizeNights(nights)
+    // Repeating the cut nightly must never give the room away. When it would,
+    // the value was meant for the stay as a whole — how fixed discounts were
+    // entered before they became per night — so it is honoured that way.
+    if (overStay >= roomChargeBase && perNight < roomChargeBase) return perNight
+    return Math.min(roomChargeBase, overStay)
   }
   const pct = Math.min(100, Math.max(0, value))
   return (roomChargeBase * pct) / 100

@@ -167,6 +167,9 @@ type BookingDueFields = BookingStayNightsInput & {
   discountEnabled?: boolean | null
   discountType?: string | null
   discountValue?: number | null
+  /** Folio contents when the caller loaded them — see `resolveBookingDisplayDue`. */
+  charges?: BookingChargeRow[]
+  restaurantOrders?: BookingFolioRestaurantRow[]
 }
 
 type InvoiceDueSnapshot = {
@@ -189,9 +192,35 @@ export function computeBookingRoomDue(
 }
 
 /**
+ * Everything standing on the folio — room after discount, posted extras, and
+ * restaurant bills charged to the room — less what the guest has paid. This is
+ * the same sum the stay total is built from, so the two always agree.
+ */
+function computeBookingFolioDue(
+  booking: BookingDueFields,
+  payments: BookingPaymentRow[]
+): number {
+  const roomTotal = computeRoomBookingTotals(
+    booking.totalRoomCharge,
+    0,
+    bookingVatOptions(booking),
+    bookingDiscountInput(booking)
+  ).totalWithVat
+  const folioTotal =
+    roomTotal +
+    sumBookingPostedExtras(booking.charges, payments) +
+    sumBookingFolioRestaurant(booking.restaurantOrders)
+  return Math.max(0, folioTotal - sumCheckoutBookingPaid(payments))
+}
+
+/**
  * Due shown in bookings list and detail:
  * - After checkout, invoice due is authoritative (room + F&B + extras − payments).
- * - Before checkout, room charge due with reservation discount.
+ * - While the guest is in house, the folio is recomputed from what is posted to
+ *   the room. The stored `dueAmount` only moves for charges raised on the hotel
+ *   screens, so a restaurant bill sent to the room from the POS never reaches it.
+ * - Without folio rows to read (callers that fetch the booking alone), the stored
+ *   due stands, and a reservation falls back to its room charge less payments.
  */
 export function resolveBookingDisplayDue(
   booking: BookingDueFields,
@@ -206,7 +235,10 @@ export function resolveBookingDisplayDue(
     return Math.max(0, latestInvoice.dueAmount)
   }
 
-  // Folio due includes room charges plus unpaid room-service balance (adjusted at POS).
+  if (booking.charges !== undefined || booking.restaurantOrders !== undefined) {
+    return computeBookingFolioDue(booking, payments)
+  }
+
   if (booking.status === 'CHECKED_IN' && booking.dueAmount != null) {
     return Math.max(0, booking.dueAmount)
   }

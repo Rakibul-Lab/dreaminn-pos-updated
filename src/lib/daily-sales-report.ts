@@ -864,6 +864,9 @@ export async function buildDailySalesDetailReport(
 
     const sortAt = (invoice.issuedAt ?? invoice.createdAt).toISOString()
     const foodExtra = restaurantGross + invoice.extraCharges
+    // The invoice keeps the rack rate and the discount apart. Only what the guest
+    // was actually billed is a sale, so the sheet foots with the money collected.
+    const roomBilled = Math.max(0, invoice.roomCharges - Math.max(0, invoice.discount))
     const guestName = booking.customer.name
     const room = booking.room.roomNumber
     const regNo = resolveBookingRegistrationNumber(booking) || null
@@ -874,7 +877,7 @@ export async function buildDailySalesDetailReport(
       continue
     }
 
-    if (invoice.roomCharges > 0) {
+    if (roomBilled > 0) {
       const roomCompanyBill = foodExtra > 0 ? 0 : companyBill
       lines.push({
         id: `${invoice.id}-room`,
@@ -883,14 +886,14 @@ export async function buildDailySalesDetailReport(
         guestName,
         room,
         regNo,
-        roomAmount: invoice.roomCharges,
+        roomAmount: roomBilled,
         otherService: 0,
         cash: 0,
         card: 0,
         mbanking: 0,
         companyBill: roomCompanyBill,
         remark: buildCheckoutInvoiceRoomRemark(invoice.invoiceNumber, companyRemark),
-        total: resolveChargeLineTotal(invoice.roomCharges, { companyBill: roomCompanyBill }),
+        total: resolveChargeLineTotal(roomBilled, { companyBill: roomCompanyBill }),
         reference: invoice.invoiceNumber,
         sortAt,
       })
@@ -900,7 +903,7 @@ export async function buildDailySalesDetailReport(
       const billPayment = restaurantBillRemark
         ? resolveCheckoutFoodPaymentAllocation(booking.id, restaurantOrders, foodExtra)
         : { cash: 0, card: 0, mbanking: 0 }
-      const foodCompanyBill = invoice.roomCharges > 0 ? 0 : companyBill
+      const foodCompanyBill = roomBilled > 0 ? 0 : companyBill
       const foodLineTotal = resolveChargeLineTotal(foodExtra, {
         companyBill: foodCompanyBill,
         cash: billPayment.cash,
@@ -931,7 +934,7 @@ export async function buildDailySalesDetailReport(
       })
     }
 
-    if (invoice.roomCharges <= 0 && foodExtra <= 0 && invoice.totalAmount > 0) {
+    if (roomBilled <= 0 && foodExtra <= 0 && invoice.totalAmount > 0) {
       lines.push({
         id: invoice.id,
         lineType: 'charge',

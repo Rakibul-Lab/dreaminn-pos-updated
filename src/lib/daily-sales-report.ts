@@ -301,6 +301,40 @@ function allocateSinglePaymentAmounts(payment: { amount: number; method: string;
   return { cash: amount, card: 0, mbanking: 0 }
 }
 
+/**
+ * A collection the checkout flow already booked against one restaurant folio charge,
+ * named on the payment itself — "Restaurant · Bill 006985415". Those reach the sheet
+ * as restaurant rows of their own and must not be carved up a second time.
+ *
+ * The separator is what makes the label a restaurant charge: an extra service the
+ * desk posts by hand can be called anything, "Restaurant Food Bill" included, and it
+ * is billed as an extra rather than through the restaurant.
+ */
+function isRestaurantFolioSettlementPayment(payment: {
+  categoryLabel?: string | null
+  notes?: string | null
+}): boolean {
+  const raw = payment.categoryLabel?.trim() || payment.notes?.trim() || ''
+  const label = raw.replace(/\s+settled at check-out\.?$/i, '').trim()
+  return /^restaurant(\s*·.*)?$/i.test(label)
+}
+
+/** Splits one payment's tender columns across a part of its amount. */
+function allocatePaymentPortion(
+  payment: { amount: number; method: string; paymentType: string },
+  portion: number
+): { cash: number; card: number; mbanking: number } {
+  const full = allocateSinglePaymentAmounts(payment)
+  const fullTotal = full.cash + full.card + full.mbanking
+  if (Math.abs(fullTotal) < 0.005) return { cash: 0, card: 0, mbanking: 0 }
+  const ratio = portion / fullTotal
+  return {
+    cash: Number((full.cash * ratio).toFixed(2)),
+    card: Number((full.card * ratio).toFixed(2)),
+    mbanking: Number((full.mbanking * ratio).toFixed(2)),
+  }
+}
+
 function buildCheckoutInvoiceRoomRemark(invoiceNumber: string, extra?: string | null): string {
   return [`Room sale · Checkout · ${invoiceNumber}`, extra].filter(Boolean).join(' · ')
 }
@@ -371,9 +405,14 @@ function shouldSkipInvoiceChargeLines(
     paidAmount: number
     totalAmount: number
   },
-  invoiceIdsWithCheckoutPayments: Set<string>
+  invoiceIdsWithCheckoutPayments: Set<string>,
+  billedToCompany = false
 ): boolean {
   if (invoiceIdsWithCheckoutPayments.has(invoice.id)) return true
+  // A stay charged to a company ledger is owed, not collected — checkout marks the
+  // invoice paid only so the folio can close. Its rows stay on the sheet whatever
+  // the ledger owes today, so settling the ledger later cannot rewrite this day.
+  if (billedToCompany) return false
   return (
     invoice.totalAmount > 0 &&
     invoice.dueAmount <= 0.01 &&
@@ -537,46 +576,68 @@ type InvoiceBillMix = {
   items: Array<{ itemType: string; total: number }>
 }
 
-const RESTAURANT_INVOICE_ITEM_TYPES = new Set(['food_order', 'vat_restaurant'])
-
 /**
- * What the restaurant billed on a checkout invoice, VAT included. `foodCharges`
- * holds the net only — the restaurant VAT sits inside the invoice VAT total — so
- * the invoice lines are the honest source and keep restaurant VAT out of hotel sales.
+ * What the restaurant billed on a checkout invoice, VAT included.
+ *
+ * `foodCharges` is the net, with the restaurant VAT kept apart from it, so the two
+ * added together are the gross. The VAT comes off the invoice lines rather than
+ * `vatAmount`, which also carries the hotel's own VAT.
+ *
+ * The food lines themselves are not summed: a bill posted to the folio by hand is
+ * written as one line at its gross, so adding the VAT line to it counted the VAT
+ * twice and reported a ৳3,105 food bill as ৳3,138.
  */
 function invoiceRestaurantGross(invoice: InvoiceBillMix): number {
-  const fromItems = invoice.items.reduce(
-    (sum, item) => (RESTAURANT_INVOICE_ITEM_TYPES.has(item.itemType) ? sum + item.total : sum),
+  const restaurantVat = invoice.items.reduce(
+    (sum, item) => (item.itemType === 'vat_restaurant' ? sum + item.total : sum),
     0
   )
-  if (fromItems > 0) return Number(fromItems.toFixed(2))
-  return Math.max(0, invoice.foodCharges)
+  const net = Math.max(0, invoice.foodCharges)
+  if (net > 0) return Number((net + restaurantVat).toFixed(2))
+
+  // Older invoices carry no net figure; their food lines already include the VAT.
+  const fromFoodLines = invoice.items.reduce(
+    (sum, item) => (item.itemType === 'food_order' ? sum + item.total : sum),
+    0
+  )
+  return Math.max(0, Number(fromFoodLines.toFixed(2)))
 }
 
 /**
- * Share of a checkout invoice that came from the restaurant. A guest's F&B bills
- * ride on the folio and are settled with the room, so the invoice has to be split
- * for the breakdown — otherwise restaurant sales are reported as hotel sales.
+ * The restaurant's part of money collected on a checkout invoice. A guest's F&B
+ * bills ride on the folio and are settled with the room, so what was taken has to
+ * be split — otherwise restaurant sales are reported as hotel sales.
+ *
+ * The split goes by amount rather than by proportion of the invoice total: the
+ * F&B bills are a fixed sum, while the invoice total moves with the room discount.
+ * Sharing out a payment in proportion made the whole of it read as restaurant
+ * whenever a room was discounted down to its F&B, which is how a ৳3,105 food bill
+ * came to be reported as ৳10,005 of restaurant sales.
  */
-function invoiceRestaurantShare(invoice: InvoiceBillMix | undefined): number {
-  if (!invoice) return 0
-  const restaurantGross = invoiceRestaurantGross(invoice)
-  if (restaurantGross <= 0) return 0
-  const base =
-    invoice.totalAmount > 0
-      ? invoice.totalAmount
-      : invoice.roomCharges + invoice.extraCharges + restaurantGross
-  if (base <= 0) return 0
-  return Math.min(1, restaurantGross / base)
+function invoiceRestaurantCollected(
+  invoice: InvoiceBillMix | undefined,
+  collected: number
+): number {
+  if (!invoice || collected <= 0) return 0
+  return Math.max(0, Math.min(invoiceRestaurantGross(invoice), collected))
 }
 
+/**
+ * Splits the day's takings into hotel, restaurant, and transport. Every row the
+ * sheet totals has to land in exactly one of them, or the breakdown will not add
+ * up to Total Sale: charge rows by their source, collections on checkout invoices
+ * whose charge rows are hidden, and money taken against no bill at all.
+ */
 function computeReportBillBreakdown(
   lines: DailySalesLine[],
   invoiceIdsWithCheckoutPayments: Set<string>,
   payments: Array<{
     invoiceId: string | null
+    orderId: string | null
     amount: number
     paymentType: string
+    notes?: string | null
+    reference?: string | null
   }>,
   transportBills: number,
   invoices: InvoiceBillMix[]
@@ -609,9 +670,21 @@ function computeReportBillBreakdown(
     payments
   )
   for (const [invoiceId, collected] of suppressedCollections) {
-    const share = invoiceRestaurantShare(invoiceById.get(invoiceId))
-    restaurantBills += collected * share
-    hotelBills += collected * (1 - share)
+    const fromRestaurant = invoiceRestaurantCollected(invoiceById.get(invoiceId), collected)
+    restaurantBills += fromRestaurant
+    hotelBills += collected - fromRestaurant
+  }
+
+  // Money taken against no bill of its own — booking advances, reservation
+  // payments, walk-in beverage. It counts towards Total Sale, so it has to be
+  // attributed here too. Transport takings are already totalled by the caller.
+  for (const payment of payments) {
+    if (payment.invoiceId || payment.orderId) continue
+    if (isTransportSalePayment(payment)) continue
+    const amount =
+      payment.paymentType === 'REFUND' ? -Math.abs(payment.amount) : payment.amount
+    if (payment.paymentType === 'RESTAURANT') restaurantBills += amount
+    else hotelBills += amount
   }
 
   return {
@@ -790,6 +863,24 @@ export async function buildDailySalesDetailReport(
     transportSales.map((sale) => [sale.saleNumber, sale] as const)
   )
 
+  // Restaurant money on a checkout invoice that no payment row names by itself.
+  // It has to be carved out of the collection row, or the sheet shows a food bill
+  // inside a room payment while the breakdown counts it under Restaurant bills.
+  const unnamedRestaurantByInvoice = new Map<string, number>()
+  for (const invoice of invoices) {
+    const gross = invoiceRestaurantGross(invoice)
+    if (gross > 0) unnamedRestaurantByInvoice.set(invoice.id, gross)
+  }
+  for (const payment of allPayments) {
+    if (!payment.invoiceId || !isRestaurantFolioSettlementPayment(payment)) continue
+    const remaining = unnamedRestaurantByInvoice.get(payment.invoiceId)
+    if (remaining == null) continue
+    unnamedRestaurantByInvoice.set(
+      payment.invoiceId,
+      Math.max(0, remaining - Math.abs(payment.amount))
+    )
+  }
+
   for (const payment of allPayments) {
     const saleNumber = beverageSaleNumberFromPayment(payment)
     if (saleNumber) coveredBeverageSaleNumbers.add(saleNumber)
@@ -813,32 +904,92 @@ export async function buildDailySalesDetailReport(
       continue
     }
 
-    const { cash, card, mbanking } = allocateSinglePaymentAmounts(payment)
     const roomNumber = resolvePaymentRoomNumber(payment)
     const guestName = resolvePaymentGuestName(payment)
     const booking = payment.booking
+    const paymentTotal =
+      payment.paymentType === 'REFUND' ? -Math.abs(payment.amount) : payment.amount
 
-    lines.push({
-      id: payment.id,
-      lineType: 'payment',
-      source: 'payment',
-      guestName,
-      room: roomNumber,
-      regNo:
-        (booking ? resolveBookingRegistrationNumber(booking) : null) ??
-        payment.reservationEntry?.registrationNumber ??
-        null,
-      roomAmount: 0,
-      otherService: 0,
-      cash,
-      card,
-      mbanking,
-      companyBill: 0,
-      remark: resolvePaymentSourceLabel(payment),
-      total: payment.paymentType === 'REFUND' ? -Math.abs(payment.amount) : payment.amount,
-      reference: resolvePaymentReference(payment),
-      sortAt: payment.createdAt.toISOString(),
-    })
+    const pendingRestaurant = payment.invoiceId
+      ? unnamedRestaurantByInvoice.get(payment.invoiceId) ?? 0
+      : 0
+    const restaurantPart =
+      paymentTotal > 0 ? Math.min(pendingRestaurant, paymentTotal) : 0
+    if (restaurantPart > 0.005 && payment.invoiceId) {
+      unnamedRestaurantByInvoice.set(payment.invoiceId, pendingRestaurant - restaurantPart)
+    }
+
+    // Collections the checkout flow already booked against a restaurant charge are
+    // restaurant rows as they stand; they only need marking as such.
+    const alreadyNamedRestaurant =
+      !!payment.invoiceId && paymentTotal > 0 && isRestaurantFolioSettlementPayment(payment)
+
+    const label = resolvePaymentSourceLabel(payment)
+    const parts =
+      restaurantPart > 0.005
+        ? [
+            {
+              id: `${payment.id}-restaurant`,
+              amount: Number(restaurantPart.toFixed(2)),
+              remark: `${label} · Restaurant bill settled at check-out`,
+              restaurant: true,
+            },
+            {
+              id: payment.id,
+              amount: Number((paymentTotal - restaurantPart).toFixed(2)),
+              remark: label,
+              restaurant: false,
+            },
+          ].filter((part) => Math.abs(part.amount) > 0.005)
+        : [
+            {
+              id: payment.id,
+              amount: paymentTotal,
+              remark: label,
+              restaurant: alreadyNamedRestaurant,
+            },
+          ]
+
+    const regNo =
+      (booking ? resolveBookingRegistrationNumber(booking) : null) ??
+      payment.reservationEntry?.registrationNumber ??
+      null
+
+    // The last row takes whatever tender the earlier ones left, so a split never
+    // moves a paisa away from what the guest actually handed over.
+    let unallocatedTender = allocateSinglePaymentAmounts(payment)
+
+    for (const [index, part] of parts.entries()) {
+      const isLast = index === parts.length - 1
+      const { cash, card, mbanking } = isLast
+        ? unallocatedTender
+        : allocatePaymentPortion(payment, part.amount)
+      unallocatedTender = {
+        cash: Number((unallocatedTender.cash - cash).toFixed(2)),
+        card: Number((unallocatedTender.card - card).toFixed(2)),
+        mbanking: Number((unallocatedTender.mbanking - mbanking).toFixed(2)),
+      }
+
+      lines.push({
+        id: part.id,
+        lineType: 'payment',
+        source: 'payment',
+        guestName,
+        room: roomNumber,
+        regNo,
+        roomAmount: 0,
+        otherService: 0,
+        cash,
+        card,
+        mbanking,
+        companyBill: 0,
+        remark: part.remark,
+        total: part.amount,
+        restaurantAmount: part.restaurant ? part.amount : undefined,
+        reference: resolvePaymentReference(payment),
+        sortAt: payment.createdAt.toISOString(),
+      })
+    }
   }
 
   for (const invoice of invoices) {
@@ -873,7 +1024,7 @@ export async function buildDailySalesDetailReport(
 
     // Same-day checkout payments appear as collection rows; fully prepaid checkouts
     // (advance on a prior day) omit invoice charge rows entirely.
-    if (shouldSkipInvoiceChargeLines(invoice, invoiceIdsWithCheckoutPayments)) {
+    if (shouldSkipInvoiceChargeLines(invoice, invoiceIdsWithCheckoutPayments, onCompanyLedger)) {
       continue
     }
 

@@ -193,6 +193,13 @@ export function buildPaperSalesLines(lines: PaperSalesInputLine[] | undefined): 
       totalInclVat = Number(lineTotal.toFixed(2))
     }
 
+    // A bill raised today that nobody settled is money still owed, so it sits in
+    // the due bill column. That keeps the sheet footing both ways: every row's
+    // total is backed by a column, and cash + card + m.banking + due = total sale.
+    const unsettledCharge =
+      line.lineType === 'charge' && columnSum <= 0 && lineTotal > 0 ? lineTotal : null
+    const dueBill = company ?? unsettledCharge
+
     let displayCash = cash
     let displayCard = card
     let displayMBanking = mBanking
@@ -217,7 +224,7 @@ export function buildPaperSalesLines(lines: PaperSalesInputLine[] | undefined): 
       cash: displayCash,
       card: displayCard,
       mBanking: displayMBanking,
-      dueBill: company,
+      dueBill,
       remarks: line.remark ?? '',
       totalInclVat,
       lineType: line.lineType,
@@ -279,7 +286,9 @@ export function buildPaperSummary(data: PaperSalesInput): PaperSummary {
   const totals = computePaperTotals(paperLines)
   const balances = data.balances ?? {}
   const openingBalance = balances.openingBalance ?? data.openingBalance ?? 0
-  const dueBill = balances.companyBillTotal ?? totals.dueBill
+  // What the day billed but did not collect: company ledger bills and charges
+  // still standing on a folio. Read off the column so the sheet foots.
+  const dueBill = totals.dueBill > 0 ? totals.dueBill : balances.companyBillTotal ?? 0
   // Total Sale must foot with Cash + Card + M. Banking + Company on the paper.
   // Do not use balances.salesTotal when tenders exist — that previously added full
   // checkout invoice totals (including prior-day advances) and overstated the day.

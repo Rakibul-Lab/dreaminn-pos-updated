@@ -53,6 +53,10 @@ function invoiceWindowWhere(businessDate: string, openedAt: Date, closedAt: Date
   return {
     status: { not: 'CANCELLED' as const },
     discount: { gt: 0 },
+    // Matches the sales report: an invoice raised while the guest is still in
+    // house is a preview of the folio, so its discount is only given on the day
+    // the guest checks out. Until then the stay is reported from the booking.
+    booking: { status: 'CHECKED_OUT' as const },
     OR: [
       { businessDate },
       {

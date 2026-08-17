@@ -157,7 +157,7 @@ export function BusinessDaySummarySection({
         </Card>
         <Card>
           <CardContent className="p-4">
-            <p className="text-sm text-muted-foreground">Restaurant</p>
+            <p className="text-sm text-muted-foreground">Restaurant POS</p>
             {isLoading ? (
               <Skeleton className="h-7 w-24 mt-1" />
             ) : (

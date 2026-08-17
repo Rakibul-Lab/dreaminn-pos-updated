@@ -1,3 +1,4 @@
+import type { Prisma } from '@prisma/client'
 import { db } from '@/lib/db'
 import { bookingVatOptions, computeRoomBookingTotals } from '@/lib/booking-totals'
 
@@ -13,25 +14,28 @@ export type InHouseBookingDiscountRecord = Awaited<
   ReturnType<typeof fetchInHouseBookingDiscountsForWindow>
 >[number]
 
-export function inHouseBookingDiscountWhere(openedAt: Date, closedAt: Date) {
+/**
+ * Discounts on stays that have not reached a bill yet. A booking leaves this set
+ * the moment the guest checks out, and only then does its invoice discount get
+ * reported, so a discount is never counted twice. An invoice previewed while the
+ * guest is in house is not a bill and must not hide the stay from the reports.
+ */
+export function inHouseBookingDiscountWhere(
+  openedAt: Date,
+  closedAt: Date
+): Prisma.BookingWhereInput {
   return {
-    status: { in: ['CHECKED_IN', 'RESERVED'] as const },
+    status: { in: ['CHECKED_IN', 'RESERVED'] },
     discountEnabled: true,
     discountValue: { gt: 0 },
     OR: [
       { actualCheckIn: { gte: openedAt, lte: closedAt } },
       {
-        status: 'RESERVED' as const,
+        status: 'RESERVED',
         actualCheckIn: null,
         createdAt: { gte: openedAt, lte: closedAt },
       },
     ],
-    invoices: {
-      none: {
-        status: { not: 'CANCELLED' as const },
-        discount: { gt: 0 },
-      },
-    },
   }
 }
 
@@ -49,12 +53,6 @@ export async function fetchAllInHouseBookingDiscounts() {
       status: { in: ['CHECKED_IN', 'RESERVED'] },
       discountEnabled: true,
       discountValue: { gt: 0 },
-      invoices: {
-        none: {
-          status: { not: 'CANCELLED' },
-          discount: { gt: 0 },
-        },
-      },
     },
     include: inHouseBookingDiscountInclude,
     orderBy: { createdAt: 'asc' },

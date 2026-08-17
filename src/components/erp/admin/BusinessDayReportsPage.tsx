@@ -58,11 +58,6 @@ import {
   ClosedBusinessDaySearchField,
   type ClosedBusinessDayOption,
 } from '@/components/erp/admin/ClosedBusinessDaySearchField'
-import {
-  BOOKING_DATE_PRESET_OPTIONS,
-  resolveBookingDateRangeWithBusinessDate,
-  type BookingDatePreset,
-} from '@/lib/booking-date-filter'
 import { formatBusinessDateDisplay } from '@/lib/business-date-format'
 
 function policeGuestRoleLabel(guest: {
@@ -118,13 +113,6 @@ function buildReportRangeUrl(type: string, range: { dateFrom?: string; dateTo?: 
   return `/reports?${params.toString()}`
 }
 
-function buildDiscountReportUrl(range: { dateFrom?: string; dateTo?: string }): string {
-  const params = new URLSearchParams({ type: 'hotel-daily-discounts' })
-  if (range.dateFrom) params.set('dateFrom', range.dateFrom)
-  if (range.dateTo) params.set('dateTo', range.dateTo)
-  return `/reports?${params.toString()}`
-}
-
 async function fetchAllClosedBusinessDays(): Promise<ClosedBusinessDayOption[]> {
   const rows: ClosedBusinessDayOption[] = []
   let page = 1
@@ -159,9 +147,6 @@ export default function BusinessDayReportsPage() {
   const [discountSearchInput, setDiscountSearchInput] = useState('')
   const [discountSearchQuery, setDiscountSearchQuery] = useState('')
   const [discountSourceFilter, setDiscountSourceFilter] = useState<'all' | 'hotel' | 'restaurant'>('all')
-  const [discountDatePreset, setDiscountDatePreset] = useState<BookingDatePreset>('today')
-  const [discountCustomDateFrom, setDiscountCustomDateFrom] = useState('')
-  const [discountCustomDateTo, setDiscountCustomDateTo] = useState('')
 
   useEffect(() => {
     const timer = window.setTimeout(() => setDiscountSearchQuery(discountSearchInput.trim()), 300)
@@ -204,28 +189,7 @@ export default function BusinessDayReportsPage() {
     setDiscountSearchInput('')
     setDiscountSearchQuery('')
     setDiscountSourceFilter('all')
-  }, [selectedBusinessDate])
-
-  const discountDateRange = useMemo(
-    () =>
-      resolveBookingDateRangeWithBusinessDate(
-        discountDatePreset,
-        discountCustomDateFrom,
-        discountCustomDateTo,
-        currentBusinessDate
-      ),
-    [discountDatePreset, discountCustomDateFrom, discountCustomDateTo, currentBusinessDate]
-  )
-
-  const discountQueryEnabled = useMemo(() => {
-    if (discountDatePreset === 'today' || discountDatePreset === 'yesterday') {
-      return !!currentBusinessDate
-    }
-    if (discountDatePreset === 'custom') {
-      return !!(discountCustomDateFrom || discountCustomDateTo)
-    }
-    return true
-  }, [discountDatePreset, discountCustomDateFrom, discountCustomDateTo, currentBusinessDate])
+  }, [dateMode, selectedBusinessDate, rangeDateFrom, rangeDateTo])
 
   const reportEnabled =
     dateMode === 'single'
@@ -278,14 +242,14 @@ export default function BusinessDayReportsPage() {
   })
 
   const { data: discountsRes, isLoading: loadingDiscounts, refetch: refetchDiscounts, isFetching: fetchingDiscounts } = useQuery({
-    queryKey: [
-      'business-day-discounts',
-      discountDatePreset,
-      discountDateRange.dateFrom,
-      discountDateRange.dateTo,
-    ],
-    queryFn: () => api.get<ReportResponse>(buildDiscountReportUrl(discountDateRange)),
-    enabled: discountQueryEnabled,
+    queryKey: ['business-day-discounts', dateMode, selectedBusinessDate, rangeDateFrom, rangeDateTo],
+    queryFn: () =>
+      api.get<ReportResponse>(
+        dateMode === 'range'
+          ? buildReportRangeUrl('hotel-daily-discounts', { dateFrom: rangeDateFrom, dateTo: rangeDateTo })
+          : buildReportUrl('hotel-daily-discounts', selectedBusinessDate!)
+      ),
+    enabled: reportEnabled,
   })
 
   const salesData = salesRes?.data as SalesReportData | undefined
@@ -308,7 +272,6 @@ export default function BusinessDayReportsPage() {
   const dailyDeparturesGuests = departuresData?.guests as Array<Record<string, unknown>> | undefined
 
   const dailyDiscountLines = discountsData?.lines ?? []
-  const dailyDiscountSummary = discountsData?.summary
 
   const filteredDiscountLines = useMemo(() => {
     let lines = dailyDiscountLines
@@ -336,11 +299,24 @@ export default function BusinessDayReportsPage() {
     return lines
   }, [dailyDiscountLines, discountSearchQuery, discountSourceFilter])
 
-  const hasDiscountFilters =
-    !!discountSearchQuery ||
-    discountSourceFilter !== 'all' ||
-    discountDatePreset !== 'today' ||
-    (discountDatePreset === 'custom' && !!(discountCustomDateFrom || discountCustomDateTo))
+  // Totals follow the rows on screen so the cards never disagree with the table.
+  const discountTotals = useMemo(() => {
+    const sum = (rows: typeof filteredDiscountLines) =>
+      rows.reduce((total, line) => total + line.discountAmount, 0)
+    const hotel = filteredDiscountLines.filter((line) => line.source === 'hotel')
+    const restaurant = filteredDiscountLines.filter((line) => line.source === 'restaurant')
+
+    return {
+      hotelDiscountTotal: sum(hotel),
+      hotelCount: hotel.length,
+      restaurantDiscountTotal: sum(restaurant),
+      restaurantCount: restaurant.length,
+      totalDiscount: sum(filteredDiscountLines),
+      lineCount: filteredDiscountLines.length,
+    }
+  }, [filteredDiscountLines])
+
+  const hasDiscountFilters = !!discountSearchQuery || discountSourceFilter !== 'all'
 
   const businessDateDisplay =
     (policeData?.businessDateDisplay as string | undefined) ||
@@ -348,6 +324,9 @@ export default function BusinessDayReportsPage() {
     (collectionsData?.businessDateDisplay as string | undefined) ||
     (discountsData?.businessDateDisplay as string | undefined) ||
     selectedBusinessDate
+
+  const discountPeriodDisplay =
+    (discountsData?.businessDateDisplay as string | undefined) || businessDateDisplay
 
   const isPoliceDateRange =
     dateMode === 'range' ||
@@ -986,10 +965,10 @@ export default function BusinessDayReportsPage() {
                 <CardContent className="p-4">
                   <p className="text-sm text-muted-foreground">Hotel discounts</p>
                   <p className="text-2xl font-bold text-red-600">
-                    ৳{(dailyDiscountSummary?.hotelDiscountTotal ?? 0).toLocaleString()}
+                    ৳{discountTotals.hotelDiscountTotal.toLocaleString()}
                   </p>
                   <p className="text-xs text-muted-foreground mt-1">
-                    {dailyDiscountSummary?.hotelCount ?? 0} invoice(s)
+                    {discountTotals.hotelCount} invoice(s)
                   </p>
                 </CardContent>
               </Card>
@@ -997,10 +976,10 @@ export default function BusinessDayReportsPage() {
                 <CardContent className="p-4">
                   <p className="text-sm text-muted-foreground">Restaurant discounts</p>
                   <p className="text-2xl font-bold text-red-600">
-                    ৳{(dailyDiscountSummary?.restaurantDiscountTotal ?? 0).toLocaleString()}
+                    ৳{discountTotals.restaurantDiscountTotal.toLocaleString()}
                   </p>
                   <p className="text-xs text-muted-foreground mt-1">
-                    {dailyDiscountSummary?.restaurantCount ?? 0} order(s)
+                    {discountTotals.restaurantCount} order(s)
                   </p>
                 </CardContent>
               </Card>
@@ -1008,10 +987,10 @@ export default function BusinessDayReportsPage() {
                 <CardContent className="p-4">
                   <p className="text-sm text-muted-foreground">Total discount</p>
                   <p className="text-2xl font-bold text-red-700">
-                    ৳{(dailyDiscountSummary?.totalDiscount ?? 0).toLocaleString()}
+                    ৳{discountTotals.totalDiscount.toLocaleString()}
                   </p>
                   <p className="text-xs text-muted-foreground mt-1">
-                    {dailyDiscountSummary?.lineCount ?? 0} line(s)
+                    {discountTotals.lineCount} line(s)
                   </p>
                 </CardContent>
               </Card>
@@ -1019,9 +998,16 @@ export default function BusinessDayReportsPage() {
 
             <Card>
               <CardHeader className="pb-2 space-y-3">
-                <CardTitle className="text-base">Discount transactions</CardTitle>
+                <div>
+                  <CardTitle className="text-base">Discount transactions</CardTitle>
+                  <p className="text-sm text-muted-foreground font-normal mt-1">
+                    Discounts given on{' '}
+                    <span className="font-medium text-foreground">{discountPeriodDisplay}</span>.
+                    Change the date at the top of the page to see another business day.
+                  </p>
+                </div>
                 <div className="grid grid-cols-1 md:grid-cols-12 gap-2">
-                  <div className="relative md:col-span-5 min-w-0">
+                  <div className="relative md:col-span-8 min-w-0">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <Input
                       placeholder="Search guest, reference, room, company…"
@@ -1030,7 +1016,7 @@ export default function BusinessDayReportsPage() {
                       className="pl-9 h-9 bg-background"
                     />
                   </div>
-                  <div className="md:col-span-3">
+                  <div className="md:col-span-4">
                     <Select
                       value={discountSourceFilter}
                       onValueChange={(v) => setDiscountSourceFilter(v as 'all' | 'hotel' | 'restaurant')}
@@ -1045,41 +1031,7 @@ export default function BusinessDayReportsPage() {
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="md:col-span-4">
-                    <Select
-                      value={discountDatePreset}
-                      onValueChange={(v) => setDiscountDatePreset(v as BookingDatePreset)}
-                    >
-                      <SelectTrigger className="w-full h-9 bg-background">
-                        <SelectValue placeholder="Date" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {BOOKING_DATE_PRESET_OPTIONS.map((opt) => (
-                          <SelectItem key={opt.value} value={opt.value}>
-                            {opt.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
                 </div>
-                {discountDatePreset === 'custom' && (
-                  <div className="flex flex-col sm:flex-row gap-2">
-                    <Input
-                      type="date"
-                      value={discountCustomDateFrom}
-                      onChange={(e) => setDiscountCustomDateFrom(e.target.value)}
-                      className="h-9"
-                    />
-                    <Input
-                      type="date"
-                      value={discountCustomDateTo}
-                      onChange={(e) => setDiscountCustomDateTo(e.target.value)}
-                      min={discountCustomDateFrom || undefined}
-                      className="h-9"
-                    />
-                  </div>
-                )}
                 {hasDiscountFilters && (
                   <p className="text-xs text-muted-foreground">
                     Showing {filteredDiscountLines.length} of {dailyDiscountLines.length} transaction

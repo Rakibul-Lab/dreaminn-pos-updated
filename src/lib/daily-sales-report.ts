@@ -58,6 +58,11 @@ export type DailySalesLine = {
   companyBill: number
   remark: string | null
   total: number
+  /**
+   * Part of `total` that came from the restaurant. Only set on checkout invoice
+   * lines, where a guest's F&B bill is settled together with the room.
+   */
+  restaurantAmount?: number
   reference: string | null
   sortAt: string
 }
@@ -381,6 +386,29 @@ function shouldSkipInvoiceChargeLines(
  * count only today's invoice-linked collections — never the full invoice.totalAmount.
  * Using full invoice inflated Total Sale by prior-day advances already paid.
  */
+function suppressedCheckoutInvoiceCollections(
+  invoiceIdsWithCheckoutPayments: Set<string>,
+  payments: Array<{
+    invoiceId: string | null
+    amount: number
+    paymentType: string
+  }>
+): Map<string, number> {
+  const byInvoice = new Map<string, number>()
+  if (invoiceIdsWithCheckoutPayments.size === 0) return byInvoice
+
+  for (const payment of payments) {
+    if (!payment.invoiceId || !invoiceIdsWithCheckoutPayments.has(payment.invoiceId)) {
+      continue
+    }
+    const delta =
+      payment.paymentType === 'REFUND' ? -Math.abs(payment.amount) : payment.amount
+    byInvoice.set(payment.invoiceId, (byInvoice.get(payment.invoiceId) ?? 0) + delta)
+  }
+
+  return byInvoice
+}
+
 function suppressedCheckoutInvoiceCollectionsTotal(
   invoiceIdsWithCheckoutPayments: Set<string>,
   payments: Array<{
@@ -389,18 +417,13 @@ function suppressedCheckoutInvoiceCollectionsTotal(
     paymentType: string
   }>
 ): number {
-  if (invoiceIdsWithCheckoutPayments.size === 0) return 0
-  return Number(
+  const byInvoice = suppressedCheckoutInvoiceCollections(
+    invoiceIdsWithCheckoutPayments,
     payments
-      .reduce((sum, payment) => {
-        if (!payment.invoiceId || !invoiceIdsWithCheckoutPayments.has(payment.invoiceId)) {
-          return sum
-        }
-        if (payment.paymentType === 'REFUND') return sum - Math.abs(payment.amount)
-        return sum + payment.amount
-      }, 0)
-      .toFixed(2)
   )
+  let total = 0
+  for (const amount of byInvoice.values()) total += amount
+  return Number(total.toFixed(2))
 }
 
 /** Booking advances, reservation payments, walk-in beverage, etc. — not already on charge lines. */
@@ -505,6 +528,25 @@ function buildTransportSalesReportLine(
   }
 }
 
+type InvoiceBillMix = {
+  id: string
+  roomCharges: number
+  foodCharges: number
+  extraCharges: number
+}
+
+/**
+ * Share of a checkout invoice that came from the restaurant. A guest's F&B bills
+ * ride on the folio and are settled with the room, so the invoice has to be split
+ * for the breakdown — otherwise restaurant sales are reported as hotel sales.
+ */
+function invoiceRestaurantShare(invoice: InvoiceBillMix | undefined): number {
+  if (!invoice) return 0
+  const chargeBase = invoice.roomCharges + invoice.foodCharges + invoice.extraCharges
+  if (chargeBase <= 0 || invoice.foodCharges <= 0) return 0
+  return Math.min(1, invoice.foodCharges / chargeBase)
+}
+
 function computeReportBillBreakdown(
   lines: DailySalesLine[],
   invoiceIdsWithCheckoutPayments: Set<string>,
@@ -513,7 +555,8 @@ function computeReportBillBreakdown(
     amount: number
     paymentType: string
   }>,
-  transportBills: number
+  transportBills: number,
+  invoices: InvoiceBillMix[]
 ): { hotelBills: number; restaurantBills: number; transportBills: number } {
   let hotelBills = 0
   let restaurantBills = 0
@@ -527,15 +570,27 @@ function computeReportBillBreakdown(
     })
     if (total <= 0) continue
     if (line.source === 'invoice' || line.source === 'beverage') {
-      hotelBills += total > 0 ? total : 0
+      const fromRestaurant = Math.min(total, Math.max(0, line.restaurantAmount ?? 0))
+      restaurantBills += fromRestaurant
+      hotelBills += total - fromRestaurant
     } else if (line.source === 'restaurant' || line.source === 'guest-restaurant-bill') {
       restaurantBills += total
     }
   }
-  hotelBills += suppressedCheckoutInvoiceCollectionsTotal(
+
+  // Checkout invoices paid the same day show as collection rows instead of charge
+  // rows, so split what was collected on each one the same way.
+  const invoiceById = new Map(invoices.map((invoice) => [invoice.id, invoice]))
+  const suppressedCollections = suppressedCheckoutInvoiceCollections(
     invoiceIdsWithCheckoutPayments,
     payments
   )
+  for (const [invoiceId, collected] of suppressedCollections) {
+    const share = invoiceRestaurantShare(invoiceById.get(invoiceId))
+    restaurantBills += collected * share
+    hotelBills += collected * (1 - share)
+  }
+
   return {
     hotelBills: Number(hotelBills.toFixed(2)),
     restaurantBills: Number(restaurantBills.toFixed(2)),
@@ -821,6 +876,12 @@ export async function buildDailySalesDetailReport(
         ? resolveCheckoutFoodPaymentAllocation(booking.id, restaurantOrders, foodExtra)
         : { cash: 0, card: 0, mbanking: 0 }
       const foodCompanyBill = invoice.roomCharges > 0 ? 0 : companyBill
+      const foodLineTotal = resolveChargeLineTotal(foodExtra, {
+        companyBill: foodCompanyBill,
+        cash: billPayment.cash,
+        card: billPayment.card,
+        mbanking: billPayment.mbanking,
+      })
 
       lines.push({
         id: `${invoice.id}-food`,
@@ -836,12 +897,10 @@ export async function buildDailySalesDetailReport(
         mbanking: billPayment.mbanking,
         companyBill: foodCompanyBill,
         remark: buildCheckoutInvoiceFoodRemark(invoice.invoiceNumber, restaurantBillRemark),
-        total: resolveChargeLineTotal(foodExtra, {
-          companyBill: foodCompanyBill,
-          cash: billPayment.cash,
-          card: billPayment.card,
-          mbanking: billPayment.mbanking,
-        }),
+        total: foodLineTotal,
+        restaurantAmount: Number(
+          (foodLineTotal * (invoice.foodCharges / foodExtra)).toFixed(2)
+        ),
         reference: invoice.invoiceNumber,
         sortAt,
       })
@@ -1088,7 +1147,8 @@ export async function buildDailySalesDetailReport(
     sortedLines,
     invoiceIdsWithCheckoutPayments,
     allPayments,
-    transportSalesTotal
+    transportSalesTotal,
+    invoices
   )
   const companyBillTotal = companyBills.reduce((s, bill) => s + bill.dueAmount, 0)
   const balances =

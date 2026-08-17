@@ -99,6 +99,8 @@ export type PaperSalesInputLine = {
   companyBill?: number
   remark?: string | null
   total?: number
+  /** Part of `total` billed by the restaurant (guest F&B settled on a hotel invoice). */
+  restaurantAmount?: number
   lineType?: 'charge' | 'payment'
   source?: 'invoice' | 'restaurant' | 'beverage' | 'transport' | 'guest-restaurant-bill' | 'payment'
 }
@@ -256,7 +258,9 @@ export function computeBillBreakdown(
     const total = resolveChargeLineTotal(line.total ?? 0, line)
     if (total <= 0) continue
     if (line.source === 'invoice' || line.source === 'beverage') {
-      hotelBills += total
+      const fromRestaurant = Math.min(total, Math.max(0, line.restaurantAmount ?? 0))
+      restaurantBills += fromRestaurant
+      hotelBills += total - fromRestaurant
     } else if (line.source === 'transport') {
       transportBills += total
     } else if (line.source === 'restaurant' || line.source === 'guest-restaurant-bill') {
@@ -313,9 +317,10 @@ export function buildPaperSummary(data: PaperSalesInput): PaperSummary {
     data.cashReconciliation?.cashOnHand ??
     openingBalance + cashCollectedToday - cashSentToHeadOffice
 
-  const { hotelBills, restaurantBills, transportBills } =
-    data.billBreakdown ??
-    computeBillBreakdown(data.lines)
+  const breakdown = data.billBreakdown ?? computeBillBreakdown(data.lines)
+  const hotelBills = breakdown.hotelBills ?? 0
+  const restaurantBills = breakdown.restaurantBills ?? 0
+  const transportBills = breakdown.transportBills ?? 0
 
   return {
     totalSale,

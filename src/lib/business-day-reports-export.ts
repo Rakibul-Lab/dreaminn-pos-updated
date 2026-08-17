@@ -87,9 +87,16 @@ export type SalesReportData = {
     companyBill?: number
     remark?: string | null
     total?: number
+    restaurantAmount?: number
     reference?: string | null
     lineType?: 'charge' | 'payment'
-    source?: 'invoice' | 'restaurant' | 'beverage' | 'guest-restaurant-bill' | 'payment'
+    source?:
+      | 'invoice'
+      | 'restaurant'
+      | 'beverage'
+      | 'transport'
+      | 'guest-restaurant-bill'
+      | 'payment'
   }>
   balances?: {
     openingBalance?: number

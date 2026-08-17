@@ -70,6 +70,7 @@ export function CompanyLedgerPage() {
   const queryClient = useQueryClient();
   const user = useAuthStore((s) => s.user);
   const isAdmin = canAccessAdmin(user?.role);
+  const isRestaurantStaff = user?.role === 'RESTAURANT_STAFF';
   const [searchInput, setSearchInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [page, setPage] = useState(1);
@@ -101,6 +102,7 @@ export function CompanyLedgerPage() {
         meta?: { total: number; totalPages: number };
       }>(`/company-ledger?${params.toString()}`);
     },
+    enabled: !isRestaurantStaff,
   });
 
   const companies = listQuery.data?.data ?? [];
@@ -193,13 +195,23 @@ export function CompanyLedgerPage() {
             <Eye className="w-4 h-4 mr-2" />
             CloudView Restaurant
           </Button>
+          {!isRestaurantStaff && (
           <Button className="bg-amber-600 hover:bg-amber-700 text-white" onClick={openAddCompany}>
             <Plus className="w-4 h-4 mr-2" />
             Add Company
           </Button>
+          )}
         </div>
       </div>
 
+      {isRestaurantStaff ? (
+        <Card>
+          <CardContent className="py-10 text-center text-muted-foreground">
+            <p>Open CloudView Restaurant to view, clear, and collect hotel-owed restaurant bills.</p>
+          </CardContent>
+        </Card>
+      ) : (
+      <>
       <div className="relative max-w-md">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <Input
@@ -357,6 +369,8 @@ export function CompanyLedgerPage() {
             )
           )}
         </div>
+      )}
+      </>
       )}
 
       <Dialog open={companyDialogOpen} onOpenChange={setCompanyDialogOpen}>

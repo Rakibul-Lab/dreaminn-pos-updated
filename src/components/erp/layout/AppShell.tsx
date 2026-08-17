@@ -25,32 +25,13 @@ const viewComponents: Record<ViewId, React.ComponentType> = {
   customers: CustomersPage,
   'company-ledger': CompanyLedgerPage,
   housekeeping: HousekeepingPage,
-  // Placeholder pages for views not yet built
-  'restaurant-pos': PlaceholderPage,
-  menu: PlaceholderPage,
-  tables: PlaceholderPage,
-  orders: PlaceholderPage,
-  kitchen: PlaceholderPage,
   invoices: PlaceholderPage,
   payments: PlaceholderPage,
+  deposits: PlaceholderPage,
   reports: PlaceholderPage,
   inventory: PlaceholderPage,
   settings: PlaceholderPage,
   'activity-logs': PlaceholderPage,
-};
-
-const viewLabels: Record<string, string> = {
-  'restaurant-pos': 'Restaurant POS',
-  menu: 'Menu Management',
-  tables: 'Table Management',
-  orders: 'Orders',
-  kitchen: 'Kitchen Display',
-  invoices: 'Invoices',
-  payments: 'Payments',
-  reports: 'Reports',
-  inventory: 'Inventory',
-  settings: 'Settings',
-  'activity-logs': 'Activity Logs',
 };
 
 export function AppShell() {
@@ -67,10 +48,8 @@ export function AppShell() {
 
   // Determine default view based on role
   if (activeView === 'dashboard' && user?.role === 'RESTAURANT_STAFF') {
-    // Restaurant staff should start at restaurant-pos
-    // We do this once
     if (activeView === 'dashboard') {
-      setTimeout(() => setActiveView('restaurant-pos'), 0);
+      setTimeout(() => setActiveView('payments'), 0);
     }
   }
 

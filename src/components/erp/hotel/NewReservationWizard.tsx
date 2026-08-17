@@ -90,6 +90,7 @@ import {
   type CorporateCompanionDraft,
 } from './CorporateCompanionGuestFields'
 import { INVOICE_SERVICE_CHARGE_PERCENT } from '@/lib/invoice-display'
+import { stripSystemBookingNotes } from '@/lib/invoice-notes'
 import { hasBookingCompany } from '@/lib/booking-company'
 import { getPhoneValidationMessage } from '@/lib/phone'
 import {
@@ -787,7 +788,7 @@ export function NewReservationWizard({
         payment: {
           advancePayment: '0',
           advancePaymentMethod: 'NONE',
-          reservationNotes: String(booking.notes ?? ''),
+          reservationNotes: stripSystemBookingNotes(String(booking.notes ?? '')) ?? '',
           chargesEditEnabled: booking.vatApplied === true,
           vatPercent: String(booking.vatPercent ?? defaultVatPercent),
           serviceChargePercent: String(

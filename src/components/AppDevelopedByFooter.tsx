@@ -25,7 +25,7 @@ export function AppDevelopedByFooter({
     >
       {showProductLine && (
         <p className="text-xs text-muted-foreground mb-1">
-          RRP Dream Inn + CloudView Restaurant ERP &copy; {new Date().getFullYear()}
+          RRP Dream Inn ERP &copy; {new Date().getFullYear()}
         </p>
       )}
       <p className="text-xs text-muted-foreground">{DEVELOPED_BY_LABEL}</p>

@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { EmailInput } from '@/components/ui/email-input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { Eye, EyeOff, Loader2, KeyRound, Hotel, UtensilsCrossed } from 'lucide-react';
+import { Eye, EyeOff, Loader2, KeyRound, Hotel } from 'lucide-react';
 import { api } from '@/lib/api-client';
 import { useAuthStore } from '@/lib/auth-store';
 import { toast } from 'sonner';
@@ -78,13 +78,8 @@ export function LoginPage() {
                   <Hotel className="h-3 w-3 mr-1" />
                   RRP Dream Inn
                 </Badge>
-                <span className="text-muted-foreground">+</span>
-                <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200 hover:bg-emerald-100">
-                  <UtensilsCrossed className="h-3 w-3 mr-1" />
-                  CloudView
-                </Badge>
               </div>
-              <p className="text-sm text-muted-foreground mt-2">Hotel & Restaurant ERP System</p>
+              <p className="text-sm text-muted-foreground mt-2">Hotel ERP System</p>
             </div>
 
             <CardHeader className="p-0 pb-4">

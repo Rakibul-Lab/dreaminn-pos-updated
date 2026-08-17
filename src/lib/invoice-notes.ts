@@ -20,10 +20,12 @@ function isGenericPaymentNote(note: string): boolean {
 const SYSTEM_NOTE_PATTERNS = [
   /^Auto-extended\b/i,
   /checkout grace\.?$/i,
+  /^Converted from reservation entry\.?$/i,
+  /^Booked by:/i,
 ]
 
 /** Drop auto-generated system lines, keep only human-written booking notes. */
-function stripSystemBookingNotes(notes?: string | null): string | null {
+export function stripSystemBookingNotes(notes?: string | null): string | null {
   if (!notes) return null
   const kept = notes
     .split('\n')

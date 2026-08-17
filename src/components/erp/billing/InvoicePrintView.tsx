@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Image from 'next/image'
 import { useQuery } from '@tanstack/react-query'
 import { format } from 'date-fns'
@@ -49,7 +49,10 @@ import {
   resolveRestaurantInvoiceServicePercentLabel,
   resolveRestaurantInvoiceVatPercentLabel,
 } from '@/lib/invoice-charge-rows'
-import { formatInvoiceNumberDisplay } from '@/lib/invoice-number'
+import {
+  formatInvoiceNumberDisplay,
+  formatInvoiceUrlIdentifier,
+} from '@/lib/invoice-number'
 import { INVOICE_GUEST_AGREEMENT } from '@/lib/reservation-terms'
 import { formatBookingStatusFilterLabel } from '@/lib/booking-date-filter'
 import { isManualRecordPaymentType } from '@/lib/payment-method'
@@ -201,6 +204,19 @@ export function InvoicePrintView({
   })
 
   const invoice = data?.data
+
+  useEffect(() => {
+    if (!invoice || typeof window === 'undefined') return
+    const publicIdentifier = formatInvoiceUrlIdentifier(invoice.invoiceNumber)
+    const publicPath = `/invoice/${encodeURIComponent(publicIdentifier)}`
+    if (window.location.pathname === publicPath) return
+    window.history.replaceState(
+      window.history.state,
+      '',
+      `${publicPath}${window.location.search}${window.location.hash}`
+    )
+  }, [invoice])
+
   const roomBill = invoice?.roomCharges || 0
   const restaurantOrders = invoice?.booking?.restaurantOrders || []
   const restaurantSubtotal = restaurantOrders.reduce((sum, o) => sum + o.subtotal, 0)

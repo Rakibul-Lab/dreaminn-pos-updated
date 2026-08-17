@@ -10,6 +10,7 @@ import { collectInvoiceNotes } from '@/lib/invoice-notes';
 import { mergeFolioPayments, formatManualChargeInvoiceNote } from '@/lib/invoice-payments';
 import { filterGuestFolioRestaurantOrders } from '@/lib/restaurant-order-billing';
 import { InvoiceStatus } from '@prisma/client';
+import { invoiceNumberCandidates } from '@/lib/invoice-number';
 
 // GET /api/invoices/[id] - Get invoice detail
 export async function GET(
@@ -21,9 +22,15 @@ export async function GET(
     if (authResult instanceof Response) return authResult;
 
     const { id } = await params;
+    const invoiceNumbers = invoiceNumberCandidates(id);
 
-    const invoice = await db.invoice.findUnique({
-      where: { id },
+    const invoice = await db.invoice.findFirst({
+      where: {
+        OR: [
+          { id },
+          { invoiceNumber: { in: invoiceNumbers } },
+        ],
+      },
       include: {
         booking: {
           select: {

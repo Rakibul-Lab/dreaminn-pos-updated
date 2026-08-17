@@ -353,6 +353,12 @@ function buildRestaurantRowsFromLineItems(ctx: BuildRowsContext): InvoiceChargeD
     .map((item) => {
       const { date, time } = ctx.resolveItemDateTime('food_order', item.referenceId)
       const gross = item.total
+      const order = ctx.restaurantOrders.find((row) => row.id === item.referenceId)
+      const isManualBill = Boolean(order && isGuestFolioManualRestaurantBill(order))
+      const manualBillLabel =
+        order?.notes?.trim()?.split('\n')[0]?.trim() ||
+        item.description.replace(/\s*\(Order\s+#?[^)]+\)\s*$/i, '').trim() ||
+        'Restaurant bill'
       if (gross <= 0 || item.description.toLowerCase().includes('discount')) {
         const discountAmount = Math.abs(gross)
         return buildChargeDisplayRow({
@@ -382,8 +388,8 @@ function buildRestaurantRowsFromLineItems(ctx: BuildRowsContext): InvoiceChargeD
         id: item.id,
         date,
         time,
-        category: 'F&B',
-        description: item.description,
+        category: isManualBill ? manualBillLabel : 'F&B',
+        description: isManualBill ? '' : item.description,
         grossRent: gross,
         vatPercent,
         servicePercent,
@@ -410,14 +416,17 @@ function buildFallbackRestaurantRows(ctx: BuildRowsContext): InvoiceChargeDispla
         ? order.vatPercent
         : GUEST_FOLIO_RESTAURANT_VAT_PERCENT
       : vatPercent
+  const isManualBill = Boolean(order && isGuestFolioManualRestaurantBill(order))
+  const manualBillLabel =
+    order?.notes?.trim()?.split('\n')[0]?.trim() || 'Restaurant bill'
 
   return [
     buildInclusiveGrossChargeRow({
       id: 'fb-food',
       date: dt.date,
       time: dt.time,
-      category: 'F&B',
-      description: 'Restaurant charges',
+      category: isManualBill ? manualBillLabel : 'F&B',
+      description: isManualBill ? '' : 'Restaurant charges',
       grossRent: ctx.restaurantBill,
       vatPercent: resolvedVat,
       servicePercent,

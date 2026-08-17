@@ -230,9 +230,7 @@ function buildRestaurantLines(orders: RestaurantOrderRow[]): InvoiceLineItemInpu
         lines.push({
           itemType: 'food_order',
           referenceId: order.id,
-          description: label
-            ? `${label} (Order ${orderLabel})`
-            : `Restaurant order ${orderLabel}`,
+          description: label || 'Restaurant bill',
           quantity: 1,
           unitPrice: order.totalAmount,
           total: order.totalAmount,

@@ -10,6 +10,7 @@ import { formatBookingDateOnly } from '@/lib/hotel-times'
 import { formatPaymentMethod, formatPaymentCategoryLabel } from '@/lib/payment-method'
 import { sumBookingNetPaid } from '@/lib/booking-totals'
 import { resolveBookingRegistrationNumber } from '@/lib/booking-registration'
+import { stripSystemBookingNotes } from '@/lib/invoice-notes'
 import { BookingPaymentSlipButton } from './BookingPaymentSlipButton'
 
 type BookingCompanion = {
@@ -132,6 +133,7 @@ export function RoomBookingGuestPanel({ bookingId }: { bookingId: string }) {
     booking.companions?.filter((c) => c.companionType === 'CHILD') ?? []
   const totalPaid = sumBookingNetPaid(booking.payments)
   const stayRegistrationNumber = resolveBookingRegistrationNumber(booking)
+  const visibleBookingNotes = stripSystemBookingNotes(booking.notes)
 
   return (
     <div className="space-y-4 max-h-[min(60vh,520px)] overflow-y-auto custom-scrollbar pr-1">
@@ -210,10 +212,10 @@ export function RoomBookingGuestPanel({ bookingId }: { bookingId: string }) {
         />
       ))}
 
-      {booking.notes?.trim() ? (
+      {visibleBookingNotes ? (
         <div className="rounded-lg border bg-card p-3 space-y-1">
           <p className="text-sm font-semibold">Notes</p>
-          <p className="text-sm text-muted-foreground whitespace-pre-wrap">{booking.notes}</p>
+          <p className="text-sm text-muted-foreground whitespace-pre-wrap">{visibleBookingNotes}</p>
         </div>
       ) : null}
 

@@ -20,24 +20,24 @@ const notoBengali = Noto_Sans_Bengali({
 });
 
 export const metadata: Metadata = {
-  title: "RRP Dream Inn + CloudView ERP",
-  description: "Hotel & Restaurant ERP System - RRP Dream Inn and CloudView Restaurant Management",
-  keywords: ["ERP", "Hotel", "Restaurant", "Management", "Booking", "POS"],
+  title: "RRP Dream Inn ERP",
+  description: "Hotel ERP System - RRP Dream Inn Management",
+  keywords: ["ERP", "Hotel", "Management", "Booking"],
   authors: [{ name: "RRP Dream Inn" }],
   icons: {
     icon: "/brand-logo.png",
   },
   openGraph: {
-    title: "RRP Dream Inn + CloudView ERP",
-    description: "Hotel & Restaurant ERP System for operations, billing, and POS.",
+    title: "RRP Dream Inn ERP",
+    description: "Hotel ERP System for operations and billing.",
     url: "http://localhost:3000",
-    siteName: "RRP Dream Inn + CloudView",
+    siteName: "RRP Dream Inn",
     type: "website",
   },
   twitter: {
     card: "summary_large_image",
-    title: "RRP Dream Inn + CloudView ERP",
-    description: "Hotel & Restaurant ERP System for operations, billing, and POS.",
+    title: "RRP Dream Inn ERP",
+    description: "Hotel ERP System for operations and billing.",
   },
 };
 

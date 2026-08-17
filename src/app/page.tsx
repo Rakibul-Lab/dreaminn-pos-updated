@@ -1,10 +1,10 @@
 'use client'
 
-import { useState, useRef, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import dynamic from 'next/dynamic'
 import Image from 'next/image'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useAuthStore, canAccessHotel, canAccessRestaurant, canAccessAdmin } from '@/lib/auth-store'
+import { useAuthStore, canAccessHotel } from '@/lib/auth-store'
 import { CURRENT_PAGE_STORAGE_KEY } from '@/lib/session'
 import { formatRoleLabel } from '@/lib/roles'
 import { cn } from '@/lib/utils'
@@ -12,9 +12,9 @@ import { useAuthHydration } from '@/hooks/use-auth-hydration'
 import { api } from '@/lib/api-client'
 import {
   LayoutDashboard, FileText, CreditCard, BarChart3, Users, Settings,
-  ScrollText, Package, LogOut, Hotel, UtensilsCrossed, Menu, X,
-  Bed, CalendarCheck, UserCircle, SprayCan, ShoppingCart,
-  ChefHat, Grid3X3, ClipboardList, DoorOpen, Tag, Bell, Loader2, User, UserRound,
+  ScrollText, Package, LogOut, Hotel, Menu, X,
+  Bed, CalendarCheck, UserCircle, SprayCan,
+  Tag, Bell, Loader2, User,
   ChevronLeft, ChevronRight, Building2, Landmark, Lock, CalendarClock, Coffee, Car,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -80,12 +80,6 @@ const HotelBeverageSalesPage = dynamicPage(() =>
 const TransportSalesPage = dynamicPage(() =>
   import('@/components/erp/hotel/TransportSalesPage').then((m) => m.TransportSalesPage)
 )
-const POSPage = dynamicPage(() => import('@/components/erp/restaurant/POSPage'))
-const MenuPage = dynamicPage(() => import('@/components/erp/restaurant/MenuPage'))
-const OrdersPage = dynamicPage(() => import('@/components/erp/restaurant/OrdersPage'))
-const KitchenPage = dynamicPage(() => import('@/components/erp/restaurant/KitchenPage'))
-const TablesPage = dynamicPage(() => import('@/components/erp/restaurant/TablesPage'))
-const WaitersPage = dynamicPage(() => import('@/components/erp/restaurant/WaitersPage'))
 const InvoicesPage = dynamicPage(() => import('@/components/erp/billing/InvoicesPage'))
 const PaymentsPage = dynamicPage(() => import('@/components/erp/billing/PaymentsPage'))
 const DepositsPage = dynamicPage(() => import('@/components/erp/billing/DepositsPage'))
@@ -105,7 +99,6 @@ const ProfilePage = dynamicPage(() =>
 
 type PageKey = 
   | 'hotel-dashboard' | 'rooms' | 'room-types' | 'bookings' | 'customers' | 'company-ledger' | 'housekeeping' | 'hotel-beverage-sales' | 'transport-sales'
-  | 'pos' | 'menu' | 'orders' | 'kitchen' | 'tables' | 'waiters'
   | 'invoices' | 'payments' | 'deposits' | 'reports' | 'day-close' | 'business-day-reports'
   | 'admin-dashboard' | 'users' | 'settings' | 'logs' | 'inventory'
   | 'profile'
@@ -134,21 +127,13 @@ const navItems: NavItem[] = [
   { key: 'room-types', label: 'Room Types', icon: <Tag className="h-4 w-4" />, allowedRoles: ['ADMIN', 'HOTEL_STAFF'], group: 'RRP Dream Inn' },
   { key: 'bookings', label: 'Bookings', icon: <CalendarCheck className="h-4 w-4" />, allowedRoles: ['ADMIN', 'HOTEL_STAFF', 'HOTEL_FD'], group: 'RRP Dream Inn' },
   { key: 'customers', label: 'Guests', icon: <UserCircle className="h-4 w-4" />, allowedRoles: ['ADMIN', 'HOTEL_STAFF', 'HOTEL_FD'], group: 'RRP Dream Inn' },
-  { key: 'company-ledger', label: 'Company Ledger', icon: <Building2 className="h-4 w-4" />, allowedRoles: ['ADMIN', 'HOTEL_STAFF', 'HOTEL_FD'], group: 'RRP Dream Inn' },
+  { key: 'company-ledger', label: 'Company Ledger', icon: <Building2 className="h-4 w-4" />, allowedRoles: ['ADMIN', 'HOTEL_STAFF', 'HOTEL_FD', 'RESTAURANT_STAFF'], group: 'RRP Dream Inn' },
   { key: 'housekeeping', label: 'Housekeeping', icon: <SprayCan className="h-4 w-4" />, allowedRoles: ['ADMIN', 'HOTEL_STAFF', 'HOTEL_FD'], group: 'RRP Dream Inn' },
   { key: 'hotel-beverage-sales', label: 'Beverage Sales', icon: <Coffee className="h-4 w-4" />, allowedRoles: ['ADMIN', 'HOTEL_STAFF', 'HOTEL_FD'], group: 'RRP Dream Inn' },
   { key: 'transport-sales', label: 'Transport', icon: <Car className="h-4 w-4" />, allowedRoles: ['ADMIN', 'HOTEL_STAFF', 'HOTEL_FD'], group: 'RRP Dream Inn' },
   // Housekeeper — rooms (view only) + inventory
   { key: 'rooms', label: 'Rooms', icon: <Bed className="h-4 w-4" />, allowedRoles: ['HOUSEKEEPER'], group: 'Housekeeping' },
   { key: 'inventory', label: 'Inventory', icon: <Package className="h-4 w-4" />, allowedRoles: ['HOUSEKEEPER'], group: 'Housekeeping' },
-  // Restaurant - CloudView
-  { key: 'hotel-dashboard', label: 'Dashboard', icon: <LayoutDashboard className="h-4 w-4" />, allowedRoles: ['RESTAURANT_STAFF'], group: 'CloudView' },
-  { key: 'pos', label: 'POS Terminal', icon: <ShoppingCart className="h-4 w-4" />, allowedRoles: ['ADMIN', 'RESTAURANT_STAFF'], group: 'CloudView' },
-  { key: 'menu', label: 'Menu Management', icon: <UtensilsCrossed className="h-4 w-4" />, allowedRoles: ['ADMIN', 'RESTAURANT_STAFF'], group: 'CloudView' },
-  { key: 'orders', label: 'Orders', icon: <ClipboardList className="h-4 w-4" />, allowedRoles: ['ADMIN', 'RESTAURANT_STAFF'], group: 'CloudView' },
-  { key: 'kitchen', label: 'Kitchen Display', icon: <ChefHat className="h-4 w-4" />, allowedRoles: ['ADMIN', 'RESTAURANT_STAFF', 'HOTEL_STAFF', 'HOTEL_FD'], group: 'CloudView' },
-  { key: 'tables', label: 'Tables', icon: <Grid3X3 className="h-4 w-4" />, allowedRoles: ['ADMIN', 'RESTAURANT_STAFF'], group: 'CloudView' },
-  { key: 'waiters', label: 'Waiters', icon: <UserRound className="h-4 w-4" />, allowedRoles: ['ADMIN', 'RESTAURANT_STAFF'], group: 'CloudView' },
   // Billing
   { key: 'invoices', label: 'Invoices', icon: <FileText className="h-4 w-4" />, allowedRoles: ['ADMIN', 'HOTEL_STAFF', 'HOTEL_FD'], group: 'Billing' },
   { key: 'payments', label: 'Payments', icon: <CreditCard className="h-4 w-4" />, allowedRoles: ['ADMIN', 'HOTEL_STAFF', 'HOTEL_FD', 'RESTAURANT_STAFF'], group: 'Billing' },
@@ -239,10 +224,6 @@ function LoginForm() {
                 <Badge className="bg-amber-100 text-amber-700 border-amber-200 hover:bg-amber-100">
                   <Hotel className="h-3 w-3 mr-1" /> RRP Dream Inn
                 </Badge>
-                <span className="text-slate-300">+</span>
-                <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200 hover:bg-emerald-100">
-                  <UtensilsCrossed className="h-3 w-3 mr-1" /> CloudView
-                </Badge>
               </div>
             </div>
 
@@ -294,7 +275,7 @@ function getDefaultPage(role: string | undefined): PageKey {
   if (role === 'ADMIN') return 'admin-dashboard'
   if (role === 'HOUSEKEEPER') return 'rooms'
   if (role === 'HOTEL_STAFF' || role === 'HOTEL_FD') return 'hotel-dashboard'
-  if (role === 'RESTAURANT_STAFF') return 'hotel-dashboard'
+  if (role === 'RESTAURANT_STAFF') return 'payments'
   return 'hotel-dashboard'
 }
 
@@ -308,12 +289,6 @@ const pageTitles: Record<PageKey, string> = {
   'housekeeping': 'Housekeeping',
   'hotel-beverage-sales': 'Beverage Sales',
   'transport-sales': 'Transport Sales',
-  'pos': 'POS Terminal',
-  'menu': 'Menu Management',
-  'orders': 'Order Management',
-  'kitchen': 'Kitchen Display',
-  'tables': 'Table Management',
-  'waiters': 'Waiter Management',
   'invoices': 'Invoices',
   'payments': 'Payments',
   'deposits': 'Head Office',
@@ -438,12 +413,6 @@ function ERPApp() {
       case 'housekeeping': return <HousekeepingPage />
       case 'hotel-beverage-sales': return <HotelBeverageSalesPage />
       case 'transport-sales': return <TransportSalesPage />
-      case 'pos': return <POSPage />
-      case 'menu': return <MenuPage />
-      case 'orders': return <OrdersPage />
-      case 'kitchen': return <KitchenPage />
-      case 'tables': return <TablesPage />
-      case 'waiters': return <WaitersPage />
       case 'invoices': return <InvoicesPage />
       case 'payments': return <PaymentsPage />
       case 'deposits': return <DepositsPage />
@@ -498,7 +467,6 @@ function ERPApp() {
 
   const groupColors: Record<string, string> = {
     'RRP Dream Inn': 'text-emerald-600',
-    'CloudView': 'text-amber-600',
     'Billing': 'text-muted-foreground',
     'Analytics': 'text-muted-foreground',
     'System': 'text-red-600',
@@ -507,7 +475,6 @@ function ERPApp() {
 
   const groupBgColors: Record<string, string> = {
     'RRP Dream Inn': 'bg-emerald-50',
-    'CloudView': 'bg-amber-50',
     'Billing': 'bg-muted',
     'Analytics': 'bg-muted',
     'System': 'bg-red-50',
@@ -567,7 +534,7 @@ function ERPApp() {
             {!sidebarCollapsed && (
               <div className="flex-1 min-w-0">
                 <h1 className="font-bold text-foreground text-sm leading-tight">RRP Dream Inn</h1>
-                <p className="text-[11px] text-amber-600 font-medium">+ CloudView Restaurant</p>
+                <p className="text-[11px] text-muted-foreground font-medium">Hotel ERP</p>
               </div>
             )}
             <Button
@@ -758,10 +725,10 @@ function ERPApp() {
                 <div className="px-3 py-2 border-t bg-muted/60">
                   <button
                     type="button"
-                    onClick={() => handlePageNavigation('orders')}
+                    onClick={() => handlePageNavigation('payments')}
                     className="text-xs text-muted-foreground hover:text-foreground"
                   >
-                    Go to orders
+                    Go to payments
                   </button>
                 </div>
               </DropdownMenuContent>

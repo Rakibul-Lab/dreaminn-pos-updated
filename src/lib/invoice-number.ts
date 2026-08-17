@@ -16,3 +16,22 @@ export function formatInvoiceNumberDisplay(invoiceNumber: string): string {
   return invoiceNumber.replace(/^(INV-|RRP-DI-)/i, '')
 }
 
+/** Stable, human-readable identifier used in public invoice URLs. */
+export function formatInvoiceUrlIdentifier(invoiceNumber: string): string {
+  return `RRP-DI-${formatInvoiceNumberDisplay(invoiceNumber)}`
+}
+
+/** Possible stored invoice-number forms accepted from a public URL identifier. */
+export function invoiceNumberCandidates(identifier: string): string[] {
+  const decoded = decodeURIComponent(identifier).trim()
+  const normalized = formatInvoiceNumberDisplay(decoded)
+  return Array.from(
+    new Set([
+      decoded,
+      normalized,
+      `INV-${normalized}`,
+      `RRP-DI-${normalized}`,
+    ])
+  )
+}
+

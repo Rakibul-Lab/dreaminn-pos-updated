@@ -4,20 +4,14 @@ import { useState } from 'react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Separator } from '@/components/ui/separator';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import {
   Building2,
-  Cloud,
   LayoutDashboard,
   BedDouble,
   Layers,
   CalendarCheck,
   Users,
-  ShoppingCart,
-  UtensilsCrossed,
-  Grid3X3,
-  ChefHat,
   Receipt,
   CreditCard,
   Landmark,
@@ -39,11 +33,6 @@ export type ViewId =
   | 'bookings'
   | 'customers'
   | 'company-ledger'
-  | 'restaurant-pos'
-  | 'menu'
-  | 'tables'
-  | 'orders'
-  | 'kitchen'
   | 'invoices'
   | 'payments'
   | 'deposits'
@@ -57,7 +46,7 @@ interface NavItem {
   id: ViewId;
   label: string;
   icon: React.ElementType;
-  section?: 'hotel' | 'restaurant' | 'admin';
+  section?: 'hotel' | 'admin';
 }
 
 const allNavItems: NavItem[] = [
@@ -67,11 +56,6 @@ const allNavItems: NavItem[] = [
   { id: 'bookings', label: 'Bookings', icon: CalendarCheck, section: 'hotel' },
   { id: 'customers', label: 'Customers', icon: Users, section: 'hotel' },
   { id: 'company-ledger', label: 'Company Ledger', icon: Building2, section: 'hotel' },
-  { id: 'restaurant-pos', label: 'Restaurant POS', icon: ShoppingCart, section: 'restaurant' },
-  { id: 'menu', label: 'Menu', icon: UtensilsCrossed, section: 'restaurant' },
-  { id: 'tables', label: 'Tables', icon: Grid3X3, section: 'restaurant' },
-  { id: 'orders', label: 'Orders', icon: Receipt, section: 'restaurant' },
-  { id: 'kitchen', label: 'Kitchen', icon: ChefHat, section: 'restaurant' },
   { id: 'invoices', label: 'Invoices', icon: Receipt, section: 'hotel' },
   { id: 'payments', label: 'Payments', icon: CreditCard, section: 'admin' },
   { id: 'deposits', label: 'Head Office', icon: Landmark, section: 'hotel' },
@@ -85,19 +69,18 @@ const allNavItems: NavItem[] = [
 const roleNavItems: Record<string, ViewId[]> = {
   ADMIN: [
     'dashboard', 'rooms', 'room-types', 'bookings', 'customers', 'company-ledger',
-    'restaurant-pos', 'menu', 'tables', 'orders', 'kitchen',
     'invoices', 'payments', 'deposits', 'reports', 'housekeeping', 'inventory', 'settings', 'activity-logs',
   ],
   HOTEL_STAFF: [
     'dashboard', 'rooms', 'room-types', 'bookings', 'customers', 'company-ledger',
-    'kitchen', 'invoices', 'payments', 'deposits', 'reports', 'housekeeping',
+    'invoices', 'payments', 'deposits', 'reports', 'housekeeping',
   ],
   HOTEL_FD: [
     'dashboard', 'rooms', 'bookings', 'customers', 'company-ledger',
-    'kitchen', 'invoices', 'payments', 'deposits', 'reports', 'housekeeping',
+    'invoices', 'payments', 'deposits', 'reports', 'housekeeping',
   ],
   RESTAURANT_STAFF: [
-    'restaurant-pos', 'menu', 'orders', 'kitchen', 'tables',
+    'company-ledger', 'payments', 'reports',
   ],
   HOUSEKEEPER: ['rooms', 'inventory'],
 };
@@ -116,7 +99,6 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
   const filteredNavItems = allNavItems.filter((item) => allowedViews.includes(item.id));
 
   const hotelItems = filteredNavItems.filter((item) => item.section === 'hotel');
-  const restaurantItems = filteredNavItems.filter((item) => item.section === 'restaurant');
   const adminItems = filteredNavItems.filter((item) => item.section === 'admin');
 
   const getInitials = (name: string) => {
@@ -143,7 +125,7 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
         {!collapsed && (
           <div className="flex-1 min-w-0">
             <p className="text-sm font-bold text-amber-400 truncate">RRP Dream Inn</p>
-            <p className="text-xs text-muted-foreground truncate">+ CloudView</p>
+            <p className="text-xs text-muted-foreground truncate">Hotel ERP</p>
           </div>
         )}
         <Button
@@ -158,7 +140,6 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
 
       {/* Navigation */}
       <ScrollArea className="flex-1 py-2">
-        {/* Hotel Section */}
         {hotelItems.length > 0 && (
           <div className="mb-2">
             {!collapsed && (
@@ -178,27 +159,6 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
           </div>
         )}
 
-        {/* Restaurant Section */}
-        {restaurantItems.length > 0 && (
-          <div className="mb-2">
-            {!collapsed && (
-              <p className="px-4 py-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mt-2">
-                CloudView Restaurant
-              </p>
-            )}
-            {restaurantItems.map((item) => (
-              <NavItemButton
-                key={item.id}
-                item={item}
-                active={activeView === item.id}
-                collapsed={collapsed}
-                onClick={() => onViewChange(item.id)}
-              />
-            ))}
-          </div>
-        )}
-
-        {/* Admin Section */}
         {adminItems.length > 0 && (
           <div className="mb-2">
             {!collapsed && (

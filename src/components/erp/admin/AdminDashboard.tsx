@@ -8,7 +8,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from 'recharts'
 import {
-  LayoutDashboard, BedDouble, UtensilsCrossed, Users, Activity,
+  LayoutDashboard, BedDouble, Users, Activity,
   Database, ScrollText, AlertTriangle, TrendingUp, ArrowUpRight, CalendarCheck
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -59,7 +59,6 @@ export default function AdminDashboard({
   const d = dashboardData || {}
   const revenue = d.revenue as Record<string, number> | undefined
   const rooms = d.rooms as Record<string, number> | undefined
-  const restaurant = d.restaurant as Record<string, number> | undefined
   const charts = d.charts as { revenueByDay: Array<{ date: string; amount: number }> } | undefined
   const recentActivities = d.recentActivities as Array<Record<string, unknown>> | undefined
   const checkIns = d.checkIns as { count: number; items: Array<Record<string, unknown>> } | undefined
@@ -124,31 +123,7 @@ export default function AdminDashboard({
                 </div>
                 <div>
                   <p className="text-sm text-muted-foreground">Total Revenue</p>
-                  <p className="text-2xl font-bold text-foreground">৳{(revenue?.totalRevenue || 0).toLocaleString()}</p>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="border-l-4 border-l-emerald-500">
-              <CardContent className="p-4 flex items-center gap-4">
-                <div className="p-3 rounded-lg bg-emerald-50">
-                  <BedDouble className="h-6 w-6 text-emerald-600" />
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Hotel Revenue</p>
-                  <p className="text-2xl font-bold text-emerald-700">৳{(revenue?.hotelRevenue || 0).toLocaleString()}</p>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="border-l-4 border-l-sky-500">
-              <CardContent className="p-4 flex items-center gap-4">
-                <div className="p-3 rounded-lg bg-sky-50">
-                  <UtensilsCrossed className="h-6 w-6 text-sky-600" />
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Restaurant Revenue</p>
-                  <p className="text-2xl font-bold text-sky-700">৳{(revenue?.restaurantRevenue || 0).toLocaleString()}</p>
+                  <p className="text-2xl font-bold text-foreground">৳{(revenue?.hotelRevenue || 0).toLocaleString()}</p>
                 </div>
               </CardContent>
             </Card>
@@ -161,18 +136,6 @@ export default function AdminDashboard({
                 <div>
                   <p className="text-sm text-muted-foreground">Total Bookings</p>
                   <p className="text-2xl font-bold text-purple-700">{(d.activeBookings || 0) as number}</p>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="border-l-4 border-l-orange-500">
-              <CardContent className="p-4 flex items-center gap-4">
-                <div className="p-3 rounded-lg bg-orange-50">
-                  <Activity className="h-6 w-6 text-orange-600" />
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Today&apos;s Orders</p>
-                  <p className="text-2xl font-bold text-orange-700">{(restaurant?.todaysOrders || 0) as number}</p>
                 </div>
               </CardContent>
             </Card>
@@ -264,10 +227,6 @@ export default function AdminDashboard({
                   <div className="flex justify-between items-center">
                     <span className="text-sm text-muted-foreground">Rooms Available</span>
                     <Badge variant="outline" className="bg-sky-50 text-sky-700">{(rooms?.available || 0) as number} / {(rooms?.total || 0) as number}</Badge>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm text-muted-foreground">Active Orders</span>
-                    <Badge variant="outline" className="bg-purple-50 text-purple-700">{(restaurant?.activeOrders || 0) as number}</Badge>
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-sm text-muted-foreground">Total Due</span>

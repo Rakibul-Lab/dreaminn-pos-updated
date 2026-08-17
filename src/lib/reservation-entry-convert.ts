@@ -98,20 +98,9 @@ function countEntryRoomSlots(
 }
 
 function buildConvertedBookingNotes(entry: {
-  guestName: string | null
-  guestPhone: string | null
   notes: string | null
-  individualGuest: boolean
-}): string {
-  const parts: string[] = []
-  if (entry.notes?.trim()) parts.push(entry.notes.trim())
-  if (entry.individualGuest && entry.guestName?.trim()) {
-    parts.push(
-      `Booked by: ${entry.guestName.trim()}${entry.guestPhone?.trim() ? ` · ${entry.guestPhone.trim()}` : ''}`
-    )
-  }
-  parts.push('Converted from reservation entry.')
-  return parts.join('\n')
+}): string | null {
+  return entry.notes?.trim() || null
 }
 
 /** Separate guest profile per room when entry holds multiple rooms (group block). */
@@ -524,10 +513,7 @@ export async function convertReservationEntry(input: {
         discountType: applyDiscount ? resolvedDiscountType : null,
         discountValue: applyDiscount ? resolvedDiscountValue : 0,
         notes: buildConvertedBookingNotes({
-          guestName: entry.guestName,
-          guestPhone: entry.guestPhone,
           notes: entry.notes,
-          individualGuest: useIndividualGuests,
         }),
         sourceReservationEntryId: entry.id,
         createdBy: input.createdBy,

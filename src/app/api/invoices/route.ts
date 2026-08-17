@@ -9,8 +9,15 @@ import {
   buildManualInvoiceLineItems,
   replaceInvoiceLineItems,
 } from '@/lib/invoice-line-items';
-import { computeHotelDiscountAmount, parseBookingDiscountType, taxableHotelAfterRoomDiscount } from '@/lib/booking-discount';
+import {
+  computeHotelDiscountAmount,
+  parseBookingDiscountType,
+  resolveBilledDiscountNights,
+  resolveDiscountNights,
+  taxableHotelAfterRoomDiscount,
+} from '@/lib/booking-discount';
 import { resolveInvoiceBooking } from '@/lib/invoice-booking-resolve';
+import { getRoomNightlyTotal } from '@/lib/room-pricing';
 import { isStayDatetimeRangeValid } from '@/lib/hotel-times';
 import { stampCurrentBusinessDate } from '@/lib/business-date';
 import { filterGuestFolioRestaurantOrders } from '@/lib/restaurant-order-billing';
@@ -274,6 +281,11 @@ export async function POST(request: NextRequest) {
           : 0;
 
     const hotelBase = roomCharges + extraCharges;
+    const discountNights = resolveBilledDiscountNights(
+      roomCharges,
+      getRoomNightlyTotal(booking.room),
+      resolveDiscountNights({ checkIn: invoiceCheckIn, checkOut: invoiceCheckOut })
+    );
     const discount =
       discountOverride !== undefined
         ? Math.min(Math.max(0, discountOverride), Math.max(0, roomCharges))
@@ -281,7 +293,8 @@ export async function POST(request: NextRequest) {
             roomCharges,
             booking.discountEnabled === true,
             parseBookingDiscountType(booking.discountType),
-            Number(booking.discountValue) || 0
+            Number(booking.discountValue) || 0,
+            discountNights
           );
 
     const taxableHotel = taxableHotelAfterRoomDiscount(roomCharges, discount, extraCharges);

@@ -88,7 +88,9 @@ function formatHotelDiscountDetail(
   const { enabled, type, value } = resolveBookingDiscount(booking)
   if (enabled && value > 0) {
     parts.push(
-      type === 'FIXED' ? `Booking discount: ৳${value}` : `Booking discount: ${value}%`
+      type === 'FIXED'
+        ? `Booking discount: ৳${value}/night`
+        : `Booking discount: ${value}%`
     )
   }
   for (const item of discountItems) {

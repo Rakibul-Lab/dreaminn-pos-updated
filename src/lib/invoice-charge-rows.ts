@@ -1,4 +1,8 @@
-import { computeHotelDiscountAmount, type BookingDiscountType } from '@/lib/booking-discount'
+import {
+  computeHotelDiscountAmount,
+  resolveBilledDiscountNights,
+  type BookingDiscountType,
+} from '@/lib/booking-discount'
 import {
   INVOICE_SD_PERCENT,
   INVOICE_SERVICE_CHARGE_PERCENT,
@@ -179,7 +183,8 @@ function resolveHotelRowDiscount(
   if (ctx.hotelDiscountEnabled && (ctx.hotelDiscountValue ?? 0) > 0 && grossRent > 0) {
     const type = ctx.hotelDiscountType ?? 'PERCENTAGE'
     const value = ctx.hotelDiscountValue ?? 0
-    const amount = Math.round(computeHotelDiscountAmount(grossRent, true, type, value))
+    const nights = resolveBilledDiscountNights(grossRent, ctx.nightlyRate, ctx.bookedNights)
+    const amount = Math.round(computeHotelDiscountAmount(grossRent, true, type, value, nights))
     return {
       amount,
       label: formatDiscountLabel(type, value, amount),

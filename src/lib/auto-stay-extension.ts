@@ -75,6 +75,7 @@ export async function extendOverdueCheckedInBooking(
       discountEnabled: booking.discountEnabled === true,
       discountType: booking.discountType ?? undefined,
       discountValue: booking.discountValue ?? 0,
+      nights,
     }
   )
 

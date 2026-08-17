@@ -127,7 +127,7 @@ function proportionalAdvances(
 function formatDiscountSummary(entry: EntryDetail): string | null {
   if (!entry.discountEnabled) return null
   if (entry.discountType === 'FIXED') {
-    return `${formatBdt(entry.discountValue)} per room`
+    return `${formatBdt(entry.discountValue)} per room per night`
   }
   return `${entry.discountValue}% per room`
 }
@@ -232,9 +232,10 @@ export function ReservationEntryConvertDialog({
             discountEnabled: entry.discountEnabled,
             discountType: entry.discountType === 'FIXED' ? ('FIXED' as const) : ('PERCENTAGE' as const),
             discountValue: entry.discountValue,
+            nights,
           }
         : undefined,
-    [entry]
+    [entry, nights]
   )
 
   const slotFinancials = useMemo((): SlotFinancials[] => {

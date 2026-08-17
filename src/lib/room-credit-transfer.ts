@@ -149,11 +149,13 @@ export function mergeCreditTransferSettlements(
   const vatApplied = vatOpts.vatApplied !== false
   const hotelVatRate = vatApplied ? Math.max(0, vatOpts.vatPercent ?? 0) : 0
   // Paying-room discount applies to combined room charges only — not damage/extras.
+  // A fixed discount repeats over the paying room's own billed nights.
   const discount = computeHotelDiscountAmount(
     roomCharges,
     options.discountEnabled,
     parseBookingDiscountType(options.discountType),
-    options.discountValue
+    options.discountValue,
+    primary.chargeableNights
   )
   const restaurantVat = allSettlements.reduce((sum, s) => sum + s.restaurantVat, 0)
   const restaurantTotal = foodCharges + restaurantVat

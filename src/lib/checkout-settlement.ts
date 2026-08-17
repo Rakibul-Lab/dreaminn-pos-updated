@@ -269,7 +269,8 @@ export function computeCheckoutSettlement(
     roomCharges,
     params.discountEnabled === true,
     parseBookingDiscountType(params.discountType),
-    Number(params.discountValue) || 0
+    Number(params.discountValue) || 0,
+    chargeableNights
   )
   const taxableHotel = taxableHotelAfterRoomDiscount(roomCharges, discount, extraCharges)
   const hotelVat =
@@ -318,6 +319,9 @@ export function bookingDueAfterPayments(
   totalRoomCharge: number,
   totalPaid: number,
   booking: {
+    checkIn?: Date | string | null
+    checkOut?: Date | string | null
+    nights?: number | null
     vatApplied?: boolean | null
     vatPercent?: number | null
     discountEnabled?: boolean | null

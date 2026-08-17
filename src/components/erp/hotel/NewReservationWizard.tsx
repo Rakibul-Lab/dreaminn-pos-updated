@@ -1031,18 +1031,22 @@ export function NewReservationWizard({
     patchDraftFor('existing', { guest: emptyGuestDraft({ forExistingGuest: true }) })
   }
 
-  const estimatedRoomCharge = () => {
-    if (!checkInDate || !checkOutDate || !selectedRoomId) return 0
-    const room = availableRooms.find((r) => r.id === selectedRoomId)
-    if (!room) return 0
+  const estimatedStayNights = () => {
+    if (!checkInDate || !checkOutDate) return 0
     try {
       const ci = applyHotelTimeToBookingInput(checkInDate, times.checkInTime)
       const co = applyHotelTimeToBookingInput(checkOutDate, times.checkOutTime)
-      const nights = countHotelStayNights(ci, co)
-      return nights * getRoomNightlyTotal(room)
+      return countHotelStayNights(ci, co)
     } catch {
       return 0
     }
+  }
+
+  const estimatedRoomCharge = () => {
+    if (!selectedRoomId) return 0
+    const room = availableRooms.find((r) => r.id === selectedRoomId)
+    if (!room) return 0
+    return estimatedStayNights() * getRoomNightlyTotal(room)
   }
 
   const vatPayload = () => {
@@ -1088,6 +1092,7 @@ export function NewReservationWizard({
     discountEnabled,
     discountType,
     discountValue: parsedDiscountValue(),
+    nights: estimatedStayNights(),
   })
 
   const estimatedTotals = () => {
@@ -2614,13 +2619,13 @@ export function NewReservationWizard({
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="PERCENTAGE">Percentage (%)</SelectItem>
-                            <SelectItem value="FIXED">Fixed amount (BDT)</SelectItem>
+                            <SelectItem value="FIXED">Fixed amount per night (BDT)</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
                       <div className="space-y-1">
                         <Label className="text-xs">
-                          {discountType === 'PERCENTAGE' ? 'Discount (%)' : 'Discount (BDT)'}
+                          {discountType === 'PERCENTAGE' ? 'Discount (%)' : 'Discount (BDT / night)'}
                         </Label>
                         <Input
                           type="text"
@@ -2739,7 +2744,9 @@ export function NewReservationWizard({
                     <div className="flex justify-between text-emerald-700">
                       <span>
                         Discount
-                        {discountType === 'PERCENTAGE' ? ` (${parsedDiscountValue()}%)` : ''}
+                        {discountType === 'PERCENTAGE'
+                          ? ` (${parsedDiscountValue()}%)`
+                          : ` (৳${parsedDiscountValue().toLocaleString()} × ${estimatedStayNights()} night${estimatedStayNights() === 1 ? '' : 's'})`}
                       </span>
                       <span>-৳{estimatedTotals().discountAmount.toLocaleString()}</span>
                     </div>

@@ -458,6 +458,7 @@ export async function POST(request: NextRequest) {
         discountEnabled: applyDiscount,
         discountType: resolvedDiscountType,
         discountValue: resolvedDiscountValue,
+        nights: days,
       }
     );
 
@@ -619,6 +620,7 @@ export async function POST(request: NextRequest) {
           discountEnabled: applyDiscount,
           discountType: resolvedDiscountType,
           discountValue: resolvedDiscountValue,
+          nights: days,
         },
         paymentRows
       );

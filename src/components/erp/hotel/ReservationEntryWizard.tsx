@@ -267,12 +267,17 @@ export function ReservationEntryWizard() {
     [lines, roomTypes, availableRooms]
   )
 
-  const estimatedRoomCharge = useMemo(() => {
+  const estimatedNights = useMemo(() => {
     if (!datesValid) return 0
-    const nights = countHotelStayNights(
+    return countHotelStayNights(
       new Date(`${checkInDate}T12:00:00`),
       new Date(`${checkOutDate}T12:00:00`)
     )
+  }, [checkInDate, checkOutDate, datesValid])
+
+  const estimatedRoomCharge = useMemo(() => {
+    if (!datesValid) return 0
+    const nights = estimatedNights
     let nightly = 0
     for (const line of lines.filter((l) => l.roomTypeId)) {
       const qty = line.roomId ? 1 : Math.max(1, parseInt(line.quantity, 10) || 1)
@@ -282,7 +287,7 @@ export function ReservationEntryWizard() {
       if (room) nightly += getRoomNightlyTotal(room) * qty
     }
     return nightly * nights
-  }, [lines, availableRooms, checkInDate, checkOutDate, datesValid])
+  }, [lines, availableRooms, estimatedNights, datesValid])
 
   const totalAdvancePaid = () => paymentLines.reduce((sum, line) => sum + line.amount, 0)
 
@@ -296,9 +301,17 @@ export function ReservationEntryWizard() {
           discountEnabled,
           discountType,
           discountValue: parseFloat(discountValue) || 0,
+          nights: estimatedNights,
         }
       ),
-    [estimatedRoomCharge, paymentLines, discountEnabled, discountType, discountValue]
+    [
+      estimatedRoomCharge,
+      estimatedNights,
+      paymentLines,
+      discountEnabled,
+      discountType,
+      discountValue,
+    ]
   )
 
   const resolvedCompanyLabel = companyLedgerId
@@ -855,13 +868,13 @@ export function ReservationEntryWizard() {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="PERCENTAGE">Percentage (%)</SelectItem>
-                        <SelectItem value="FIXED">Fixed amount (BDT)</SelectItem>
+                        <SelectItem value="FIXED">Fixed amount per night (BDT)</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
                   <div className="space-y-1">
                     <Label className="text-xs">
-                      {discountType === 'PERCENTAGE' ? 'Discount (%)' : 'Discount (BDT)'}
+                      {discountType === 'PERCENTAGE' ? 'Discount (%)' : 'Discount (BDT / night)'}
                     </Label>
                     <Input
                       type="text"

@@ -670,12 +670,14 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="PERCENTAGE">Percentage (%)</SelectItem>
-                      <SelectItem value="FIXED">Fixed amount (BDT)</SelectItem>
+                      <SelectItem value="FIXED">Fixed amount per night (BDT)</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label>{discountType === 'PERCENTAGE' ? 'Discount (%)' : 'Discount (BDT)'}</Label>
+                  <Label>
+                    {discountType === 'PERCENTAGE' ? 'Discount (%)' : 'Discount (BDT / night)'}
+                  </Label>
                   <Input
                     type="text"
                     inputMode="decimal"

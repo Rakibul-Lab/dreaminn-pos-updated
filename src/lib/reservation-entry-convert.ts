@@ -446,6 +446,7 @@ export async function convertReservationEntry(input: {
         discountEnabled: applyDiscount,
         discountType: resolvedDiscountType,
         discountValue: resolvedDiscountValue,
+        nights,
       }
     )
 

@@ -1,7 +1,9 @@
 import {
   computeHotelDiscountAmount,
   parseBookingDiscountType,
+  resolveDiscountNights,
   type BookingDiscountInput,
+  type BookingStayNightsInput,
 } from '@/lib/booking-discount'
 import {
   decomposeGrossAfterDiscount,
@@ -42,7 +44,8 @@ export function computeRoomBookingTotals(
     totalRoomCharge,
     discount?.discountEnabled === true,
     parseBookingDiscountType(discount?.discountType),
-    Number(discount?.discountValue) || 0
+    Number(discount?.discountValue) || 0,
+    resolveDiscountNights(discount)
   )
   const taxableRoom = Math.max(0, totalRoomCharge - discountAmount)
   const vatAmount = (taxableRoom * rate) / 100
@@ -80,7 +83,7 @@ export type BookingVatListDisplay = {
   amount: number
 }
 
-type BookingVatDisplayFields = {
+type BookingVatDisplayFields = BookingStayNightsInput & {
   vatApplied?: boolean | null
   vatPercent?: number | null
   serviceChargePercent?: number | null
@@ -103,8 +106,9 @@ export function computeBookingDisplayVat(booking: BookingVatDisplayFields): Book
   const discountAmount = computeHotelDiscountAmount(
     booking.totalRoomCharge,
     discount.discountEnabled === true,
-    discount.discountType,
-    discount.discountValue
+    parseBookingDiscountType(discount.discountType),
+    Number(discount.discountValue) || 0,
+    resolveDiscountNights(discount)
   )
   const includedInRate = booking.vatApplied === false
 
@@ -139,19 +143,22 @@ export function resolveBookingVatListDisplay(
   return computed
 }
 
-export function bookingDiscountInput(booking: {
-  discountEnabled?: boolean | null
-  discountType?: string | null
-  discountValue?: number | null
-}): BookingDiscountInput {
+export function bookingDiscountInput(
+  booking: BookingStayNightsInput & {
+    discountEnabled?: boolean | null
+    discountType?: string | null
+    discountValue?: number | null
+  }
+): BookingDiscountInput {
   return {
     discountEnabled: booking.discountEnabled === true,
     discountType: parseBookingDiscountType(booking.discountType),
     discountValue: Math.max(0, Number(booking.discountValue) || 0),
+    nights: resolveDiscountNights(booking),
   }
 }
 
-type BookingDueFields = {
+type BookingDueFields = BookingStayNightsInput & {
   status?: string | null
   totalRoomCharge: number
   dueAmount?: number

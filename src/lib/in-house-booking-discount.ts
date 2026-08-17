@@ -66,6 +66,8 @@ export function bookingDiscountAmount(booking: {
   discountEnabled: boolean
   discountType: string | null
   discountValue: number
+  checkIn?: Date | string | null
+  checkOut?: Date | string | null
   vatApplied?: boolean | null
   vatPercent?: number | null
 }): number {

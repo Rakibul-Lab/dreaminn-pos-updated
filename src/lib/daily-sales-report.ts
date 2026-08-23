@@ -348,6 +348,31 @@ function buildCheckoutInvoiceFoodRemark(
     .join(' · ')
 }
 
+/**
+ * Hotel extras on a checkout invoice (half-day charge, laundry, minibar, etc.).
+ * These used to be merged into the food line and labelled "Food & service sale".
+ */
+function buildCheckoutInvoiceExtraRemark(
+  invoiceNumber: string,
+  items: Array<{ itemType: string; description?: string | null; total: number }>,
+  companyRemark?: string | null
+): string {
+  const labels = items
+    .filter((item) => item.itemType === 'extra_service' && item.total > 0)
+    .map((item) => item.description?.trim())
+    .filter((label): label is string => Boolean(label))
+  const unique = [...new Set(labels)]
+  const detail =
+    unique.length === 0
+      ? 'Extra service'
+      : unique.length <= 2
+        ? unique.join(' · ')
+        : `${unique[0]} · +${unique.length - 1} more`
+  return [`${detail} · Checkout · ${invoiceNumber}`, companyRemark]
+    .filter(Boolean)
+    .join(' · ')
+}
+
 function buildRestaurantSaleRemark(orderNumber: string, companyName?: string | null): string {
   const base = `Restaurant sale · #${orderNumber}`
   return companyName ? `${base} · ${companyName}` : base
@@ -573,7 +598,7 @@ type InvoiceBillMix = {
   foodCharges: number
   extraCharges: number
   totalAmount: number
-  items: Array<{ itemType: string; total: number }>
+  items: Array<{ itemType: string; description?: string | null; total: number }>
 }
 
 /**
@@ -724,7 +749,7 @@ export async function buildDailySalesDetailReport(
     db.invoice.findMany({
       where: invoiceWindowWhere(businessDate, openedAt, closedAt),
       include: {
-        items: { select: { itemType: true, total: true } },
+        items: { select: { itemType: true, description: true, total: true } },
         booking: {
           include: {
             customer: { select: { name: true, registrationNumber: true, company: true } },
@@ -1014,7 +1039,8 @@ export async function buildDailySalesDetailReport(
         : null
 
     const sortAt = (invoice.issuedAt ?? invoice.createdAt).toISOString()
-    const foodExtra = restaurantGross + invoice.extraCharges
+    const extraCharges = Math.max(0, invoice.extraCharges)
+    const nonRoomCharges = restaurantGross + extraCharges
     // The invoice keeps the rack rate and the discount apart. Only what the guest
     // was actually billed is a sale, so the sheet foots with the money collected.
     const roomBilled = Math.max(0, invoice.roomCharges - Math.max(0, invoice.discount))
@@ -1029,7 +1055,7 @@ export async function buildDailySalesDetailReport(
     }
 
     if (roomBilled > 0) {
-      const roomCompanyBill = foodExtra > 0 ? 0 : companyBill
+      const roomCompanyBill = nonRoomCharges > 0 ? 0 : companyBill
       lines.push({
         id: `${invoice.id}-room`,
         lineType: 'charge',
@@ -1050,12 +1076,15 @@ export async function buildDailySalesDetailReport(
       })
     }
 
-    if (foodExtra > 0) {
+    // Restaurant food and hotel extras are different sales. Bundling them under
+    // "Food & service sale" made a half-day charge read as restaurant revenue.
+    if (restaurantGross > 0) {
       const billPayment = restaurantBillRemark
-        ? resolveCheckoutFoodPaymentAllocation(booking.id, restaurantOrders, foodExtra)
+        ? resolveCheckoutFoodPaymentAllocation(booking.id, restaurantOrders, restaurantGross)
         : { cash: 0, card: 0, mbanking: 0 }
-      const foodCompanyBill = roomBilled > 0 ? 0 : companyBill
-      const foodLineTotal = resolveChargeLineTotal(foodExtra, {
+      const foodCompanyBill =
+        roomBilled > 0 || extraCharges > 0 ? 0 : companyBill
+      const foodLineTotal = resolveChargeLineTotal(restaurantGross, {
         companyBill: foodCompanyBill,
         cash: billPayment.cash,
         card: billPayment.card,
@@ -1070,22 +1099,47 @@ export async function buildDailySalesDetailReport(
         room,
         regNo,
         roomAmount: 0,
-        otherService: foodExtra,
+        otherService: restaurantGross,
         cash: billPayment.cash,
         card: billPayment.card,
         mbanking: billPayment.mbanking,
         companyBill: foodCompanyBill,
         remark: buildCheckoutInvoiceFoodRemark(invoice.invoiceNumber, restaurantBillRemark),
         total: foodLineTotal,
-        restaurantAmount: Number(
-          (foodLineTotal * (restaurantGross / foodExtra)).toFixed(2)
-        ),
+        restaurantAmount: foodLineTotal,
         reference: invoice.invoiceNumber,
         sortAt,
       })
     }
 
-    if (roomBilled <= 0 && foodExtra <= 0 && invoice.totalAmount > 0) {
+    if (extraCharges > 0) {
+      const extraCompanyBill =
+        roomBilled > 0 || restaurantGross > 0 ? 0 : companyBill
+      lines.push({
+        id: `${invoice.id}-extra`,
+        lineType: 'charge',
+        source: 'invoice',
+        guestName,
+        room,
+        regNo,
+        roomAmount: 0,
+        otherService: extraCharges,
+        cash: 0,
+        card: 0,
+        mbanking: 0,
+        companyBill: extraCompanyBill,
+        remark: buildCheckoutInvoiceExtraRemark(
+          invoice.invoiceNumber,
+          invoice.items,
+          companyRemark
+        ),
+        total: resolveChargeLineTotal(extraCharges, { companyBill: extraCompanyBill }),
+        reference: invoice.invoiceNumber,
+        sortAt,
+      })
+    }
+
+    if (roomBilled <= 0 && nonRoomCharges <= 0 && invoice.totalAmount > 0) {
       lines.push({
         id: invoice.id,
         lineType: 'charge',

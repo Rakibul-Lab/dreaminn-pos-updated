@@ -12,6 +12,7 @@ import {
   buildInvoiceChargeLinesOnly,
   type BuildInvoiceLineItemsInput,
 } from '@/lib/invoice-line-items'
+import { recomputeCompanyLedgerTotals } from '@/lib/company-ledger-billing'
 
 export type CreditTransferBookingRow = {
   id: string
@@ -661,9 +662,16 @@ export async function completeOutboundBillTransfer(
       dueAmount: 0,
     },
   })
+  const sourceCompanyBills = await db.companyLedgerBill.findMany({
+    where: { bookingId: source.id },
+    select: { companyLedgerId: true },
+  })
   await db.companyLedgerBill.updateMany({
     where: { bookingId: source.id },
     data: {
+      // Drop bill totals so company ledger aggregates do not keep a phantom due
+      // after the stay balance moves to the receiving room.
+      totalAmount: 0,
       dueAmount: 0,
       paidAmount: 0,
       settlementStage: 'HOTEL_CLEARED',
@@ -671,6 +679,12 @@ export async function completeOutboundBillTransfer(
       notes: `Cleared — bill transferred to Room ${targetRoomNumber}`,
     },
   })
+  const ledgerIds = [
+    ...new Set(sourceCompanyBills.map((b) => b.companyLedgerId).filter(Boolean)),
+  ]
+  for (const companyLedgerId of ledgerIds) {
+    await recomputeCompanyLedgerTotals(db, companyLedgerId)
+  }
 
   await db.room.update({
     where: { id: source.roomId },

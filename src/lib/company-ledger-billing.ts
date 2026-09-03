@@ -33,6 +33,81 @@ export type PostReservationEntryCompanyLedgerBillInput = {
   notes?: string | null
 }
 
+/**
+ * Sync stored company totals from bill rows. Authoritative due is sum(bill.dueAmount),
+ * not billed − paid (cleared/transferred bills can keep historical totals with due 0).
+ * Bills cleared by room bill-transfer are excluded so they cannot leave a phantom due/billed.
+ */
+export async function recomputeCompanyLedgerTotals(
+  db: Pick<PrismaClient, 'companyLedger' | 'companyLedgerBill'>,
+  companyLedgerId: string
+): Promise<{ totalBilled: number; totalPaid: number; dueAmount: number }> {
+  const bills = await db.companyLedgerBill.findMany({
+    where: { companyLedgerId },
+    select: {
+      id: true,
+      totalAmount: true,
+      paidAmount: true,
+      dueAmount: true,
+      settlementStage: true,
+      notes: true,
+    },
+  })
+
+  const transferClearedIds: string[] = []
+  let totalBilled = 0
+  let totalPaid = 0
+  let dueAmount = 0
+
+  for (const bill of bills) {
+    const transferCleared =
+      bill.settlementStage === 'HOTEL_CLEARED' &&
+      Boolean(bill.notes?.includes('Cleared — bill transferred'))
+    if (transferCleared) {
+      if (bill.totalAmount !== 0 || bill.paidAmount !== 0 || bill.dueAmount !== 0) {
+        transferClearedIds.push(bill.id)
+      }
+      continue
+    }
+    totalBilled += Math.max(0, bill.totalAmount)
+    totalPaid += Math.max(0, bill.paidAmount)
+    dueAmount += Math.max(0, bill.dueAmount)
+  }
+
+  if (transferClearedIds.length > 0) {
+    await db.companyLedgerBill.updateMany({
+      where: { id: { in: transferClearedIds } },
+      data: { totalAmount: 0, paidAmount: 0, dueAmount: 0 },
+    })
+  }
+
+  totalBilled = Math.max(0, totalBilled)
+  totalPaid = Math.max(0, totalPaid)
+  dueAmount = Math.max(0, dueAmount)
+
+  await db.companyLedger.update({
+    where: { id: companyLedgerId },
+    data: { totalBilled, totalPaid, dueAmount },
+  })
+
+  return { totalBilled, totalPaid, dueAmount }
+}
+
+export async function recomputeCompanyLedgerTotalsForIds(
+  db: Pick<PrismaClient, 'companyLedger' | 'companyLedgerBill'>,
+  companyLedgerIds: string[]
+): Promise<Map<string, { totalBilled: number; totalPaid: number; dueAmount: number }>> {
+  const uniqueIds = [...new Set(companyLedgerIds.filter(Boolean))]
+  const result = new Map<string, { totalBilled: number; totalPaid: number; dueAmount: number }>()
+  if (uniqueIds.length === 0) return result
+
+  for (const id of uniqueIds) {
+    result.set(id, await recomputeCompanyLedgerTotals(db, id))
+  }
+
+  return result
+}
+
 export async function postCompanyLedgerBill(
   db: BillingDb,
   input: PostCompanyLedgerBillInput

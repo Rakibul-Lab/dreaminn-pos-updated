@@ -4,6 +4,7 @@ import { requireRole } from '@/lib/auth';
 import { successResponse, errorResponse, notFoundResponse, logActivity } from '@/lib/api-utils';
 import { RoleType } from '@prisma/client';
 import { getEmailValidationError } from '@/lib/email-validation';
+import { recomputeCompanyLedgerTotals } from '@/lib/company-ledger-billing';
 
 export async function GET(
   request: NextRequest,
@@ -41,6 +42,8 @@ export async function GET(
 
     if (!company) return notFoundResponse('Company ledger');
 
+    const totals = await recomputeCompanyLedgerTotals(db, id);
+
     const guests = company.guests.map(({ bookings, ...guest }) => ({
       ...guest,
       totalDue: bookings.reduce(
@@ -49,7 +52,13 @@ export async function GET(
       ),
     }));
 
-    return successResponse({ ...company, guests });
+    return successResponse({
+      ...company,
+      totalBilled: totals.totalBilled,
+      totalPaid: totals.totalPaid,
+      dueAmount: totals.dueAmount,
+      guests,
+    });
   } catch (error) {
     console.error('Company ledger get error:', error);
     return errorResponse('Failed to fetch company', 500);

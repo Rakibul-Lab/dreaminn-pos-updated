@@ -5,6 +5,7 @@ import { successResponse, paginatedResponse, errorResponse, logActivity } from '
 import { Prisma, RoleType } from '@prisma/client';
 import { getEmailValidationError } from '@/lib/email-validation';
 import { ensureCloudViewRestaurantLedger } from '@/lib/cloudview-ledger';
+import { recomputeCompanyLedgerTotalsForIds } from '@/lib/company-ledger-billing';
 
 export async function GET(request: NextRequest) {
   try {
@@ -83,7 +84,23 @@ export async function GET(request: NextRequest) {
       db.companyLedger.count({ where }),
     ]);
 
-    return paginatedResponse(companies, total, page, limit);
+    // Keep card badges in sync with bill rows (prevents stale due after bill transfer/clear).
+    const syncedTotals = await recomputeCompanyLedgerTotalsForIds(
+      db,
+      companies.map((c) => c.id)
+    );
+    const companiesWithTotals = companies.map((company) => {
+      const totals = syncedTotals.get(company.id);
+      if (!totals) return company;
+      return {
+        ...company,
+        totalBilled: totals.totalBilled,
+        totalPaid: totals.totalPaid,
+        dueAmount: totals.dueAmount,
+      };
+    });
+
+    return paginatedResponse(companiesWithTotals, total, page, limit);
   } catch (error) {
     console.error('Company ledger list error:', error);
     return errorResponse('Failed to fetch company ledger', 500);

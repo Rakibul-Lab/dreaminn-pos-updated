@@ -209,11 +209,18 @@ function buildHotelRoomRentRow(
   const servicePercent = ctx.hotelServiceChargePercent ?? INVOICE_SERVICE_CHARGE_PERCENT
   const { amount: discountAmount, label: discountLabel } = resolveHotelRowDiscount(ctx, grossRent)
 
+  const nights = ctx.bookedNights > 0 ? ctx.bookedNights : 0
+  const roomLabel = ctx.roomNumber
+    ? nights > 0
+      ? `Room ${ctx.roomNumber}-${nights} nights`
+      : `Room ${ctx.roomNumber}`
+    : ctx.roomTypeName || 'Room'
+
   return buildInclusiveGrossChargeRow({
     id,
     date,
     time,
-    category: ctx.roomTypeName || 'Room',
+    category: roomLabel,
     description: '',
     grossRent,
     vatPercent,
@@ -286,16 +293,16 @@ function buildHotelRowsFromLineItems(ctx: BuildRowsContext): InvoiceChargeDispla
               const m = roomItem.description.match(/(\d+)\s*night/i)
               return m ? Number(m[1]) : 0
             })()
-      const compactTransferred = /^Room\s+\S+\s*\(transferred\)-?\d*\s*nights?/i.test(
-        roomItem.description.trim()
-      )
+      // Always put the room number in Category so paying + transferred stays are clear.
+      const primaryRoomFromDesc =
+        /^Room\s+(\S+)/i.exec(roomItem.description.trim())?.[1] ?? ctx.roomNumber
       const category = transferredRoom
-        ? compactTransferred
-          ? roomItem.description.trim()
-          : nights > 0
-            ? `Room ${transferredRoom} (transferred)-${nights} nights`
-            : `Room ${transferredRoom} (transferred)`
-        : ctx.roomTypeName || `Room ${ctx.roomNumber}`
+        ? nights > 0
+          ? `Room ${transferredRoom} (transferred)-${nights} nights`
+          : `Room ${transferredRoom} (transferred)`
+        : nights > 0
+          ? `Room ${primaryRoomFromDesc}-${nights} nights`
+          : `Room ${primaryRoomFromDesc}`
       const description = ''
 
       rows.push(

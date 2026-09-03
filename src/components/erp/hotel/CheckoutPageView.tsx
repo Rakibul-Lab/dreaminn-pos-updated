@@ -231,7 +231,8 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
         debouncedDiscountValue,
         roomCreditTransferEnabled,
         billTransferTargetId,
-        debouncedRoomCharge,
+        roomChargeTouched,
+        roomChargeTouched ? debouncedRoomCharge : null,
         checkoutCompanyLedgerId,
         checkoutCompanyLedgerTouched,
       ],
@@ -254,7 +255,10 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
         if (roomCreditTransferEnabled && billTransferTargetId) {
           params.set('creditTransferBookingIds', billTransferTargetId)
         }
-        if (debouncedRoomCharge != null) {
+        // Only override room charge after the user edits the field. Auto-seeding
+        // the input from preview and sending it back caused a feedback loop
+        // (Stay adjusted 3→6→9… / roomCharge=738000 stuck on the request).
+        if (roomChargeTouched && debouncedRoomCharge != null) {
           params.set('roomCharge', String(debouncedRoomCharge))
         }
         // Only override the company in the preview when the user edited it;
@@ -391,10 +395,10 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
   }
   const companyLedgerDue = isCompanyLedgerCheckout ? Math.max(0, checkOutDue) : 0
 
-  // Use the value the user actually typed (not the 400ms-debounced one), so a
-  // room-charge edit is never lost when Checkout is clicked right after typing.
+  // Only send a room-charge override when staff edited the field. Otherwise the
+  // server uses booking.totalRoomCharge (avoids replaying a stale inflated input).
   const resolveSubmitRoomCharge = (): number | undefined => {
-    if (!roomChargeTouched) return debouncedRoomCharge ?? undefined
+    if (!roomChargeTouched) return undefined
     const parsed = parseFloat(roomChargeInput)
     if (roomChargeInput.trim() === '' || Number.isNaN(parsed)) return undefined
     return Math.max(0, parsed)

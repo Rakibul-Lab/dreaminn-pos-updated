@@ -302,25 +302,19 @@ export default function InvoiceDetail({ invoiceId, onClose }: InvoiceDetailProps
                 {roomItems.map((item) => {
                   const transferred = /^Transferred — Room\s+(\S+)\s*:/i.exec(item.description)
                   const compact = /^Room\s+(\S+)\s*\(transferred\)/i.exec(item.description)
-                  const roomNo =
-                    transferred?.[1] ??
-                    compact?.[1] ??
-                    /^Room\s+(\S+)/i.exec(item.description)?.[1]
-                  const isTransferred = !!(transferred || compact)
+                  const roomNo = transferred?.[1] ?? compact?.[1]
                   const nights =
                     item.quantity > 0
                       ? item.quantity
                       : Number(item.description.match(/(\d+)\s*night/i)?.[1] || 0)
+                  // Transferred stays: compact Room N (transferred)-X nights.
+                  // This room: keep the stored description / room category text.
                   const label =
-                    roomNo && isTransferred && nights > 0
+                    roomNo && nights > 0
                       ? `Room ${roomNo} (transferred)-${nights} nights`
-                      : roomNo && isTransferred
+                      : roomNo
                         ? `Room ${roomNo} (transferred)`
-                        : roomNo && nights > 0
-                          ? `Room ${roomNo}-${nights} nights`
-                          : roomNo
-                            ? `Room ${roomNo}`
-                            : item.description
+                        : item.description
                   return (
                   <TableRow key={item.id}>
                     <TableCell>{label}</TableCell>

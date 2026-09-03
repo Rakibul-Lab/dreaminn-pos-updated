@@ -400,14 +400,6 @@ export function buildCheckoutInvoiceLineItems(
       ...primary,
       hotelVatPercent: vatPercent,
       vatApplied,
-    }).map((line) => {
-      if (line.itemType !== 'room_charge') return line
-      const nights = Math.max(1, primary.chargeableNights || line.quantity || 1)
-      return {
-        ...line,
-        description: `Room ${primary.roomNumber}-${nights} nights`,
-        quantity: nights,
-      }
     })
   )
 

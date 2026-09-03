@@ -420,6 +420,7 @@ export function buildCheckoutInvoiceLineItems(
   for (const transfer of transfers) {
     const roomNumber = transfer.booking.room.roomNumber
     const prefix = `Transferred — Room ${roomNumber}`
+    const nights = Math.max(1, transfer.settlement.chargeableNights || 1)
     const transferLines = buildInvoiceChargeLinesOnly({
       roomNumber,
       roomTypeName: transfer.booking.room.type.name,
@@ -434,10 +435,19 @@ export function buildCheckoutInvoiceLineItems(
       includeExtraCharges: true,
       hotelVatPercent: vatPercent,
       vatApplied,
-    }).map((line) => ({
-      ...line,
-      description: `${prefix}: ${line.description}`,
-    }))
+    }).map((line) => {
+      if (line.itemType === 'room_charge') {
+        return {
+          ...line,
+          description: `Room ${roomNumber} (transferred)-${nights} nights`,
+          quantity: nights,
+        }
+      }
+      return {
+        ...line,
+        description: `${prefix}: ${line.description}`,
+      }
+    })
     items.push(...transferLines)
 
     const transferDiscount = Math.max(0, transfer.settlement.discount)

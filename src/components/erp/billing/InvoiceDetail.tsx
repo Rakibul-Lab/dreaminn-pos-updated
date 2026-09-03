@@ -299,14 +299,29 @@ export default function InvoiceDetail({ invoiceId, onClose }: InvoiceDetailProps
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {roomItems.map((item) => (
+                {roomItems.map((item) => {
+                  const transferred = /^Transferred — Room\s+(\S+)\s*:/i.exec(item.description)
+                  const compact = /^Room\s+(\S+)\s*\(transferred\)/i.exec(item.description)
+                  const roomNo = transferred?.[1] ?? compact?.[1]
+                  const nights =
+                    item.quantity > 0
+                      ? item.quantity
+                      : Number(item.description.match(/(\d+)\s*night/i)?.[1] || 0)
+                  const label =
+                    roomNo && nights > 0
+                      ? `Room ${roomNo} (transferred)-${nights} nights`
+                      : roomNo
+                        ? `Room ${roomNo} (transferred)`
+                        : item.description
+                  return (
                   <TableRow key={item.id}>
-                    <TableCell>{item.description}</TableCell>
+                    <TableCell>{label}</TableCell>
                     <TableCell className="text-center">{item.quantity}</TableCell>
                     <TableCell className="text-right">৳{item.unitPrice.toLocaleString()}</TableCell>
                     <TableCell className="text-right font-medium">৳{item.total.toLocaleString()}</TableCell>
                   </TableRow>
-                ))}
+                  )
+                })}
               </TableBody>
             </Table>
           </CardContent>

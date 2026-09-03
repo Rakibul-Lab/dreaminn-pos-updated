@@ -27,6 +27,7 @@ type LineItem = {
   itemType?: string
   referenceId?: string | null
   description: string
+  quantity?: number
   total: number
 }
 
@@ -223,8 +224,10 @@ function buildHotelRoomRentRow(
 }
 
 function parseTransferredRoomNumber(description: string): string | null {
-  const match = /^Transferred — Room\s+(\S+)\s*:/.exec(description.trim())
-  return match?.[1] ?? null
+  const prefixed = /^Transferred — Room\s+(\S+)\s*:/.exec(description.trim())
+  if (prefixed?.[1]) return prefixed[1]
+  const compact = /^Room\s+(\S+)\s*\(transferred\)/i.exec(description.trim())
+  return compact?.[1] ?? null
 }
 
 function matchDiscountForRoomCharge(
@@ -276,12 +279,24 @@ function buildHotelRowsFromLineItems(ctx: BuildRowsContext): InvoiceChargeDispla
               ? 'Fixed'
               : formatDiscountLabel('FIXED', discountAmount, discountAmount))
           : INVOICE_ZERO_DISCOUNT_DISPLAY
+      const nights =
+        roomItem.quantity && roomItem.quantity > 0
+          ? roomItem.quantity
+          : (() => {
+              const m = roomItem.description.match(/(\d+)\s*night/i)
+              return m ? Number(m[1]) : 0
+            })()
+      const compactTransferred = /^Room\s+\S+\s*\(transferred\)-?\d*\s*nights?/i.test(
+        roomItem.description.trim()
+      )
       const category = transferredRoom
-        ? `Room ${transferredRoom} (transferred)`
+        ? compactTransferred
+          ? roomItem.description.trim()
+          : nights > 0
+            ? `Room ${transferredRoom} (transferred)-${nights} nights`
+            : `Room ${transferredRoom} (transferred)`
         : ctx.roomTypeName || `Room ${ctx.roomNumber}`
-      const description = transferredRoom
-        ? roomItem.description.replace(/^Transferred — Room\s+\S+\s*:\s*/, '')
-        : ''
+      const description = ''
 
       rows.push(
         buildInclusiveGrossChargeRow({

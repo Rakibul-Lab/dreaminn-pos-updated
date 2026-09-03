@@ -167,6 +167,8 @@ type BookingDueFields = BookingStayNightsInput & {
   discountEnabled?: boolean | null
   discountType?: string | null
   discountValue?: number | null
+  /** When set, this stay's bill was moved to another room — display due is always 0. */
+  billTransferredToBookingId?: string | null
   /** Folio contents when the caller loaded them — see `resolveBookingDisplayDue`. */
   charges?: BookingChargeRow[]
   restaurantOrders?: BookingFolioRestaurantRow[]
@@ -215,6 +217,8 @@ function computeBookingFolioDue(
 
 /**
  * Due shown in bookings list and detail:
+ * - After a bill transfer out, due is always 0 on the source room (the receiving
+ *   room carries it).
  * - After checkout, invoice due is authoritative (room + F&B + extras − payments).
  * - While the guest is in house, the folio is recomputed from what is posted to
  *   the room. The stored `dueAmount` only moves for charges raised on the hotel
@@ -227,6 +231,10 @@ export function resolveBookingDisplayDue(
   payments: BookingPaymentRow[],
   latestInvoice?: InvoiceDueSnapshot | null
 ): number {
+  if (booking.billTransferredToBookingId) {
+    return 0
+  }
+
   if (
     booking.status === 'CHECKED_OUT' &&
     latestInvoice &&

@@ -739,8 +739,8 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
                   </div>
                 )}
                 <p className="text-xs text-indigo-900">
-                  This room checks out with no payment. Its charges will appear on the selected
-                  room&apos;s invoice when that room checks out.
+                  This room checks out with no due. The guest and remaining bill move to the
+                  selected room immediately, and are settled when that room checks out.
                 </p>
               </div>
             )}

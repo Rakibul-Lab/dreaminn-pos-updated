@@ -22,13 +22,26 @@ export type CreditTransferBookingRow = {
   checkOut: Date
   actualCheckIn: Date | null
   totalRoomCharge: number
+  adults?: number
+  dueAmount?: number
   vatApplied?: boolean | null
   vatPercent?: number | null
   discountEnabled?: boolean | null
   discountType?: string | null
   discountValue?: number | null
   notes?: string | null
-  customer: { name: string }
+  customer: {
+    name: string
+    phone?: string | null
+    email?: string | null
+    nationality?: string | null
+    idType?: string | null
+    idNumber?: string | null
+    company?: string | null
+    designation?: string | null
+    address?: string | null
+    registrationNumber?: string | null
+  }
   room: { id: string; roomNumber: string; totalPrice: number; type: { name: string } }
   charges: Array<{
     id: string
@@ -283,8 +296,47 @@ export function buildCheckoutInvoiceLineItems(
 
 type TransferDb = Pick<
   PrismaClient,
-  'booking' | 'restaurantOrder' | 'payment' | 'room' | 'housekeepingTask'
+  | 'booking'
+  | 'restaurantOrder'
+  | 'payment'
+  | 'room'
+  | 'housekeepingTask'
+  | 'roomCharge'
+  | 'bookingCompanion'
 >
+
+/** Prefix for placeholder charges posted on the receiving room until it checks out. */
+export const BILL_TRANSFER_CHARGE_PREFIX = 'Bill transferred from Room '
+
+export function isBillTransferPlaceholderCharge(description: string): boolean {
+  return description.startsWith(BILL_TRANSFER_CHARGE_PREFIX)
+}
+
+export function buildBillTransferChargeDescription(
+  sourceRoomNumber: string,
+  guestName: string
+): string {
+  return `${BILL_TRANSFER_CHARGE_PREFIX}${sourceRoomNumber} — ${guestName}`
+}
+
+/**
+ * Remove placeholder transfer charges before the receiving room's real checkout
+ * settlement merges the source folios line-by-line (avoids double counting).
+ */
+export async function clearBillTransferPlaceholderCharges(
+  db: TransferDb,
+  payingBookingId: string
+): Promise<void> {
+  const charges = await db.roomCharge.findMany({
+    where: { bookingId: payingBookingId, chargeType: 'EXTRA_SERVICE' },
+    select: { id: true, description: true },
+  })
+  const ids = charges
+    .filter((c) => isBillTransferPlaceholderCharge(c.description))
+    .map((c) => c.id)
+  if (ids.length === 0) return
+  await db.roomCharge.deleteMany({ where: { id: { in: ids } } })
+}
 
 export async function loadBillTransferTargets(
   db: TransferDb,
@@ -384,17 +436,22 @@ export async function prepareCreditTransfers(
 export async function completeOutboundBillTransfer(
   db: TransferDb,
   source: CreditTransferBookingRow,
-  targetBookingId: string,
-  targetRoomNumber: string,
+  target: CreditTransferBookingRow,
+  transferAmount: number,
   now: Date
 ): Promise<void> {
+  const amount = Math.max(0, Number(transferAmount) || 0)
+  const targetRoomNumber = target.room.roomNumber
+  const sourceRoomNumber = source.room.roomNumber
+  const guestName = source.customer.name.trim() || 'Guest'
+
   await db.booking.update({
     where: { id: source.id },
     data: {
       status: 'CHECKED_OUT',
       actualCheckOut: now,
       dueAmount: 0,
-      billTransferredToBookingId: targetBookingId,
+      billTransferredToBookingId: target.id,
       notes: source.notes
         ? `${source.notes}\nBill transferred to Room ${targetRoomNumber} at checkout`
         : `Bill transferred to Room ${targetRoomNumber} at checkout`,
@@ -411,7 +468,67 @@ export async function completeOutboundBillTransfer(
       roomId: source.roomId,
       taskType: 'cleaning',
       status: 'PENDING',
-      notes: `Post-checkout cleaning for room ${source.room.roomNumber} (bill transferred to Room ${targetRoomNumber})`,
+      notes: `Post-checkout cleaning for room ${sourceRoomNumber} (bill transferred to Room ${targetRoomNumber})`,
+    },
+  })
+
+  if (amount > 0.005) {
+    await db.roomCharge.create({
+      data: {
+        bookingId: target.id,
+        chargeType: 'EXTRA_SERVICE',
+        description: buildBillTransferChargeDescription(sourceRoomNumber, guestName),
+        amount,
+        quantity: 1,
+        chargeDate: now,
+      },
+    })
+  }
+
+  const existingCompanions = await db.bookingCompanion.count({
+    where: { bookingId: target.id },
+  })
+  const sourcePhone = source.customer.phone?.trim() || null
+  const alreadyListed = await db.bookingCompanion.findFirst({
+    where: {
+      bookingId: target.id,
+      name: guestName,
+      ...(sourcePhone ? { phone: sourcePhone } : {}),
+    },
+    select: { id: true },
+  })
+
+  if (!alreadyListed && guestName) {
+    await db.bookingCompanion.create({
+      data: {
+        bookingId: target.id,
+        sortOrder: existingCompanions,
+        companionType: 'ADULT',
+        name: guestName,
+        company: source.customer.company?.trim() || null,
+        designation: source.customer.designation?.trim() || null,
+        phone: sourcePhone,
+        nationality: source.customer.nationality?.trim() || null,
+        idType: source.customer.idType?.trim() || null,
+        idNumber: source.customer.idNumber?.trim() || null,
+        registrationNumber: source.customer.registrationNumber?.trim() || null,
+        email: source.customer.email?.trim() || null,
+        address: source.customer.address?.trim() || null,
+      },
+    })
+  }
+
+  const targetAdults = Math.max(1, Number(target.adults) || 1)
+  const nextAdults = alreadyListed ? targetAdults : Math.max(targetAdults + 1, 2)
+  const priorDue = Math.max(0, Number(target.dueAmount) || 0)
+  const transferNote = `Received bill from Room ${sourceRoomNumber} (${guestName}) — ৳${amount.toFixed(2)}`
+
+  await db.booking.update({
+    where: { id: target.id },
+    data: {
+      adults: nextAdults,
+      dueAmount: priorDue + amount,
+      notes: target.notes ? `${target.notes}\n${transferNote}` : transferNote,
     },
   })
 }

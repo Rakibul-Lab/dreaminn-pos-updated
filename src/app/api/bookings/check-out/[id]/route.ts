@@ -10,7 +10,7 @@ import {
   isValidPaymentAccountLastFour,
 } from '@/lib/payment-method';
 import { getRoomNightlyTotal } from '@/lib/room-pricing';
-import { sumCheckoutBookingPaid } from '@/lib/booking-totals';
+import { sumBookingNetPaid, sumCheckoutBookingPaid } from '@/lib/booking-totals';
 import {
   computeCheckoutSettlement,
   groupFolioRestaurantCharges,
@@ -19,7 +19,9 @@ import {
 import { buildInvoiceLineItems, replaceInvoiceLineItems } from '@/lib/invoice-line-items';
 import {
   buildCheckoutInvoiceLineItems,
+  clearBillTransferPlaceholderCharges,
   completeOutboundBillTransfer,
+  isBillTransferPlaceholderCharge,
   loadBillTransferTargets,
   loadInboundBillTransfers,
   mergeCreditTransferSettlements,
@@ -268,8 +270,36 @@ export async function GET(
     const inboundTransfers = await prepareCreditTransfers(db, inboundSources, now);
     const hasInboundTransfers = inboundTransfers.length > 0;
 
+    // Placeholder charges exist only to show due on the receiving room while the
+    // guest is still in house. Preview merges the real source folios instead.
+    const primaryForMerge = hasInboundTransfers
+      ? computeCheckoutSettlement({
+          booking: {
+            ...booking,
+            charges: booking.charges.filter(
+              (c) => !isBillTransferPlaceholderCharge(c.description)
+            ),
+          },
+          nightlyRate: getRoomNightlyTotal(booking.room),
+          restaurantOrders,
+          lateCheckoutCharge: 0,
+          payments: bookingPayments,
+          discountEnabled: checkoutDiscount.discountEnabled,
+          discountType: checkoutDiscount.discountType,
+          discountValue: checkoutDiscount.discountValue,
+          includeExtraCharges,
+          damageChargeAmount,
+          lateCheckoutAmount,
+          roomChargeOverride:
+            roomChargeOverride != null && !Number.isNaN(roomChargeOverride)
+              ? roomChargeOverride
+              : null,
+          asOf: now,
+        })
+      : primarySettlement;
+
     const settlement = hasInboundTransfers
-      ? mergeCreditTransferSettlements(primarySettlement, inboundTransfers, {
+      ? mergeCreditTransferSettlements(primaryForMerge, inboundTransfers, {
           payingBooking: booking,
           discountEnabled: checkoutDiscount.discountEnabled,
           discountType: checkoutDiscount.discountType,
@@ -516,8 +546,8 @@ export async function POST(
       await completeOutboundBillTransfer(
         db,
         booking as Parameters<typeof completeOutboundBillTransfer>[1],
-        target.id,
-        target.room.roomNumber,
+        target as Parameters<typeof completeOutboundBillTransfer>[2],
+        primarySettlement.dueBeforeSettlement,
         now
       );
 
@@ -546,19 +576,43 @@ export async function POST(
       );
     }
 
+    await clearBillTransferPlaceholderCharges(db, id);
+    booking = await loadCheckoutBooking(id);
+    if (!booking) return notFoundResponse('Booking');
+    // Recompute primary settlement after clearing transfer placeholders so the
+    // inbound merge does not double-count those amounts.
+    const primarySettlementAfterClear = computeCheckoutSettlement({
+      booking,
+      nightlyRate: getRoomNightlyTotal(booking.room),
+      restaurantOrders,
+      lateCheckoutCharge: 0,
+      payments: bookingPayments,
+      discountEnabled: checkoutDiscount.discountEnabled,
+      discountType: checkoutDiscount.discountType,
+      discountValue: checkoutDiscount.discountValue,
+      includeExtraCharges,
+      damageChargeAmount: includeDamageCharge ? damageChargeAmount : 0,
+      lateCheckoutAmount,
+      roomChargeOverride:
+        roomChargeOverride != null && !Number.isNaN(roomChargeOverride)
+          ? roomChargeOverride
+          : null,
+      asOf: now,
+    });
+
     const inboundSources = await loadInboundBillTransfers(db, id);
     const inboundTransfers = await prepareCreditTransfers(db, inboundSources, now);
     const hasInboundTransfers = inboundTransfers.length > 0;
 
     const settlement = hasInboundTransfers
-      ? mergeCreditTransferSettlements(primarySettlement, inboundTransfers, {
+      ? mergeCreditTransferSettlements(primarySettlementAfterClear, inboundTransfers, {
           payingBooking: booking,
           discountEnabled: checkoutDiscount.discountEnabled,
           discountType: checkoutDiscount.discountType,
           discountValue: checkoutDiscount.discountValue,
           primaryPayments: bookingPayments,
         })
-      : primarySettlement;
+      : primarySettlementAfterClear;
 
     const {
       roomCharges,
@@ -672,7 +726,10 @@ export async function POST(
       });
     }
 
-    const totalPaidAfter = sumCheckoutBookingPaid(bookingPayments);
+    const inboundPaid = hasInboundTransfers
+      ? sumBookingNetPaid(inboundTransfers.flatMap((t) => t.payments))
+      : 0;
+    const totalPaidAfter = sumCheckoutBookingPaid(bookingPayments) + inboundPaid;
     const invoiceDue = Math.max(0, totalAmount - totalPaidAfter);
     const guestDueAmount = isCompanyLedgerCheckout ? 0 : invoiceDue;
 

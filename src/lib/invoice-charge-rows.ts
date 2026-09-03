@@ -222,13 +222,83 @@ function buildHotelRoomRentRow(
   })
 }
 
+function parseTransferredRoomNumber(description: string): string | null {
+  const match = /^Transferred — Room\s+(\S+)\s*:/.exec(description.trim())
+  return match?.[1] ?? null
+}
+
+function matchDiscountForRoomCharge(
+  roomItem: LineItem,
+  discountItems: LineItem[],
+  primaryRoomNumber: string
+): LineItem | undefined {
+  const transferredRoom = parseTransferredRoomNumber(roomItem.description)
+  if (transferredRoom) {
+    return discountItems.find((d) => {
+      const dRoom = parseTransferredRoomNumber(d.description)
+      return dRoom === transferredRoom || d.description.includes(`Room ${transferredRoom}`)
+    })
+  }
+  return discountItems.find((d) => {
+    if (parseTransferredRoomNumber(d.description)) return false
+    return (
+      d.description.includes(`Room ${primaryRoomNumber}`) ||
+      d.description === 'Hotel discount' ||
+      d.description.startsWith('Hotel discount')
+    )
+  })
+}
+
 function buildHotelRowsFromLineItems(ctx: BuildRowsContext): InvoiceChargeDisplayRow[] {
   const roomItems = ctx.lineItems.filter((item) => item.itemType === 'room_charge')
   const extraItems = ctx.lineItems.filter((item) => item.itemType === 'extra_service')
+  const discountItems = ctx.lineItems.filter((item) => item.itemType === 'discount')
 
   const rows: InvoiceChargeDisplayRow[] = []
+  const vatPercent = ctx.hotelVatPercent || INVOICE_VAT_PERCENT
+  const servicePercent = ctx.hotelServiceChargePercent ?? INVOICE_SERVICE_CHARGE_PERCENT
 
-  if (roomItems.length > 0 || resolveHotelGrossRoomRent(ctx) > 0) {
+  if (roomItems.length > 1) {
+    // Multi-room invoice (bill transfer): one rent row per room with that room's discount.
+    for (const roomItem of roomItems) {
+      const transferredRoom = parseTransferredRoomNumber(roomItem.description)
+      const matchedDiscount = matchDiscountForRoomCharge(
+        roomItem,
+        discountItems,
+        ctx.roomNumber
+      )
+      const discountAmount = matchedDiscount ? Math.abs(matchedDiscount.total) : 0
+      const percentInLabel = matchedDiscount?.description.match(/\(([^)]*%[^)]*)\)/)?.[1]
+      const discountLabel =
+        discountAmount > 0
+          ? percentInLabel ??
+            (matchedDiscount?.description.includes('Fixed')
+              ? 'Fixed'
+              : formatDiscountLabel('FIXED', discountAmount, discountAmount))
+          : INVOICE_ZERO_DISCOUNT_DISPLAY
+      const category = transferredRoom
+        ? `Room ${transferredRoom} (transferred)`
+        : ctx.roomTypeName || `Room ${ctx.roomNumber}`
+      const description = transferredRoom
+        ? roomItem.description.replace(/^Transferred — Room\s+\S+\s*:\s*/, '')
+        : ''
+
+      rows.push(
+        buildInclusiveGrossChargeRow({
+          id: roomItem.id,
+          date: ctx.stayDateTime.date,
+          time: ctx.stayDateTime.time,
+          category,
+          description,
+          grossRent: Math.abs(roomItem.total),
+          vatPercent,
+          servicePercent,
+          discountLabel,
+          discountAmount,
+        })
+      )
+    }
+  } else if (roomItems.length > 0 || resolveHotelGrossRoomRent(ctx) > 0) {
     rows.push(buildHotelRoomRentRow(ctx, roomItems[0]?.id ?? 'hotel-room-rent'))
   }
 
@@ -244,7 +314,11 @@ function buildHotelRowsFromLineItems(ctx: BuildRowsContext): InvoiceChargeDispla
     const base = Math.abs(item.total)
     const isBeverage = item.description.toLowerCase().includes('beverage')
     const isLateCheckout = item.description.toLowerCase().includes('late checkout')
-    const folioChargeLabel = item.description.trim() || 'Extra Charges'
+    const transferredRoom = parseTransferredRoomNumber(item.description)
+    const folioChargeLabel = transferredRoom
+      ? item.description.replace(/^Transferred — Room\s+\S+\s*:\s*/, '').trim() ||
+        `Room ${transferredRoom} extras`
+      : item.description.trim() || 'Extra Charges'
     rows.push(
       buildChargeDisplayRow({
         id: item.id,
@@ -255,18 +329,22 @@ function buildHotelRowsFromLineItems(ctx: BuildRowsContext): InvoiceChargeDispla
               manualPayment.paymentType,
               manualPayment.categoryLabel ?? item.description
             )
-          : isBeverage
-            ? 'Hotel Beverage'
-            : isLateCheckout
-              ? item.description
-              : folioChargeLabel,
+          : transferredRoom
+            ? `Room ${transferredRoom} (transferred)`
+            : isBeverage
+              ? 'Hotel Beverage'
+              : isLateCheckout
+                ? item.description
+                : folioChargeLabel,
         description: isManualCharge
           ? ''
           : isLateCheckout
             ? ''
             : isBeverage
               ? item.description
-              : '',
+              : transferredRoom
+                ? folioChargeLabel
+                : '',
         roomRent: base,
         sdAmount: 0,
         vatAmount: 0,

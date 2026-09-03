@@ -48,6 +48,7 @@ export interface CheckoutPreview {
   roomCharges: number
   foodCharges: number
   extraCharges: number
+  lateCheckoutCharge?: number
   damageCharge?: number
   subtotal: number
   discount: number
@@ -68,10 +69,41 @@ export interface CheckoutPreview {
     roomNumber: string
     roomTypeName: string
     customerName: string
+    kind?: 'primary' | 'transferred'
+    nights?: number
+    nightlyRate?: number
     roomCharges: number
     foodCharges: number
     extraCharges: number
+    discount?: number
+    discountLabel?: string
+    hotelVat?: number
+    restaurantVat?: number
+    vatAmount?: number
+    subtotal?: number
+    roomTotal?: number
+    totalPaid?: number
     transferTotal: number
+  }>
+  roomFolios?: Array<{
+    bookingId: string
+    roomNumber: string
+    roomTypeName: string
+    customerName: string
+    kind: 'primary' | 'transferred'
+    nights: number
+    nightlyRate: number
+    roomCharges: number
+    foodCharges: number
+    extraCharges: number
+    discount: number
+    discountLabel: string
+    hotelVat: number
+    restaurantVat: number
+    vatAmount: number
+    subtotal: number
+    roomTotal: number
+    totalPaid: number
   }>
   billTransferOut?: boolean
   billTransferTarget?: {
@@ -794,6 +826,144 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
         <CardContent className="p-4 space-y-2 text-sm">
           {checkoutPreviewFetching && !checkoutPreview ? (
             <Skeleton className="h-24 w-full" />
+          ) : (checkoutPreview?.roomFolios?.length ?? 0) > 1 ? (
+            <div className="space-y-3">
+              {checkoutPreview!.roomFolios!.map((folio) => (
+                <div
+                  key={folio.bookingId}
+                  className={cn(
+                    'rounded-md border p-3 space-y-1.5',
+                    folio.kind === 'transferred'
+                      ? 'border-indigo-200 bg-indigo-50/40'
+                      : 'border-border bg-muted/30'
+                  )}
+                >
+                  <div className="flex items-start justify-between gap-2 pb-1 border-b border-border/60">
+                    <div>
+                      <p className="font-semibold text-foreground">
+                        {folio.kind === 'transferred'
+                          ? `Transferred — Room ${folio.roomNumber}`
+                          : `This room — ${folio.roomNumber}`}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {folio.customerName}
+                        {folio.roomTypeName ? ` · ${folio.roomTypeName}` : ''}
+                        {folio.nights > 0 ? ` · ${folio.nights} night(s)` : ''}
+                      </p>
+                    </div>
+                    <p className="font-semibold text-right whitespace-nowrap">
+                      {formatBdt(folio.roomTotal)}
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-x-2 gap-y-1">
+                    <p className="text-muted-foreground">Room rent</p>
+                    <p className="font-medium text-right">{formatBdt(folio.roomCharges)}</p>
+                    {folio.discount > 0 && (
+                      <>
+                        <p className="text-muted-foreground">
+                          Discount
+                          {folio.discountLabel && folio.discountLabel !== '—'
+                            ? ` (${folio.discountLabel})`
+                            : ''}
+                        </p>
+                        <p className="font-medium text-right text-emerald-700">
+                          -{formatBdt(folio.discount)}
+                        </p>
+                      </>
+                    )}
+                    {folio.foodCharges > 0 && (
+                      <>
+                        <p className="text-muted-foreground">Restaurant</p>
+                        <p className="font-medium text-right">{formatBdt(folio.foodCharges)}</p>
+                      </>
+                    )}
+                    {folio.extraCharges > 0 && (
+                      <>
+                        <p className="text-muted-foreground">Extras / service</p>
+                        <p className="font-medium text-right">{formatBdt(folio.extraCharges)}</p>
+                      </>
+                    )}
+                    {folio.vatAmount > 0 && (
+                      <>
+                        <p className="text-muted-foreground">VAT</p>
+                        <p className="font-medium text-right">{formatBdt(folio.vatAmount)}</p>
+                      </>
+                    )}
+                    {folio.totalPaid > 0 && (
+                      <>
+                        <p className="text-muted-foreground">Paid on this stay</p>
+                        <p className="font-medium text-right text-emerald-700">
+                          {formatBdt(folio.totalPaid)}
+                        </p>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ))}
+              <div className="grid grid-cols-2 gap-2 pt-1 border-t">
+                {(checkoutPreview?.damageCharge ?? 0) > 0 && (
+                  <>
+                    <p className="text-muted-foreground">Damage charges</p>
+                    <p className="font-medium text-right text-amber-800">
+                      {formatBdt(checkoutPreview?.damageCharge ?? 0)}
+                    </p>
+                  </>
+                )}
+                {(checkoutPreview?.discount ?? 0) > 0 && (
+                  <>
+                    <p className="text-muted-foreground">Combined discount</p>
+                    <p className="font-medium text-right text-emerald-700">
+                      -{formatBdt(checkoutPreview?.discount ?? 0)}
+                    </p>
+                  </>
+                )}
+                <p className="text-muted-foreground">
+                  Combined VAT (
+                  {checkoutPreview?.vatApplied === false
+                    ? 'none'
+                    : `${checkoutPreview?.vatPercent ?? 0}%`}
+                  )
+                </p>
+                <p className="font-medium text-right">
+                  {formatBdt(checkoutPreview?.vatAmount ?? 0)}
+                </p>
+                <p className="text-muted-foreground font-semibold">Invoice total</p>
+                <p className="font-semibold text-right">
+                  {formatBdt(checkoutPreview?.totalAmount ?? 0)}
+                </p>
+                <p className="text-muted-foreground">Paid</p>
+                <p className="font-medium text-right text-emerald-700">
+                  {formatBdt(checkoutPreview?.totalPaid ?? 0)}
+                </p>
+                <p className="text-muted-foreground">Current due</p>
+                <p
+                  className={cn(
+                    'font-semibold text-right',
+                    isBillTransferOut || isCompanyLedgerCheckout
+                      ? 'text-indigo-700'
+                      : 'text-red-600'
+                  )}
+                >
+                  {isBillTransferOut ? formatBdt(0) : formatBdt(checkOutDue)}
+                </p>
+                {isCompanyLedgerCheckout && checkOutDue > 0 && (
+                  <>
+                    <p className="text-muted-foreground">Due on company ledger</p>
+                    <p className="font-semibold text-right text-indigo-800">
+                      {formatBdt(companyLedgerDue)}
+                    </p>
+                  </>
+                )}
+                {checkOutCredit > 0 && (
+                  <>
+                    <p className="text-muted-foreground">Overpaid</p>
+                    <p className="font-semibold text-right text-emerald-700">
+                      {formatBdt(checkOutCredit)}
+                    </p>
+                  </>
+                )}
+              </div>
+            </div>
           ) : (
             <div className="grid grid-cols-2 gap-2">
               <p className="text-muted-foreground">Room charges</p>
@@ -833,27 +1003,6 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
                   </p>
                 </>
               )}
-              {(checkoutPreview?.creditTransfers ?? []).map((transfer) => (
-                <div key={transfer.bookingId} className="contents">
-                  <p className="text-muted-foreground col-span-2 text-xs text-indigo-800 pt-1">
-                    Transferred from Room {transfer.roomNumber} ({transfer.customerName})
-                  </p>
-                  <p className="text-muted-foreground pl-2">Room</p>
-                  <p className="font-medium text-right">{formatBdt(transfer.roomCharges)}</p>
-                  {transfer.foodCharges > 0 && (
-                    <>
-                      <p className="text-muted-foreground pl-2">Restaurant</p>
-                      <p className="font-medium text-right">{formatBdt(transfer.foodCharges)}</p>
-                    </>
-                  )}
-                  {transfer.extraCharges > 0 && (
-                    <>
-                      <p className="text-muted-foreground pl-2">Service charges</p>
-                      <p className="font-medium text-right">{formatBdt(transfer.extraCharges)}</p>
-                    </>
-                  )}
-                </div>
-              ))}
               {(checkoutPreview?.discount ?? 0) > 0 && (
                 <>
                   <p className="text-muted-foreground">Discount</p>

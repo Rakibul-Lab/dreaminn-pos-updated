@@ -782,14 +782,21 @@ export async function POST(
             checkOut: updatedBooking.checkOut,
             charges: updatedBooking.charges,
             restaurantOrders: restaurantOrdersWithItems,
-            roomCharges: primarySettlement.roomCharges,
-            chargeableNights: primarySettlement.chargeableNights,
-            nightlyRate: primarySettlement.nightlyRate,
-            stayAdjusted: primarySettlement.stayAdjusted,
+            roomCharges: primarySettlementAfterClear.roomCharges,
+            chargeableNights: primarySettlementAfterClear.chargeableNights,
+            nightlyRate: primarySettlementAfterClear.nightlyRate,
+            stayAdjusted: primarySettlementAfterClear.stayAdjusted,
             includeExtraCharges,
+            discount: primarySettlementAfterClear.discount,
+            discountLabel:
+              checkoutDiscount.discountEnabled && checkoutDiscount.discountValue > 0
+                ? checkoutDiscount.discountType === 'FIXED'
+                  ? 'Fixed'
+                  : `${checkoutDiscount.discountValue}%`
+                : undefined,
+            hotelVat: primarySettlementAfterClear.hotelVat,
           },
           inboundTransfers,
-          discount,
           hotelVat,
           vatPercent,
           vatApplied

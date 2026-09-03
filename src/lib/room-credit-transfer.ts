@@ -1,5 +1,5 @@
 import type { PrismaClient } from '@prisma/client'
-import { computeHotelDiscountAmount, parseBookingDiscountType, taxableHotelAfterRoomDiscount } from '@/lib/booking-discount'
+import { parseBookingDiscountType, taxableHotelAfterRoomDiscount } from '@/lib/booking-discount'
 import { bookingVatOptions, computeRoomBookingTotals, sumBookingNetPaid } from '@/lib/booking-totals'
 import { getRoomNightlyTotal } from '@/lib/room-pricing'
 import {
@@ -57,9 +57,29 @@ export type CreditTransferPreviewLine = {
   roomNumber: string
   roomTypeName: string
   customerName: string
+  /** Paying room folio vs bill transferred in from another stay. */
+  kind: 'primary' | 'transferred'
+  checkIn: string | Date
+  checkOut: string | Date
+  nights: number
+  nightlyRate: number
   roomCharges: number
   foodCharges: number
   extraCharges: number
+  discount: number
+  discountEnabled: boolean
+  discountType: 'PERCENTAGE' | 'FIXED' | null
+  discountValue: number
+  discountLabel: string
+  hotelVat: number
+  restaurantVat: number
+  vatAmount: number
+  /** Room + extras + food (before hotel discount / hotel VAT). */
+  subtotal: number
+  /** Folio total for this room after its own discount + VAT. */
+  roomTotal: number
+  totalPaid: number
+  /** @deprecated use roomTotal — kept for older checkout UI */
   transferTotal: number
 }
 
@@ -69,6 +89,92 @@ export type PreparedCreditTransfer = {
   restaurantOrders: CheckoutSettlementParams['restaurantOrders']
   restaurantOrdersWithItems: BuildInvoiceLineItemsInput['restaurantOrders']
   payments: { amount: number; paymentType: string }[]
+}
+
+function discountMetaFromBooking(booking: {
+  discountEnabled?: boolean | null
+  discountType?: string | null
+  discountValue?: number | null
+}): {
+  discountEnabled: boolean
+  discountType: 'PERCENTAGE' | 'FIXED' | null
+  discountValue: number
+  discountLabel: string
+  discount: number
+} {
+  const discountEnabled = booking.discountEnabled === true
+  const discountType = discountEnabled
+    ? parseBookingDiscountType(booking.discountType)
+    : null
+  const discountValue = discountEnabled ? Math.max(0, Number(booking.discountValue) || 0) : 0
+  return {
+    discountEnabled,
+    discountType,
+    discountValue,
+    discountLabel: '',
+    discount: 0,
+  }
+}
+
+function buildRoomFolioPreviewLine(params: {
+  bookingId: string
+  roomNumber: string
+  roomTypeName: string
+  customerName: string
+  kind: 'primary' | 'transferred'
+  checkIn: Date
+  checkOut: Date
+  settlement: CheckoutSettlementResult
+  booking: {
+    discountEnabled?: boolean | null
+    discountType?: string | null
+    discountValue?: number | null
+  }
+  payments: { amount: number; paymentType: string }[]
+}): CreditTransferPreviewLine {
+  const meta = discountMetaFromBooking(params.booking)
+  const discount = Math.max(0, params.settlement.discount)
+  const discountLabel =
+    discount > 0 && meta.discountType
+      ? meta.discountType === 'PERCENTAGE' && meta.discountValue > 0
+        ? `${meta.discountValue}%`
+        : 'Fixed'
+      : discount > 0
+        ? 'Discount'
+        : '—'
+  const subtotal =
+    params.settlement.roomCharges +
+    params.settlement.extraCharges +
+    params.settlement.foodCharges
+  const roomTotal = Math.max(0, params.settlement.totalAmount)
+  const totalPaid = sumBookingNetPaid(params.payments)
+
+  return {
+    bookingId: params.bookingId,
+    roomNumber: params.roomNumber,
+    roomTypeName: params.roomTypeName,
+    customerName: params.customerName,
+    kind: params.kind,
+    checkIn: params.checkIn,
+    checkOut: params.checkOut,
+    nights: params.settlement.chargeableNights,
+    nightlyRate: params.settlement.nightlyRate,
+    roomCharges: params.settlement.roomCharges,
+    foodCharges: params.settlement.foodCharges,
+    extraCharges: params.settlement.extraCharges,
+    discount,
+    discountEnabled: meta.discountEnabled,
+    discountType: meta.discountType,
+    discountValue: meta.discountValue,
+    discountLabel,
+    hotelVat: params.settlement.hotelVat,
+    restaurantVat: params.settlement.restaurantVat,
+    vatAmount: params.settlement.vatAmount,
+    subtotal,
+    roomTotal,
+    totalPaid,
+    transferTotal: roomTotal,
+  }
 }
 
 export function parseCreditTransferBookingIds(raw: unknown): string[] {
@@ -142,13 +248,27 @@ export function mergeCreditTransferSettlements(
   primary: CheckoutSettlementResult,
   transfers: PreparedCreditTransfer[],
   options: {
-    payingBooking: { vatApplied?: boolean | null; vatPercent?: number | null }
+    payingBooking: {
+      id?: string
+      vatApplied?: boolean | null
+      vatPercent?: number | null
+      discountEnabled?: boolean | null
+      discountType?: string | null
+      discountValue?: number | null
+      checkIn?: Date
+      checkOut?: Date
+      customer?: { name?: string }
+      room?: { roomNumber?: string; type?: { name?: string } }
+    }
     discountEnabled: boolean
     discountType: string | null | undefined
     discountValue: number
     primaryPayments: { amount: number; paymentType: string }[]
   }
-): CheckoutSettlementResult & { creditTransfers: CreditTransferPreviewLine[] } {
+): CheckoutSettlementResult & {
+  creditTransfers: CreditTransferPreviewLine[]
+  roomFolios: CreditTransferPreviewLine[]
+} {
   const allSettlements = [primary, ...transfers.map((t) => t.settlement)]
 
   const roomCharges = allSettlements.reduce((sum, s) => sum + s.roomCharges, 0)
@@ -161,19 +281,18 @@ export function mergeCreditTransferSettlements(
   const vatOpts = bookingVatOptions(options.payingBooking)
   const vatApplied = vatOpts.vatApplied !== false
   const hotelVatRate = vatApplied ? Math.max(0, vatOpts.vatPercent ?? 0) : 0
-  // Paying-room discount applies to combined room charges only — not damage/extras.
-  // A fixed discount repeats over the paying room's own billed nights.
-  const discount = computeHotelDiscountAmount(
-    roomCharges,
-    options.discountEnabled,
-    parseBookingDiscountType(options.discountType),
-    options.discountValue,
-    primary.chargeableNights
-  )
+
+  // Keep each room's own discount (source stay discount is not rewritten by the
+  // paying room). Combined hotel VAT is the sum of each folio's hotel VAT.
+  const discount = allSettlements.reduce((sum, s) => sum + Math.max(0, s.discount), 0)
   const restaurantVat = allSettlements.reduce((sum, s) => sum + s.restaurantVat, 0)
   const restaurantTotal = foodCharges + restaurantVat
-  const taxableHotel = taxableHotelAfterRoomDiscount(roomCharges, discount, extraCharges)
-  const hotelVat = hotelVatRate > 0 ? (taxableHotel * hotelVatRate) / 100 : 0
+  const taxableHotel = allSettlements.reduce(
+    (sum, s) =>
+      sum + taxableHotelAfterRoomDiscount(s.roomCharges, s.discount, s.extraCharges),
+    0
+  )
+  const hotelVat = allSettlements.reduce((sum, s) => sum + s.hotelVat, 0)
   const vatAmount = hotelVat + restaurantVat
   const totalAmount = taxableHotel + hotelVat + restaurantTotal
 
@@ -185,20 +304,37 @@ export function mergeCreditTransferSettlements(
   const dueBeforeSettlement = totalAmount - totalPaid
   const creditAmount = dueBeforeSettlement < 0 ? Math.abs(dueBeforeSettlement) : 0
 
-  const creditTransfers: CreditTransferPreviewLine[] = transfers.map((t) => ({
-    bookingId: t.booking.id,
-    roomNumber: t.booking.room.roomNumber,
-    roomTypeName: t.booking.room.type.name,
-    customerName: t.booking.customer.name,
-    roomCharges: t.settlement.roomCharges,
-    foodCharges: t.settlement.foodCharges,
-    extraCharges: t.settlement.extraCharges,
-    transferTotal:
-      t.settlement.roomCharges +
-      t.settlement.extraCharges +
-      t.settlement.foodCharges +
-      t.settlement.restaurantVat,
-  }))
+  const primaryFolio = buildRoomFolioPreviewLine({
+    bookingId: options.payingBooking.id ?? 'primary',
+    roomNumber: options.payingBooking.room?.roomNumber ?? '—',
+    roomTypeName: options.payingBooking.room?.type?.name ?? '—',
+    customerName: options.payingBooking.customer?.name ?? '—',
+    kind: 'primary',
+    checkIn: options.payingBooking.checkIn ?? new Date(),
+    checkOut: options.payingBooking.checkOut ?? new Date(),
+    settlement: primary,
+    booking: {
+      discountEnabled: options.discountEnabled,
+      discountType: options.discountType,
+      discountValue: options.discountValue,
+    },
+    payments: options.primaryPayments,
+  })
+
+  const creditTransfers: CreditTransferPreviewLine[] = transfers.map((t) =>
+    buildRoomFolioPreviewLine({
+      bookingId: t.booking.id,
+      roomNumber: t.booking.room.roomNumber,
+      roomTypeName: t.booking.room.type.name,
+      customerName: t.booking.customer.name,
+      kind: 'transferred',
+      checkIn: t.booking.checkIn,
+      checkOut: t.booking.checkOut,
+      settlement: t.settlement,
+      booking: t.booking,
+      payments: t.payments,
+    })
+  )
 
   return {
     ...primary,
@@ -218,7 +354,20 @@ export function mergeCreditTransferSettlements(
     dueBeforeSettlement: Math.max(0, dueBeforeSettlement),
     creditAmount,
     creditTransfers,
+    roomFolios: [primaryFolio, ...creditTransfers],
   }
+}
+
+function roomDiscountLineDescription(
+  roomNumber: string,
+  discountLabel: string,
+  transferred: boolean
+): string {
+  const body =
+    discountLabel && discountLabel !== '—'
+      ? `Hotel discount — Room ${roomNumber} (${discountLabel})`
+      : `Hotel discount — Room ${roomNumber}`
+  return transferred ? `Transferred — Room ${roomNumber}: ${body}` : body
 }
 
 export function buildCheckoutInvoiceLineItems(
@@ -234,23 +383,45 @@ export function buildCheckoutInvoiceLineItems(
     nightlyRate?: number
     stayAdjusted?: boolean
     includeExtraCharges?: boolean
+    discount: number
+    discountLabel?: string
+    hotelVat: number
   },
   transfers: PreparedCreditTransfer[],
-  discount: number,
-  hotelVat: number,
+  /** Combined hotel VAT (sum of room folios) — one summary line after all rooms. */
+  combinedHotelVat: number,
   vatPercent: number,
   vatApplied: boolean
 ): InvoiceLineItemInput[] {
-  const items: InvoiceLineItemInput[] = buildInvoiceChargeLinesOnly({
-    ...primary,
-    hotelVatPercent: vatPercent,
-    vatApplied,
-  })
+  const items: InvoiceLineItemInput[] = []
+
+  items.push(
+    ...buildInvoiceChargeLinesOnly({
+      ...primary,
+      hotelVatPercent: vatPercent,
+      vatApplied,
+    })
+  )
+
+  if (primary.discount > 0) {
+    items.push({
+      itemType: 'discount',
+      description: roomDiscountLineDescription(
+        primary.roomNumber,
+        primary.discountLabel ?? '',
+        false
+      ),
+      quantity: 1,
+      unitPrice: -primary.discount,
+      total: -primary.discount,
+    })
+  }
 
   for (const transfer of transfers) {
-    const prefix = `Transferred — Room ${transfer.booking.room.roomNumber}`
+    const roomNumber = transfer.booking.room.roomNumber
+    const prefix = `Transferred — Room ${roomNumber}`
     const transferLines = buildInvoiceChargeLinesOnly({
-      roomNumber: transfer.booking.room.roomNumber,
+      roomNumber,
       roomTypeName: transfer.booking.room.type.name,
       checkIn: transfer.booking.checkIn,
       checkOut: transfer.booking.checkOut,
@@ -268,26 +439,34 @@ export function buildCheckoutInvoiceLineItems(
       description: `${prefix}: ${line.description}`,
     }))
     items.push(...transferLines)
+
+    const transferDiscount = Math.max(0, transfer.settlement.discount)
+    if (transferDiscount > 0) {
+      const meta = discountMetaFromBooking(transfer.booking)
+      const discountLabel =
+        meta.discountType === 'PERCENTAGE' && meta.discountValue > 0
+          ? `${meta.discountValue}%`
+          : meta.discountType === 'FIXED'
+            ? 'Fixed'
+            : 'Discount'
+      items.push({
+        itemType: 'discount',
+        description: roomDiscountLineDescription(roomNumber, discountLabel, true),
+        quantity: 1,
+        unitPrice: -transferDiscount,
+        total: -transferDiscount,
+      })
+    }
   }
 
-  if (discount > 0) {
-    items.push({
-      itemType: 'discount',
-      description: 'Hotel discount',
-      quantity: 1,
-      unitPrice: -discount,
-      total: -discount,
-    })
-  }
-
-  if (hotelVat > 0) {
+  if (combinedHotelVat > 0) {
     const rateLabel = vatApplied ? ` (${vatPercent}%)` : ''
     items.push({
       itemType: 'vat_hotel',
       description: `Hotel VAT${rateLabel}`,
       quantity: 1,
-      unitPrice: hotelVat,
-      total: hotelVat,
+      unitPrice: combinedHotelVat,
+      total: combinedHotelVat,
     })
   }
 

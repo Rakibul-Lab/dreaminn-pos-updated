@@ -21,6 +21,14 @@ import { getRoomNightlyTotal } from '@/lib/room-pricing';
 import { isStayDatetimeRangeValid } from '@/lib/hotel-times';
 import { stampCurrentBusinessDate } from '@/lib/business-date';
 import { filterGuestFolioRestaurantOrders } from '@/lib/restaurant-order-billing';
+import { computeCheckoutSettlement } from '@/lib/checkout-settlement';
+import {
+  buildCheckoutInvoiceLineItems,
+  isBillTransferPlaceholderCharge,
+  loadInboundBillTransfers,
+  mergeCreditTransferSettlements,
+  prepareCreditTransfers,
+} from '@/lib/room-credit-transfer';
 
 function parseOptionalAmount(value: unknown): number | undefined {
   if (value === undefined || value === null || value === '') return undefined;
@@ -236,7 +244,13 @@ export async function POST(request: NextRequest) {
       .filter((c) => c.chargeType === 'ROOM_RATE')
       .reduce((sum, c) => sum + c.amount * c.quantity, 0);
 
-    const autoExtraCharges = booking.charges
+    // Placeholder "Bill transferred from Room …" rows only keep due visible while
+    // in-house. Invoice must expand the real source folio (rent + its discount).
+    const chargesForInvoice = booking.charges.filter(
+      (c) => !isBillTransferPlaceholderCharge(c.description)
+    );
+
+    const autoExtraCharges = chargesForInvoice
       .filter((c) => c.chargeType !== 'ROOM_RATE')
       .reduce((sum, c) => sum + c.amount * c.quantity, 0);
 
@@ -254,6 +268,7 @@ export async function POST(request: NextRequest) {
             menuItem: { select: { name: true } },
           },
         },
+        payments: { select: { amount: true, paymentType: true } },
         companyLedgerBill: { select: { id: true } },
       },
     });
@@ -267,26 +282,28 @@ export async function POST(request: NextRequest) {
     const restaurantVat = restaurantOrders.reduce((sum, order) => sum + order.vatAmount, 0);
     const restaurantTotal = restaurantOrders.reduce((sum, order) => sum + order.totalAmount, 0);
 
-    const roomCharges = roomChargesOverride ?? autoRoomCharges;
-    const foodCharges = foodChargesOverride ?? autoRestaurantNet;
-    const extraCharges = serviceChargesOverride ?? (manualMode ? 0 : autoExtraCharges);
+    const now = new Date();
+    const inboundSources = await loadInboundBillTransfers(db, bookingId);
+    const inboundTransfers =
+      !manualMode && inboundSources.length > 0
+        ? await prepareCreditTransfers(db, inboundSources, now)
+        : [];
+    const hasInboundTransfers = inboundTransfers.length > 0;
+
+    let roomCharges = roomChargesOverride ?? autoRoomCharges;
+    let foodCharges = foodChargesOverride ?? autoRestaurantNet;
+    let extraCharges = serviceChargesOverride ?? (manualMode ? 0 : autoExtraCharges);
 
     const vatOpts = bookingVatOptions(booking);
     const vatApplied = vatOpts.vatApplied !== false;
-    const vatPercent =
+    let vatPercent =
       vatPercentOverride !== undefined
         ? vatPercentOverride
         : vatApplied
           ? Math.max(0, vatOpts.vatPercent ?? 0)
           : 0;
 
-    const hotelBase = roomCharges + extraCharges;
-    const discountNights = resolveBilledDiscountNights(
-      roomCharges,
-      getRoomNightlyTotal(booking.room),
-      resolveDiscountNights({ checkIn: invoiceCheckIn, checkOut: invoiceCheckOut })
-    );
-    const discount =
+    let discount =
       discountOverride !== undefined
         ? Math.min(Math.max(0, discountOverride), Math.max(0, roomCharges))
         : computeHotelDiscountAmount(
@@ -294,55 +311,141 @@ export async function POST(request: NextRequest) {
             booking.discountEnabled === true,
             parseBookingDiscountType(booking.discountType),
             Number(booking.discountValue) || 0,
-            discountNights
+            resolveBilledDiscountNights(
+              roomCharges,
+              getRoomNightlyTotal(booking.room),
+              resolveDiscountNights({ checkIn: invoiceCheckIn, checkOut: invoiceCheckOut })
+            )
           );
 
-    const taxableHotel = taxableHotelAfterRoomDiscount(roomCharges, discount, extraCharges);
-    const hotelVat = vatPercent > 0 ? (taxableHotel * vatPercent) / 100 : 0;
-    const vatAmount = manualMode ? hotelVat : hotelVat + restaurantVat;
-    const subtotal = hotelBase + foodCharges;
-    const totalAmount = manualMode
-      ? taxableHotel + hotelVat + foodCharges
-      : taxableHotel + hotelVat + restaurantTotal;
+    let hotelVat = 0;
+    let vatAmount = 0;
+    let subtotal = 0;
+    let totalAmount = 0;
+    let lineItems;
+
+    if (hasInboundTransfers) {
+      const bookingPayments = await db.payment.findMany({
+        where: { bookingId },
+        select: { amount: true, paymentType: true },
+      });
+      const primarySettlement = computeCheckoutSettlement({
+        booking: { ...booking, charges: chargesForInvoice },
+        nightlyRate: getRoomNightlyTotal(booking.room),
+        restaurantOrders: allRestaurantOrders,
+        lateCheckoutCharge: 0,
+        payments: bookingPayments,
+        discountEnabled: booking.discountEnabled === true,
+        discountType: booking.discountType,
+        discountValue: Number(booking.discountValue) || 0,
+        includeExtraCharges: true,
+        damageChargeAmount: 0,
+        roomChargeOverride: roomChargesOverride ?? null,
+        asOf: now,
+      });
+      const settlement = mergeCreditTransferSettlements(primarySettlement, inboundTransfers, {
+        payingBooking: booking,
+        discountEnabled: booking.discountEnabled === true,
+        discountType: booking.discountType,
+        discountValue: Number(booking.discountValue) || 0,
+        primaryPayments: bookingPayments,
+      });
+
+      roomCharges = settlement.roomCharges;
+      foodCharges = foodChargesOverride ?? settlement.foodCharges;
+      extraCharges = serviceChargesOverride ?? settlement.extraCharges;
+      discount = discountOverride !== undefined ? discountOverride : settlement.discount;
+      hotelVat = settlement.hotelVat;
+      vatAmount = settlement.vatAmount;
+      vatPercent = settlement.vatPercent;
+      subtotal = settlement.subtotal;
+      totalAmount = settlement.totalAmount;
+
+      const primaryDiscountLabel =
+        booking.discountEnabled && Number(booking.discountValue) > 0
+          ? parseBookingDiscountType(booking.discountType) === 'FIXED'
+            ? 'Fixed'
+            : `${Number(booking.discountValue)}%`
+          : undefined;
+
+      lineItems = buildCheckoutInvoiceLineItems(
+        {
+          roomNumber: booking.room.roomNumber,
+          roomTypeName: booking.room.type?.name || '',
+          checkIn: invoiceCheckIn,
+          checkOut: invoiceCheckOut,
+          charges: chargesForInvoice,
+          restaurantOrders: allRestaurantOrders,
+          roomCharges: primarySettlement.roomCharges,
+          chargeableNights: primarySettlement.chargeableNights,
+          nightlyRate: primarySettlement.nightlyRate,
+          stayAdjusted: primarySettlement.stayAdjusted,
+          includeExtraCharges: true,
+          discount: primarySettlement.discount,
+          discountLabel: primaryDiscountLabel,
+          hotelVat: primarySettlement.hotelVat,
+        },
+        inboundTransfers,
+        hotelVat,
+        vatPercent,
+        vatPercent > 0
+      );
+    } else {
+      const hotelBase = roomCharges + extraCharges;
+      const taxableHotel = taxableHotelAfterRoomDiscount(roomCharges, discount, extraCharges);
+      hotelVat = vatPercent > 0 ? (taxableHotel * vatPercent) / 100 : 0;
+      vatAmount = manualMode ? hotelVat : hotelVat + restaurantVat;
+      subtotal = hotelBase + foodCharges;
+      totalAmount = manualMode
+        ? taxableHotel + hotelVat + foodCharges
+        : taxableHotel + hotelVat + restaurantTotal;
+
+      lineItems = manualMode
+        ? buildManualInvoiceLineItems({
+            roomNumber: booking.room.roomNumber,
+            roomTypeName: booking.room.type?.name || '',
+            checkIn: invoiceCheckIn,
+            checkOut: invoiceCheckOut,
+            roomCharges,
+            foodCharges,
+            serviceCharges: extraCharges,
+            discount,
+            hotelVat,
+            hotelVatPercent: vatPercent,
+            vatApplied: vatPercent > 0,
+          })
+        : buildInvoiceLineItems({
+            roomNumber: booking.room.roomNumber,
+            roomTypeName: booking.room.type?.name || '',
+            checkIn: invoiceCheckIn,
+            checkOut: invoiceCheckOut,
+            charges: chargesForInvoice,
+            restaurantOrders,
+            roomCharges,
+            includeExtraCharges: true,
+            discount,
+            hotelVat,
+            hotelVatPercent: vatPercent,
+            vatApplied: vatPercent > 0,
+            restaurantVat,
+          });
+    }
 
     const paidAmount =
       paidAmountOverride !== undefined
         ? paidAmountOverride
-        : sumBookingNetPaid(booking.payments);
+        : sumBookingNetPaid(
+            hasInboundTransfers
+              ? [
+                  ...(booking.payments ?? []),
+                  ...inboundTransfers.flatMap((t) => t.payments),
+                ]
+              : booking.payments
+          );
     const dueAmount = totalAmount - paidAmount;
     const status: InvoiceStatus = dueAmount <= 0 ? 'PAID' : 'ISSUED';
     const invoiceNumber = generateInvoiceNumber();
     const businessDate = await stampCurrentBusinessDate();
-
-    const lineItems = manualMode
-      ? buildManualInvoiceLineItems({
-          roomNumber: booking.room.roomNumber,
-          roomTypeName: booking.room.type?.name || '',
-          checkIn: invoiceCheckIn,
-          checkOut: invoiceCheckOut,
-          roomCharges,
-          foodCharges,
-          serviceCharges: extraCharges,
-          discount,
-          hotelVat,
-          hotelVatPercent: vatPercent,
-          vatApplied: vatPercent > 0,
-        })
-      : buildInvoiceLineItems({
-          roomNumber: booking.room.roomNumber,
-          roomTypeName: booking.room.type?.name || '',
-          checkIn: invoiceCheckIn,
-          checkOut: invoiceCheckOut,
-          charges: booking.charges,
-          restaurantOrders,
-          roomCharges,
-          includeExtraCharges: true,
-          discount,
-          hotelVat,
-          hotelVatPercent: vatPercent,
-          vatApplied: vatPercent > 0,
-          restaurantVat,
-        });
 
     const invoice = await db.$transaction(async (tx) => {
       const inv = existingInvoice

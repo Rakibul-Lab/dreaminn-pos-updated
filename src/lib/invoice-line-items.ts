@@ -132,10 +132,17 @@ function buildExtraChargeLines(input: BuildInvoiceLineItemsInput): InvoiceLineIt
     .filter((c) => {
       if (c.chargeType === 'ROOM_RATE') return false
       if (c.chargeType === 'LATE_CHECKOUT' && input.includeExtraCharges === false) return false
+      // Never invoice the in-house bill-transfer placeholder — real source folio is expanded separately.
+      if (
+        typeof c.description === 'string' &&
+        c.description.startsWith('Bill transferred from Room ')
+      ) {
+        return false
+      }
       return true
     })
     .map((charge) => ({
-      itemType: 'extra_service',
+      itemType: 'extra_service' as const,
       referenceId: charge.id,
       description:
         charge.description ||
@@ -143,9 +150,11 @@ function buildExtraChargeLines(input: BuildInvoiceLineItemsInput): InvoiceLineIt
           ? 'Early checkout fee'
           : charge.chargeType === 'DAMAGE'
             ? 'Damage charges'
-            : charge.chargeType === 'MINIBAR'
-              ? charge.description || 'Beverage / minibar'
-              : charge.chargeType.replace(/_/g, ' ')),
+            : charge.chargeType === 'LATE_CHECKOUT'
+              ? 'Late checkout charge'
+              : charge.chargeType === 'MINIBAR'
+                ? charge.description || 'Beverage / minibar'
+                : charge.chargeType.replace(/_/g, ' ')),
       quantity: charge.quantity,
       unitPrice: charge.amount,
       total: charge.amount * charge.quantity,

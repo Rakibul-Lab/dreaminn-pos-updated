@@ -30,7 +30,6 @@ import {
 } from '@/lib/room-credit-transfer';
 import { postCompanyLedgerBill, ensureCompanyLedgerGuestFromCustomer, resolveCompanyLedgerBooking } from '@/lib/company-ledger-billing';
 import { DEFAULT_GUEST_COMPANY } from '@/lib/reservation-terms';
-import { processAllOverdueStayExtensions, extendOverdueCheckedInBooking } from '@/lib/auto-stay-extension';
 import { bookingDiscountPrefill, resolveCheckoutDiscount } from '@/lib/checkout-discount';
 import { stampCurrentBusinessDate } from '@/lib/business-date';
 import { recordFolioSettlementPayments, subtractSettledCharges } from '@/lib/folio-settlement';
@@ -187,10 +186,6 @@ export async function GET(
     if (booking.status !== 'CHECKED_IN') {
       return errorResponse('Only checked-in bookings can be checked out');
     }
-
-    await extendOverdueCheckedInBooking(db, id);
-    booking = await loadCheckoutBooking(id);
-    if (!booking) return notFoundResponse('Booking');
 
     const now = new Date();
     const restaurantOrders = await db.restaurantOrder.findMany({
@@ -387,9 +382,8 @@ export async function POST(
       return errorResponse('Only checked-in bookings can be checked out');
     }
 
-    await extendOverdueCheckedInBooking(db, id);
-    booking = await loadCheckoutBooking(id);
-    if (!booking) return notFoundResponse('Booking');
+    // Do not auto-extend on checkout — preview/refetch was stacking nights
+    // (Stay adjusted 3 → 9 → 12…) while staff tried to settle the bill.
 
     if (
       roomChargeOverride != null &&

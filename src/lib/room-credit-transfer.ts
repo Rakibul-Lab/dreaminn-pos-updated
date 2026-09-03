@@ -1,6 +1,6 @@
 import type { PrismaClient } from '@prisma/client'
 import { computeHotelDiscountAmount, parseBookingDiscountType, taxableHotelAfterRoomDiscount } from '@/lib/booking-discount'
-import { bookingVatOptions, sumBookingNetPaid } from '@/lib/booking-totals'
+import { bookingVatOptions, computeRoomBookingTotals, sumBookingNetPaid } from '@/lib/booking-totals'
 import { getRoomNightlyTotal } from '@/lib/room-pricing'
 import {
   computeCheckoutSettlement,
@@ -520,14 +520,41 @@ export async function completeOutboundBillTransfer(
 
   const targetAdults = Math.max(1, Number(target.adults) || 1)
   const nextAdults = alreadyListed ? targetAdults : Math.max(targetAdults + 1, 2)
-  const priorDue = Math.max(0, Number(target.dueAmount) || 0)
   const transferNote = `Received bill from Room ${sourceRoomNumber} (${guestName}) — ৳${amount.toFixed(2)}`
+
+  // Recompute due from discounted room + all posted extras (incl. this transfer).
+  // Adding transferAmount onto a stale undiscounted dueAmount caused 18000+12600=30600.
+  const targetPayments = await db.payment.findMany({
+    where: { bookingId: target.id },
+    select: { amount: true, paymentType: true },
+  })
+  const targetCharges = await db.roomCharge.findMany({
+    where: { bookingId: target.id },
+    select: { chargeType: true, amount: true, quantity: true },
+  })
+  const roomDue = computeRoomBookingTotals(
+    Number(target.totalRoomCharge) || 0,
+    sumBookingNetPaid(targetPayments),
+    bookingVatOptions(target),
+    {
+      discountEnabled: target.discountEnabled === true,
+      discountType: target.discountType ?? undefined,
+      discountValue: target.discountValue ?? 0,
+      checkIn: target.checkIn,
+      checkOut: target.checkOut,
+      totalRoomCharge: target.totalRoomCharge,
+    }
+  ).dueAmount
+  const extrasTotal = targetCharges
+    .filter((c) => c.chargeType !== 'ROOM_RATE')
+    .reduce((sum, c) => sum + c.amount * (c.quantity || 1), 0)
+  const nextDue = Math.max(0, roomDue + extrasTotal)
 
   await db.booking.update({
     where: { id: target.id },
     data: {
       adults: nextAdults,
-      dueAmount: priorDue + amount,
+      dueAmount: nextDue,
       notes: target.notes ? `${target.notes}\n${transferNote}` : transferNote,
     },
   })

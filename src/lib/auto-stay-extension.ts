@@ -17,8 +17,8 @@ import { bookingVatOptions, computeRoomBookingTotals, sumBookingNetPaid } from '
  */
 export const AUTO_EXTENSION_GRACE_END_TIME = '14:00'
 
-/** Hard cap so a bad clock or corrupt row cannot bill decades of nights in one pass. */
-const MAX_AUTO_EXTENSION_NIGHTS = 14
+/** Only one extra night may be billed in a single auto-extend pass. */
+const MAX_AUTO_EXTENSION_NIGHTS = 1
 
 export function getAutoExtensionCutoff(
   checkOut: Date,
@@ -38,11 +38,10 @@ export function isPastAutoExtensionCutoff(
 }
 
 /**
- * Earliest checkout calendar day that is still valid for a guest who remains in-house.
+ * Next checkout datetime after grace has passed on the current departure day.
  *
- * After grace on day D the guest owes that night, so checkout moves to D+1. If the
- * system was offline for several days, jump once to that target — never add another
- * night on the next page load once checkout is caught up.
+ * Only ever advances **one** night per run. Multi-day catch-up on every list/checkout
+ * refresh was stacking stays (3 → 9 → 12 nights) and inflating due.
  */
 export function resolveAutoExtendedCheckoutDate(
   currentCheckOut: Date,
@@ -54,40 +53,16 @@ export function resolveAutoExtendedCheckoutDate(
     return null
   }
 
-  let targetDay = startOfDay(now)
-  if (now.getTime() > applyHotelTimeToDate(targetDay, graceTime).getTime()) {
-    targetDay = addDays(targetDay, 1)
-  }
-
-  let target = applyHotelTimeToBookingInput(datePickerValue(targetDay), checkOutTime)
-
-  // Always move at least one calendar day forward when grace on the current
-  // checkout has passed; otherwise a timezone skew can leave checkout stuck and
-  // re-bill the same night on every request.
-  const minForward = applyHotelTimeToBookingInput(
+  const target = applyHotelTimeToBookingInput(
     datePickerValue(addDays(startOfDay(currentCheckOut), 1)),
     checkOutTime
   )
-  if (target.getTime() < minForward.getTime()) {
-    target = minForward
-  }
 
   if (target.getTime() <= currentCheckOut.getTime()) {
     return null
   }
 
-  // Cap runaway catch-up (bad server clock / corrupt dates).
-  const daysAdvanced = Math.round(
-    (startOfDay(target).getTime() - startOfDay(currentCheckOut).getTime()) / 86_400_000
-  )
-  if (daysAdvanced > MAX_AUTO_EXTENSION_NIGHTS) {
-    target = applyHotelTimeToBookingInput(
-      datePickerValue(addDays(startOfDay(currentCheckOut), MAX_AUTO_EXTENSION_NIGHTS)),
-      checkOutTime
-    )
-  }
-
-  return target.getTime() > currentCheckOut.getTime() ? target : null
+  return target
 }
 
 type ExtensionDb = Pick<PrismaClient, 'booking' | 'roomCharge'>
@@ -103,6 +78,7 @@ export async function extendOverdueCheckedInBooking(
     include: {
       room: { include: { type: true } },
       payments: { select: { amount: true, paymentType: true } },
+      charges: { select: { chargeType: true, amount: true, quantity: true } },
     },
   })
   if (!booking || booking.status !== 'CHECKED_IN') return false
@@ -123,10 +99,12 @@ export async function extendOverdueCheckedInBooking(
   const nights = countHotelStayNights(booking.checkIn, checkOut)
   const extensions = Math.max(0, nights - previousNights)
   if (extensions <= 0) return false
+  // Hard stop if calendar math somehow jumps more than one night in a single run.
+  if (extensions > MAX_AUTO_EXTENSION_NIGHTS) return false
 
   const totalRoomCharge = nights * nightlyRate
   const totalPaid = sumBookingNetPaid(booking.payments)
-  const { dueAmount } = computeRoomBookingTotals(
+  const roomDue = computeRoomBookingTotals(
     totalRoomCharge,
     totalPaid,
     bookingVatOptions(booking),
@@ -135,8 +113,16 @@ export async function extendOverdueCheckedInBooking(
       discountType: booking.discountType ?? undefined,
       discountValue: booking.discountValue ?? 0,
       nights,
+      checkIn: booking.checkIn,
+      checkOut,
+      totalRoomCharge,
     }
-  )
+  ).dueAmount
+  // Keep bill-transfer placeholders and other posted extras in the stored due.
+  const postedExtras = booking.charges
+    .filter((c) => c.chargeType !== 'ROOM_RATE')
+    .reduce((sum, c) => sum + c.amount * (c.quantity || 1), 0)
+  const dueAmount = Math.max(0, roomDue + postedExtras)
 
   console.info(
     `[auto-next-day-bill] booking=${bookingId} reg=${booking.registrationNumber ?? '—'} ` +

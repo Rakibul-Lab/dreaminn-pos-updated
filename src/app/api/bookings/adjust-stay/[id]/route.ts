@@ -3,7 +3,7 @@ import { db } from '@/lib/db'
 import { requireRole } from '@/lib/auth'
 import { successResponse, errorResponse, notFoundResponse, logActivity } from '@/lib/api-utils'
 import { RoleType } from '@prisma/client'
-import { getEarlyCheckoutSettings } from '@/lib/app-settings'
+import { getEarlyCheckoutSettings, getHotelCheckInOutTimes } from '@/lib/app-settings'
 import { getRoomNightlyTotal } from '@/lib/room-pricing'
 import { sumBookingNetPaid } from '@/lib/booking-totals'
 import {
@@ -20,6 +20,7 @@ import {
 } from '@/lib/booking-stay'
 import { buildInvoiceLineItems, replaceInvoiceLineItems } from '@/lib/invoice-line-items'
 import { computeCheckoutSettlement } from '@/lib/checkout-settlement'
+import { applyHotelTimeToBookingInput } from '@/lib/hotel-times'
 
 async function loadBooking(id: string) {
   return db.booking.findUnique({
@@ -228,6 +229,12 @@ export async function POST(
         ? `departure ${preview.chargeableUntilDate}`
         : `checkout through ${preview.chargeableUntilDate}`
 
+    const times = await getHotelCheckInOutTimes()
+    const adjustedCheckOut = applyHotelTimeToBookingInput(
+      preview.chargeableUntilDate,
+      times.checkOutTime
+    )
+
     await db.$transaction(async (tx) => {
       await tx.roomCharge.deleteMany({
         where: {
@@ -263,6 +270,7 @@ export async function POST(
       await tx.booking.update({
         where: { id },
         data: {
+          checkOut: adjustedCheckOut,
           totalRoomCharge: preview.roomCharge,
           dueAmount: preview.dueAmount,
         },

@@ -215,12 +215,16 @@ export function computeCheckoutSettlement(
     .filter((c) => c.chargeType === 'ROOM_RATE')
     .reduce((sum, c) => sum + c.amount * c.quantity, 0)
 
+  // Prefer the booking total (kept in sync by auto-extend and adjust-stay). Folio
+  // ROOM_RATE rows can go stale and previously overstated checkout room charges.
   const roomCharges =
     params.roomChargeOverride != null && params.roomChargeOverride >= 0
       ? params.roomChargeOverride
-      : individualRoomCharges > 0
-        ? individualRoomCharges
-        : booking.totalRoomCharge
+      : booking.totalRoomCharge > 0
+        ? booking.totalRoomCharge
+        : individualRoomCharges > 0
+          ? individualRoomCharges
+          : computeAdjustedRoomCharge(nightlyRate, bookedNights)
 
   const chargeableNights =
     nightlyRate > 0 && roomCharges > 0

@@ -241,7 +241,7 @@ export async function POST(request: NextRequest) {
       .reduce((sum, c) => sum + c.amount * c.quantity, 0);
 
     const autoRoomCharges =
-      individualRoomCharges > 0 ? individualRoomCharges : booking.totalRoomCharge;
+      booking.totalRoomCharge > 0 ? booking.totalRoomCharge : individualRoomCharges;
 
     const allRestaurantOrders = await db.restaurantOrder.findMany({
       where: {

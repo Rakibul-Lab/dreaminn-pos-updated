@@ -492,6 +492,8 @@ type TransferDb = Pick<
   | 'housekeepingTask'
   | 'roomCharge'
   | 'bookingCompanion'
+  | 'invoice'
+  | 'companyLedgerBill'
 >
 
 /** Prefix for placeholder charges posted on the receiving room until it checks out. */
@@ -644,6 +646,29 @@ export async function completeOutboundBillTransfer(
       notes: source.notes
         ? `${source.notes}\nBill transferred to Room ${targetRoomNumber} at checkout`
         : `Bill transferred to Room ${targetRoomNumber} at checkout`,
+    },
+  })
+
+  // Any folio invoice / company bill on the source stay would double-count on the
+  // sales report once the receiving room settles the combined bill.
+  await db.invoice.updateMany({
+    where: {
+      bookingId: source.id,
+      status: { not: 'CANCELLED' },
+    },
+    data: {
+      status: 'CANCELLED',
+      dueAmount: 0,
+    },
+  })
+  await db.companyLedgerBill.updateMany({
+    where: { bookingId: source.id },
+    data: {
+      dueAmount: 0,
+      paidAmount: 0,
+      settlementStage: 'HOTEL_CLEARED',
+      hotelClearedAt: now,
+      notes: `Cleared — bill transferred to Room ${targetRoomNumber}`,
     },
   })
 

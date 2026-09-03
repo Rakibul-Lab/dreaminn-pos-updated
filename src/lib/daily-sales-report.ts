@@ -856,6 +856,7 @@ export async function buildDailySalesDetailReport(
       },
       include: {
         companyLedger: { select: { name: true } },
+        booking: { select: { billTransferredToBookingId: true } },
       },
     }),
     db.booking.count({ where: buildCheckInsDuringWindowWhere(openedAt, closedAt) }),
@@ -1019,6 +1020,11 @@ export async function buildDailySalesDetailReport(
 
   for (const invoice of invoices) {
     const booking = invoice.booking
+
+    // Bill was moved to another room — sale is reported only on the receiving checkout.
+    if (booking.billTransferredToBookingId) {
+      continue
+    }
 
     const ledgerBill = companyBills.find((b) => b.bookingId === booking.id)
     const onCompanyLedger = Boolean(booking.companyLedgerId || ledgerBill)
@@ -1383,7 +1389,9 @@ export async function buildDailySalesDetailReport(
     transportSalesTotal,
     invoices
   )
-  const companyBillTotal = companyBills.reduce((s, bill) => s + bill.dueAmount, 0)
+  const companyBillTotal = companyBills
+    .filter((bill) => !bill.booking?.billTransferredToBookingId)
+    .reduce((s, bill) => s + bill.dueAmount, 0)
   const balances =
     storedBalances ??
     computeDailySalesBalances(openingBalance, chargeTotal, companyBillTotal)

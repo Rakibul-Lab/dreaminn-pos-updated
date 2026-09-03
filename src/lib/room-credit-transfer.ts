@@ -1,6 +1,6 @@
 import type { PrismaClient } from '@prisma/client'
 import { parseBookingDiscountType, taxableHotelAfterRoomDiscount } from '@/lib/booking-discount'
-import { bookingVatOptions, computeRoomBookingTotals, sumBookingNetPaid } from '@/lib/booking-totals'
+import { bookingVatOptions, computeRoomBookingTotals, sumBookingNetPaid, sumBookingFolioRestaurant } from '@/lib/booking-totals'
 import { getRoomNightlyTotal } from '@/lib/room-pricing'
 import {
   computeCheckoutSettlement,
@@ -509,6 +509,190 @@ export function buildBillTransferChargeDescription(
   guestName: string
 ): string {
   return `${BILL_TRANSFER_CHARGE_PREFIX}${sourceRoomNumber} — ${guestName}`
+}
+
+/**
+ * Discounted folio balance that should move with a bill transfer (room after
+ * discount + extras + room F&B − payments). Used to correct stale placeholder
+ * charges that were posted at the undiscounted room rate (e.g. 18000+12600=30600).
+ */
+export function computeBillTransferAmountFromSource(source: {
+  totalRoomCharge: number
+  checkIn?: Date | string | null
+  checkOut?: Date | string | null
+  vatApplied?: boolean | null
+  vatPercent?: number | null
+  discountEnabled?: boolean | null
+  discountType?: string | null
+  discountValue?: number | null
+  charges?: Array<{
+    chargeType: string
+    amount: number
+    quantity: number
+    description?: string | null
+  }>
+  restaurantOrders?: Array<{
+    status: string
+    billingDisposition?: string | null
+    totalAmount: number
+    companyLedgerBill?: { id: string } | null
+  }>
+  payments?: Array<{ amount: number; paymentType: string }>
+}): number {
+  const roomTotal = computeRoomBookingTotals(
+    Number(source.totalRoomCharge) || 0,
+    0,
+    bookingVatOptions(source),
+    {
+      discountEnabled: source.discountEnabled === true,
+      discountType: source.discountType ?? undefined,
+      discountValue: Number(source.discountValue) || 0,
+      checkIn: source.checkIn,
+      checkOut: source.checkOut,
+      totalRoomCharge: source.totalRoomCharge,
+    }
+  ).totalWithVat
+
+  const extras = (source.charges ?? [])
+    .filter(
+      (c) =>
+        c.chargeType !== 'ROOM_RATE' &&
+        !isBillTransferPlaceholderCharge(c.description ?? '')
+    )
+    .reduce((sum, c) => sum + c.amount * (c.quantity || 1), 0)
+
+  const restaurant = sumBookingFolioRestaurant(source.restaurantOrders ?? [])
+  const paid = sumBookingNetPaid(source.payments ?? [])
+  return Math.max(0, roomTotal + extras + restaurant - paid)
+}
+
+/**
+ * Fix receiving-room placeholder charges / due when an older transfer posted the
+ * undiscounted source balance. Safe to call on bookings list loads.
+ */
+export async function repairBillTransferPlaceholdersForBookings(
+  db: TransferDb,
+  receivingBookingIds: string[]
+): Promise<void> {
+  const targetIds = [...new Set(receivingBookingIds.filter(Boolean))]
+  if (targetIds.length === 0) return
+
+  const sources = await db.booking.findMany({
+    where: {
+      billTransferredToBookingId: { in: targetIds },
+      status: 'CHECKED_OUT',
+    },
+    include: {
+      room: { select: { roomNumber: true } },
+      customer: { select: { name: true } },
+      payments: { select: { amount: true, paymentType: true } },
+      charges: {
+        select: { chargeType: true, amount: true, quantity: true, description: true },
+      },
+      restaurantOrders: {
+        select: {
+          status: true,
+          billingDisposition: true,
+          totalAmount: true,
+          companyLedgerBill: { select: { id: true } },
+        },
+      },
+    },
+  })
+  if (sources.length === 0) return
+
+  const touchedTargetIds = new Set<string>()
+
+  for (const source of sources) {
+    const targetId = source.billTransferredToBookingId
+    if (!targetId) continue
+
+    const correctAmount = computeBillTransferAmountFromSource(source)
+    const expectedDescription = buildBillTransferChargeDescription(
+      source.room.roomNumber,
+      source.customer.name.trim() || 'Guest'
+    )
+
+    const placeholders = await db.roomCharge.findMany({
+      where: {
+        bookingId: targetId,
+        chargeType: 'EXTRA_SERVICE',
+      },
+      select: { id: true, amount: true, description: true },
+    })
+
+    const match =
+      placeholders.find((c) => c.description === expectedDescription) ??
+      placeholders.find(
+        (c) =>
+          isBillTransferPlaceholderCharge(c.description) &&
+          c.description.includes(`Room ${source.room.roomNumber}`)
+      )
+
+    if (!match) continue
+    if (Math.abs(match.amount - correctAmount) <= 0.01) continue
+
+    await db.roomCharge.update({
+      where: { id: match.id },
+      data: { amount: correctAmount },
+    })
+    touchedTargetIds.add(targetId)
+  }
+
+  for (const targetId of touchedTargetIds) {
+    const target = await db.booking.findUnique({
+      where: { id: targetId },
+      select: {
+        id: true,
+        status: true,
+        totalRoomCharge: true,
+        dueAmount: true,
+        discountEnabled: true,
+        discountType: true,
+        discountValue: true,
+        vatApplied: true,
+        vatPercent: true,
+        checkIn: true,
+        checkOut: true,
+      },
+    })
+    if (!target || target.status !== 'CHECKED_IN') continue
+
+    const [payments, charges] = await Promise.all([
+      db.payment.findMany({
+        where: { bookingId: targetId },
+        select: { amount: true, paymentType: true },
+      }),
+      db.roomCharge.findMany({
+        where: { bookingId: targetId },
+        select: { chargeType: true, amount: true, quantity: true },
+      }),
+    ])
+
+    const roomDue = computeRoomBookingTotals(
+      Number(target.totalRoomCharge) || 0,
+      sumBookingNetPaid(payments),
+      bookingVatOptions(target),
+      {
+        discountEnabled: target.discountEnabled === true,
+        discountType: target.discountType ?? undefined,
+        discountValue: target.discountValue ?? 0,
+        checkIn: target.checkIn,
+        checkOut: target.checkOut,
+        totalRoomCharge: target.totalRoomCharge,
+      }
+    ).dueAmount
+    const extrasTotal = charges
+      .filter((c) => c.chargeType !== 'ROOM_RATE')
+      .reduce((sum, c) => sum + c.amount * (c.quantity || 1), 0)
+    const nextDue = Math.max(0, roomDue + extrasTotal)
+    if (Math.abs((target.dueAmount ?? 0) - nextDue) > 0.01) {
+      await db.booking.update({
+        where: { id: targetId },
+        data: { dueAmount: nextDue },
+      })
+    }
+  }
 }
 
 /**

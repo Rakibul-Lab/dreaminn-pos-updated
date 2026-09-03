@@ -36,6 +36,10 @@ import { getCorporateGuestMissingFields, getPhysicalIdMissingFields, isReservati
 import { hasBookingCompany } from '@/lib/booking-company';
 import { buildGuestStayFilterWhere } from '@/lib/business-date';
 import { assertRoomAvailableForBooking, listReservationEntries } from '@/lib/reservation-entry';
+import {
+  isBillTransferPlaceholderCharge,
+  repairBillTransferPlaceholdersForBookings,
+} from '@/lib/room-credit-transfer';
 
 const bookingListInclude = {
   customer: true,
@@ -45,7 +49,7 @@ const bookingListInclude = {
   sourceReservationEntry: { select: { registrationNumber: true } },
   creator: { select: { id: true, name: true, email: true } },
   payments: { select: { amount: true, paymentType: true } },
-  charges: { select: { chargeType: true, amount: true, quantity: true } },
+  charges: { select: { chargeType: true, amount: true, quantity: true, description: true } },
   restaurantOrders: {
     select: {
       status: true,
@@ -187,7 +191,22 @@ export async function GET(request: NextRequest) {
         }),
       ]);
 
-      const enrichedBookings = allBookings.map(enrichBookingListRow);
+      const transferTargetIds = allBookings
+        .filter((b) =>
+          b.charges.some((c) => isBillTransferPlaceholderCharge(c.description ?? ''))
+        )
+        .map((b) => b.id);
+      let bookingRows = allBookings;
+      if (transferTargetIds.length > 0) {
+        await repairBillTransferPlaceholdersForBookings(db, transferTargetIds);
+        const refreshedBookings = await db.booking.findMany({
+          where: { id: { in: transferTargetIds } },
+          include: bookingListInclude,
+        });
+        const byId = new Map(refreshedBookings.map((b) => [b.id, b]));
+        bookingRows = allBookings.map((b) => byId.get(b.id) ?? b);
+      }
+      const enrichedBookings = bookingRows.map(enrichBookingListRow);
       const merged = sortMergedBookingList(
         [...entryRows, ...enrichedBookings],
         !!(dateFrom || dateTo)
@@ -212,7 +231,22 @@ export async function GET(request: NextRequest) {
       db.booking.count({ where }),
     ]);
 
-    const enriched = bookings.map(enrichBookingListRow);
+    const transferTargetIds = bookings
+      .filter((b) =>
+        b.charges.some((c) => isBillTransferPlaceholderCharge(c.description ?? ''))
+      )
+      .map((b) => b.id);
+    let bookingRows = bookings;
+    if (transferTargetIds.length > 0) {
+      await repairBillTransferPlaceholdersForBookings(db, transferTargetIds);
+      const refreshed = await db.booking.findMany({
+        where: { id: { in: transferTargetIds } },
+        include: bookingListInclude,
+      });
+      const byId = new Map(refreshed.map((b) => [b.id, b]));
+      bookingRows = bookings.map((b) => byId.get(b.id) ?? b);
+    }
+    const enriched = bookingRows.map(enrichBookingListRow);
 
     return paginatedResponse(enriched, total, page, limit);
   } catch (error) {

@@ -431,18 +431,26 @@ function shouldSkipInvoiceChargeLines(
     totalAmount: number
   },
   invoiceIdsWithCheckoutPayments: Set<string>,
-  billedToCompany = false
+  billedToCompany = false,
+  companyLedgerDue = 0
 ): boolean {
   if (invoiceIdsWithCheckoutPayments.has(invoice.id)) return true
-  // A stay charged to a company ledger is owed, not collected — checkout marks the
-  // invoice paid only so the folio can close. Its rows stay on the sheet whatever
-  // the ledger owes today, so settling the ledger later cannot rewrite this day.
-  if (billedToCompany) return false
-  return (
+
+  const fullyCollected =
     invoice.totalAmount > 0 &&
     invoice.dueAmount <= 0.01 &&
     invoice.paidAmount >= invoice.totalAmount - 0.01
-  )
+
+  if (billedToCompany) {
+    // Company stays that still owe on the ledger must keep charge rows (often the
+    // folio is marked paid only so checkout can close). Once guest tender has
+    // already covered the bill — including advances taken on an earlier business
+    // day — skip the checkout reprint or the registration double-counts.
+    if ((companyLedgerDue ?? 0) > 0.01) return false
+    return fullyCollected
+  }
+
+  return fullyCollected
 }
 
 /**
@@ -1056,7 +1064,14 @@ export async function buildDailySalesDetailReport(
 
     // Same-day checkout payments appear as collection rows; fully prepaid checkouts
     // (advance on a prior day) omit invoice charge rows entirely.
-    if (shouldSkipInvoiceChargeLines(invoice, invoiceIdsWithCheckoutPayments, onCompanyLedger)) {
+    if (
+      shouldSkipInvoiceChargeLines(
+        invoice,
+        invoiceIdsWithCheckoutPayments,
+        onCompanyLedger,
+        companyBill
+      )
+    ) {
       continue
     }
 

@@ -14,11 +14,13 @@ import {
   Lock,
   Plus,
   Trash2,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react'
 import { api } from '@/lib/api-client'
 import { useAuthStore, canAccessAdmin } from '@/lib/auth-store'
 import { useToast } from '@/hooks/use-toast'
-import { formatRoleLabel, APP_ROLES, type AppRole } from '@/lib/roles'
+import { type AppRole } from '@/lib/roles'
 import {
   ADMIN_LOCKED_PERMISSION_KEYS,
   ALWAYS_GRANTED_PERMISSION_KEYS,
@@ -29,7 +31,6 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   Dialog,
@@ -144,11 +145,38 @@ function PermissionMatrix({
   onToggleKeys: (keys: string[], next: boolean) => void
 }) {
   const locked = useMemo(() => new Set(lockedKeys), [lockedKeys])
+  const [expandedPages, setExpandedPages] = useState<Set<string>>(() => new Set())
 
   const inheritBadge = (key: string, checked: boolean) => {
     if (roleDefaults == null) return null
     if (roleDefaults.has(key) === checked) return null
     return roleDefaults.has(key) ? 'denied' : 'granted'
+  }
+
+  const setPageExpanded = (pageKey: string, next: boolean) => {
+    setExpandedPages((prev) => {
+      const copy = new Set(prev)
+      if (next) copy.add(pageKey)
+      else copy.delete(pageKey)
+      return copy
+    })
+  }
+
+  const togglePageExpanded = (pageKey: string) => {
+    setExpandedPages((prev) => {
+      const copy = new Set(prev)
+      if (copy.has(pageKey)) copy.delete(pageKey)
+      else copy.add(pageKey)
+      return copy
+    })
+  }
+
+  const handleActionToggle = (pageKey: string, actionKey: string, next: boolean) => {
+    if (next && !selected.has(pageKey)) {
+      onToggleKeys([pageKey, actionKey], true)
+      return
+    }
+    onToggle(actionKey, next)
   }
 
   return (
@@ -157,10 +185,16 @@ function PermissionMatrix({
         const keys = sectionKeys(section)
         const enabledCount = keys.filter((k) => selected.has(k)).length
         const allOn = enabledCount === keys.length
+        const expandableKeys = section.pages
+          .filter(({ actions }) => actions.length > 0)
+          .map(({ page }) => page.key)
+        const allExpanded =
+          expandableKeys.length > 0 &&
+          expandableKeys.every((key) => expandedPages.has(key))
 
         return (
           <Card key={section.group} className="border-border/70 shadow-none">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 px-4 py-3">
+            <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0 px-4 py-3">
               <div>
                 <CardTitle className="text-sm font-semibold tracking-wide">
                   {section.group}
@@ -169,20 +203,48 @@ function PermissionMatrix({
                   {enabledCount} of {keys.length} permissions enabled
                 </CardDescription>
               </div>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-8 gap-1.5"
-                onClick={() => onToggleKeys(keys, !allOn)}
-              >
-                {allOn ? (
-                  <CheckSquare className="h-3.5 w-3.5" />
-                ) : (
-                  <Square className="h-3.5 w-3.5" />
+              <div className="flex flex-wrap gap-2">
+                {expandableKeys.length > 0 && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 gap-1.5"
+                    onClick={() => {
+                      setExpandedPages((prev) => {
+                        const copy = new Set(prev)
+                        if (allExpanded) {
+                          for (const key of expandableKeys) copy.delete(key)
+                        } else {
+                          for (const key of expandableKeys) copy.add(key)
+                        }
+                        return copy
+                      })
+                    }}
+                  >
+                    {allExpanded ? (
+                      <ChevronUp className="h-3.5 w-3.5" />
+                    ) : (
+                      <ChevronDown className="h-3.5 w-3.5" />
+                    )}
+                    {allExpanded ? 'Collapse all' : 'Expand all'}
+                  </Button>
                 )}
-                {allOn ? 'Clear section' : 'Select all'}
-              </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 gap-1.5"
+                  onClick={() => onToggleKeys(keys, !allOn)}
+                >
+                  {allOn ? (
+                    <CheckSquare className="h-3.5 w-3.5" />
+                  ) : (
+                    <Square className="h-3.5 w-3.5" />
+                  )}
+                  {allOn ? 'Clear section' : 'Select all'}
+                </Button>
+              </div>
             </CardHeader>
             <CardContent className="space-y-3 px-4 pb-4 pt-0">
               {section.pages.map(({ page, actions }) => {
@@ -191,6 +253,8 @@ function PermissionMatrix({
                 const enabledActions = actionKeys.filter((k) => selected.has(k)).length
                 const allActionsOn =
                   actionKeys.length > 0 && enabledActions === actionKeys.length
+                const expanded = expandedPages.has(page.key)
+                const hasDetails = actions.length > 0
 
                 return (
                   <div
@@ -200,58 +264,104 @@ function PermissionMatrix({
                       pageOn ? 'border-emerald-200/80 bg-emerald-50/30' : 'border-border/80'
                     )}
                   >
-                    <label className="flex cursor-pointer items-start gap-3 px-3 py-2.5">
-                      <Checkbox
-                        checked={pageOn}
-                        disabled={locked.has(page.key) && pageOn}
-                        onCheckedChange={(value) => onToggle(page.key, value === true)}
-                        className="mt-0.5"
-                      />
-                      <span className="min-w-0 flex-1">
-                        <span className="flex items-center gap-1.5 text-sm font-medium leading-tight">
-                          {page.label}
-                          {locked.has(page.key) && (
-                            <Lock className="h-3 w-3 text-muted-foreground" />
+                    <div className="flex items-start gap-2 px-3 py-2.5">
+                      <label className="flex min-w-0 flex-1 cursor-pointer items-start gap-3">
+                        <Checkbox
+                          checked={pageOn}
+                          disabled={locked.has(page.key) && pageOn}
+                          onCheckedChange={(value) => {
+                            const next = value === true
+                            if (!next && actionKeys.length > 0) {
+                              onToggleKeys([page.key, ...actionKeys], false)
+                            } else {
+                              onToggle(page.key, next)
+                              if (next && hasDetails) setPageExpanded(page.key, true)
+                            }
+                          }}
+                          className="mt-0.5"
+                        />
+                        <span className="min-w-0 flex-1">
+                          <span className="flex flex-wrap items-center gap-1.5 text-sm font-medium leading-tight">
+                            {page.label}
+                            {locked.has(page.key) && (
+                              <Lock className="h-3 w-3 text-muted-foreground" />
+                            )}
+                            {hasDetails && (
+                              <Badge
+                                variant="outline"
+                                className="h-5 border-border/80 text-[10px] font-normal text-muted-foreground"
+                              >
+                                {enabledActions}/{actions.length} details
+                              </Badge>
+                            )}
+                          </span>
+                          {page.description ? (
+                            <span className="mt-0.5 block text-xs leading-snug text-muted-foreground">
+                              {page.description}
+                            </span>
+                          ) : null}
+                          {inheritBadge(page.key, pageOn) === 'granted' && (
+                            <Badge
+                              variant="outline"
+                              className="mt-1 h-5 border-sky-200 bg-sky-50 text-[10px] text-sky-700"
+                            >
+                              Extra grant
+                            </Badge>
+                          )}
+                          {inheritBadge(page.key, pageOn) === 'denied' && (
+                            <Badge
+                              variant="outline"
+                              className="mt-1 h-5 border-amber-200 bg-amber-50 text-[10px] text-amber-700"
+                            >
+                              Role default removed
+                            </Badge>
                           )}
                         </span>
-                        {page.description ? (
-                          <span className="mt-0.5 block text-xs leading-snug text-muted-foreground">
-                            {page.description}
-                          </span>
-                        ) : null}
-                        {inheritBadge(page.key, pageOn) === 'granted' && (
-                          <Badge
-                            variant="outline"
-                            className="mt-1 h-5 border-sky-200 bg-sky-50 text-[10px] text-sky-700"
-                          >
-                            Extra grant
-                          </Badge>
-                        )}
-                        {inheritBadge(page.key, pageOn) === 'denied' && (
-                          <Badge
-                            variant="outline"
-                            className="mt-1 h-5 border-amber-200 bg-amber-50 text-[10px] text-amber-700"
-                          >
-                            Role default removed
-                          </Badge>
-                        )}
-                      </span>
-                    </label>
+                      </label>
+                      {hasDetails && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-8 shrink-0 gap-1 px-2.5 text-xs"
+                          onClick={() => togglePageExpanded(page.key)}
+                          aria-expanded={expanded}
+                        >
+                          {expanded ? (
+                            <>
+                              <ChevronUp className="h-3.5 w-3.5" />
+                              Reduce
+                            </>
+                          ) : (
+                            <>
+                              <ChevronDown className="h-3.5 w-3.5" />
+                              Expand
+                            </>
+                          )}
+                        </Button>
+                      )}
+                    </div>
 
-                    {pageOn && actions.length > 0 && (
+                    {hasDetails && expanded && (
                       <div className="border-t border-border/60 px-3 pb-3 pt-2">
                         <div className="mb-2 flex items-center justify-between pl-6">
                           <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                            Actions
+                            Detailed access
                           </span>
                           <Button
                             type="button"
                             variant="ghost"
                             size="sm"
                             className="h-7 px-2 text-xs"
-                            onClick={() => onToggleKeys(actionKeys, !allActionsOn)}
+                            onClick={() => {
+                              if (allActionsOn) {
+                                onToggleKeys(actionKeys, false)
+                              } else {
+                                onToggleKeys([page.key, ...actionKeys], true)
+                              }
+                            }}
                           >
-                            {allActionsOn ? 'Clear actions' : 'Select all actions'}
+                            {allActionsOn ? 'Clear details' : 'Select all details'}
                           </Button>
                         </div>
                         <div className="space-y-1.5 pl-6">
@@ -272,7 +382,11 @@ function PermissionMatrix({
                                   checked={checked}
                                   disabled={isLocked && checked}
                                   onCheckedChange={(value) =>
-                                    onToggle(action.key, value === true)
+                                    handleActionToggle(
+                                      page.key,
+                                      action.key,
+                                      value === true
+                                    )
                                   }
                                   className="mt-0.5"
                                 />
@@ -331,6 +445,7 @@ export default function RolesPermissionsPage() {
   const [selectedAccessRoleId, setSelectedAccessRoleId] = useState<string | null>(null)
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null)
   const [draftKeys, setDraftKeys] = useState<Set<string>>(new Set())
+  const [draftAccessRoleId, setDraftAccessRoleId] = useState<string | null>(null)
   const [dirty, setDirty] = useState(false)
 
   const [addRoleOpen, setAddRoleOpen] = useState(false)
@@ -398,6 +513,7 @@ export default function RolesPermissionsPage() {
   useEffect(() => {
     if (tab === 'user' && userQuery.data) {
       setDraftKeys(new Set(userQuery.data.permissionKeys))
+      setDraftAccessRoleId(userQuery.data.user.accessRoleId)
       setDirty(false)
     }
   }, [tab, userQuery.data])
@@ -440,7 +556,8 @@ export default function RolesPermissionsPage() {
         {
           label: addRoleForm.label.trim(),
           description: addRoleForm.description.trim() || null,
-          baseRole: addRoleForm.baseRole,
+          baseRole: 'HOTEL_STAFF',
+          permissionKeys: [],
         }
       ),
     onSuccess: (res) => {
@@ -452,6 +569,8 @@ export default function RolesPermissionsPage() {
       setAddRoleForm({ label: '', description: '', baseRole: 'HOTEL_STAFF' })
       if (res.data?.id) setSelectedAccessRoleId(res.data.id)
       invalidateAll()
+      queryClient.invalidateQueries({ queryKey: ['users'] })
+      queryClient.invalidateQueries({ queryKey: ['access-roles-for-users'] })
     },
     onError: (error: Error) => {
       toast({
@@ -497,6 +616,7 @@ export default function RolesPermissionsPage() {
       return api.put<{ success: boolean; message?: string }>('/permissions', {
         mode: 'user',
         userId: selectedUserId,
+        accessRoleId: draftAccessRoleId,
         permissionKeys: [...draftKeys],
       })
     },
@@ -517,28 +637,20 @@ export default function RolesPermissionsPage() {
     },
   })
 
-  const assignRoleMutation = useMutation({
-    mutationFn: async (accessRoleId: string) =>
-      api.put<{ success: boolean; message?: string }>('/permissions', {
-        mode: 'user',
-        userId: selectedUserId,
-        accessRoleId,
-      }),
-    onSuccess: (res) => {
-      toast({
-        title: 'Access role assigned',
-        description: res.message || 'User role template updated.',
-      })
-      invalidateAll()
-    },
-    onError: (error: Error) => {
-      toast({
-        title: 'Assignment failed',
-        description: error.message,
-        variant: 'destructive',
-      })
-    },
-  })
+  const handleDraftAccessRoleChange = async (accessRoleId: string) => {
+    setDraftAccessRoleId(accessRoleId)
+    setDirty(true)
+    try {
+      const res = await api.get<AccessRoleDetailResponse>(
+        `/permissions?scope=access-role&accessRoleId=${accessRoleId}`
+      )
+      if (res.data?.permissionKeys) {
+        setDraftKeys(new Set(res.data.permissionKeys))
+      }
+    } catch {
+      // Keep current permission draft if role defaults cannot be loaded.
+    }
+  }
 
   const resetUserMutation = useMutation({
     mutationFn: async () =>
@@ -614,8 +726,8 @@ export default function RolesPermissionsPage() {
     (tab === 'role' ? accessRoleQuery.isLoading : userQuery.isLoading)
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+    <div className="flex min-h-0 flex-1 flex-col gap-4">
+      <div className="flex shrink-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="flex items-center gap-2 text-xl font-semibold tracking-tight">
             <ShieldCheck className="h-5 w-5 text-emerald-600" />
@@ -696,8 +808,9 @@ export default function RolesPermissionsPage() {
           setTab(value as 'role' | 'user')
           setDirty(false)
         }}
+        className="flex min-h-0 flex-1 flex-col gap-2"
       >
-        <TabsList>
+        <TabsList className="shrink-0">
           <TabsTrigger value="role" className="gap-1.5">
             <Shield className="h-3.5 w-3.5" />
             By role
@@ -708,79 +821,84 @@ export default function RolesPermissionsPage() {
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="role" className="mt-4">
-          <div className="grid gap-4 lg:grid-cols-[260px_minmax(0,1fr)]">
-            <Card className="h-fit shadow-none">
-              <CardHeader className="px-3 py-3">
-                <CardTitle className="text-sm">Access roles</CardTitle>
-                <CardDescription className="text-xs">
-                  System and custom role templates
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-1 px-2 pb-3 pt-0">
-                {catalogQuery.isLoading ? (
-                  <div className="space-y-2 px-1">
-                    <Skeleton className="h-12 w-full" />
-                    <Skeleton className="h-12 w-full" />
-                  </div>
-                ) : (
-                  roles.map((role) => {
-                    const active = selectedAccessRoleId === role.id
-                    return (
-                      <button
-                        key={role.id}
-                        type="button"
-                        onClick={() => {
-                          setSelectedAccessRoleId(role.id)
-                          setDirty(false)
-                        }}
-                        className={cn(
-                          'w-full rounded-md px-3 py-2 text-left text-sm transition-colors',
-                          active
-                            ? 'bg-emerald-600 text-white'
-                            : 'text-foreground hover:bg-muted'
-                        )}
-                      >
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium">{role.label}</span>
-                          {role.isSystem ? (
-                            <Badge
-                              variant="outline"
-                              className={cn(
-                                'h-5 border-current/20 text-[10px]',
-                                active && 'border-white/30 text-emerald-50'
-                              )}
-                            >
-                              System
-                            </Badge>
-                          ) : null}
-                        </div>
-                        <div
+        <TabsContent
+          value="role"
+          className="mt-0 min-h-0 flex-1 data-[state=active]:flex data-[state=active]:flex-col"
+        >
+          <div className="flex min-h-0 flex-1 flex-col gap-4 lg:flex-row lg:items-stretch">
+            <aside className="w-full shrink-0 lg:w-[260px] lg:overflow-y-auto">
+              <Card className="gap-1.5 py-2 shadow-none">
+                <CardHeader className="gap-0.5 px-3 py-1.5">
+                  <CardTitle className="text-sm">Access roles</CardTitle>
+                  <CardDescription className="text-xs">
+                    System and custom role templates
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-0.5 px-2 pb-2 pt-0">
+                  {catalogQuery.isLoading ? (
+                    <div className="space-y-2 px-1">
+                      <Skeleton className="h-12 w-full" />
+                      <Skeleton className="h-12 w-full" />
+                    </div>
+                  ) : (
+                    roles.map((role) => {
+                      const active = selectedAccessRoleId === role.id
+                      return (
+                        <button
+                          key={role.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedAccessRoleId(role.id)
+                            setDirty(false)
+                          }}
                           className={cn(
-                            'text-[11px]',
-                            active ? 'text-emerald-50' : 'text-muted-foreground'
+                            'w-full rounded-md px-2.5 py-1.5 text-left text-sm transition-colors',
+                            active
+                              ? 'bg-emerald-600 text-white'
+                              : 'text-foreground hover:bg-muted'
                           )}
                         >
-                          {role.baseRoleLabel}
-                          {' · '}
-                          {role.userCount} user{role.userCount === 1 ? '' : 's'}
-                          {' · '}
-                          {role.permissionCount} permissions
-                        </div>
-                      </button>
-                    )
-                  })
-                )}
-              </CardContent>
-            </Card>
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium">{role.label}</span>
+                            {role.isSystem ? (
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  'h-5 border-current/20 text-[10px]',
+                                  active && 'border-white/30 text-emerald-50'
+                                )}
+                              >
+                                System
+                              </Badge>
+                            ) : null}
+                          </div>
+                          <div
+                            className={cn(
+                              'text-[11px] leading-snug',
+                              active ? 'text-emerald-50' : 'text-muted-foreground'
+                            )}
+                          >
+                            {role.userCount} user{role.userCount === 1 ? '' : 's'}
+                            {' · '}
+                            {role.permissionCount} permissions
+                          </div>
+                        </button>
+                      )
+                    })
+                  )}
+                </CardContent>
+              </Card>
+            </aside>
 
-            <div>
+            <div className="min-h-0 min-w-0 flex-1 overflow-y-auto pr-1">
               {selectedRoleMeta ? (
                 <div className="mb-3 flex flex-wrap items-center gap-2">
                   <Badge variant="outline">{selectedRoleMeta.label}</Badge>
-                  <Badge variant="secondary" className="font-normal">
-                    Based on {selectedRoleMeta.baseRoleLabel}
-                  </Badge>
+                  {selectedRoleMeta.isSystem && (
+                    <Badge variant="secondary" className="font-normal">
+                      System
+                    </Badge>
+                  )}
                   {dirty && (
                     <span className="text-xs text-amber-700">Unsaved changes</span>
                   )}
@@ -805,19 +923,27 @@ export default function RolesPermissionsPage() {
           </div>
         </TabsContent>
 
-        <TabsContent value="user" className="mt-4">
-          <div className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
-            <Card className="shadow-none">
-              <CardHeader className="px-3 py-3">
-                <CardTitle className="text-sm">Active users</CardTitle>
-                <CardDescription className="text-xs">
-                  Override permissions for a specific person.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="px-2 pb-3 pt-0">
-                <ScrollArea className="h-[min(70vh,640px)] pr-2">
-                  <div className="space-y-1">
-                    {(catalogQuery.data?.users ?? []).map((row) => {
+        <TabsContent
+          value="user"
+          className="mt-0 min-h-0 flex-1 data-[state=active]:flex data-[state=active]:flex-col"
+        >
+          <div className="flex min-h-0 flex-1 flex-col gap-4 lg:flex-row lg:items-stretch">
+            <aside className="w-full shrink-0 lg:w-[280px] lg:overflow-y-auto">
+              <Card className="gap-1.5 py-2 shadow-none">
+                <CardHeader className="gap-0.5 px-3 py-1.5">
+                  <CardTitle className="text-sm">Active users</CardTitle>
+                  <CardDescription className="text-xs">
+                    Override permissions for a specific person.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-0.5 px-2 pb-2 pt-0">
+                  {catalogQuery.isLoading ? (
+                    <div className="space-y-2 px-1">
+                      <Skeleton className="h-12 w-full" />
+                      <Skeleton className="h-12 w-full" />
+                    </div>
+                  ) : (
+                    (catalogQuery.data?.users ?? []).map((row) => {
                       const active = selectedUserId === row.id
                       return (
                         <button
@@ -828,7 +954,7 @@ export default function RolesPermissionsPage() {
                             setDirty(false)
                           }}
                           className={cn(
-                            'w-full rounded-md px-3 py-2 text-left text-sm transition-colors',
+                            'w-full rounded-md px-2.5 py-1.5 text-left text-sm transition-colors',
                             active
                               ? 'bg-emerald-600 text-white'
                               : 'text-foreground hover:bg-muted'
@@ -837,7 +963,7 @@ export default function RolesPermissionsPage() {
                           <div className="font-medium truncate">{row.name}</div>
                           <div
                             className={cn(
-                              'truncate text-[11px]',
+                              'truncate text-[11px] leading-snug',
                               active ? 'text-emerald-50' : 'text-muted-foreground'
                             )}
                           >
@@ -848,22 +974,22 @@ export default function RolesPermissionsPage() {
                           </div>
                         </button>
                       )
-                    })}
-                  </div>
-                </ScrollArea>
-              </CardContent>
-            </Card>
+                    })
+                  )}
+                </CardContent>
+              </Card>
+            </aside>
 
-            <div>
+            <div className="min-h-0 min-w-0 flex-1 overflow-y-auto pr-1">
               {userQuery.data ? (
-                <div className="mb-3 space-y-3">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <div>
-                      <div className="font-medium">{userQuery.data.user.name}</div>
-                      <div className="text-xs text-muted-foreground">
-                        {userQuery.data.user.email}
-                      </div>
-                    </div>
+                <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
+                  <div className="min-w-0 shrink-0 font-medium">
+                    {userQuery.data.user.name}
+                  </div>
+                  <div className="min-w-0 truncate text-sm text-muted-foreground sm:max-w-xs sm:flex-1">
+                    {userQuery.data.user.email}
+                  </div>
+                  <div className="flex min-w-0 flex-wrap items-center gap-2 sm:ml-auto">
                     {userQuery.data.overrides.length > 0 && (
                       <Badge className="border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-50">
                         {userQuery.data.overrides.length} overrides
@@ -872,24 +998,23 @@ export default function RolesPermissionsPage() {
                     {dirty && (
                       <span className="text-xs text-amber-700">Unsaved changes</span>
                     )}
-                  </div>
-                  <div className="flex max-w-md flex-col gap-1.5">
-                    <Label htmlFor="user-access-role" className="text-xs">
+                    <Label htmlFor="user-access-role" className="shrink-0 text-xs">
                       Access role
                     </Label>
                     <Select
-                      value={userQuery.data.user.accessRoleId ?? undefined}
-                      disabled={assignRoleMutation.isPending}
-                      onValueChange={(value) => assignRoleMutation.mutate(value)}
+                      value={draftAccessRoleId ?? undefined}
+                      disabled={saveMutation.isPending || loading}
+                      onValueChange={(value) => {
+                        void handleDraftAccessRoleChange(value)
+                      }}
                     >
-                      <SelectTrigger id="user-access-role" className="h-9">
+                      <SelectTrigger id="user-access-role" className="h-9 w-full sm:w-48">
                         <SelectValue placeholder="Select access role" />
                       </SelectTrigger>
                       <SelectContent>
                         {roles.map((role) => (
                           <SelectItem key={role.id} value={role.id}>
                             {role.label}
-                            {!role.isSystem ? ' (custom)' : ''}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -927,6 +1052,11 @@ export default function RolesPermissionsPage() {
           <DialogHeader>
             <DialogTitle>Add access role</DialogTitle>
           </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            New roles start with{' '}
+            <span className="font-medium text-foreground">0 permissions</span>.
+            After creation, grant pages/actions and assign the role to users.
+          </p>
           <div className="space-y-4 py-2">
             <div className="space-y-1.5">
               <Label htmlFor="role-label">Role name *</Label>
@@ -950,29 +1080,6 @@ export default function RolesPermissionsPage() {
                 }
                 placeholder="Optional notes about this role"
               />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="role-base">Base role template</Label>
-              <Select
-                value={addRoleForm.baseRole}
-                onValueChange={(value) =>
-                  setAddRoleForm((f) => ({ ...f, baseRole: value as AppRole }))
-                }
-              >
-                <SelectTrigger id="role-base">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {(catalogQuery.data?.baseRoles ?? APP_ROLES.map((r) => ({
-                    role: r,
-                    label: formatRoleLabel(r),
-                  }))).map((item) => (
-                    <SelectItem key={item.role} value={item.role}>
-                      {item.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
             </div>
           </div>
           <DialogFooter>

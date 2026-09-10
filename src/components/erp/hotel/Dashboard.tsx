@@ -19,6 +19,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { openNewReservationTab } from '@/lib/reservation-navigation';
 import { TakaIcon } from '@/components/icons/TakaIcon';
+import { usePermissions } from '@/hooks/use-permissions';
 import {
   PieChart,
   Pie,
@@ -139,6 +140,8 @@ function HotelAdminDashboard({
   data: DashboardData;
   onNavigate?: (page: DashboardPageKey) => void;
 }) {
+  const { can, isLoading: permissionsLoading } = usePermissions();
+
   const handleNewReservation = () => {
     openNewReservationTab();
   };
@@ -146,6 +149,25 @@ function HotelAdminDashboard({
   const rooms = data.rooms;
   const checkIns = data.checkIns || data.arrivals;
   const checkOuts = data.checkOuts || data.departures;
+
+  // Until permissions load, show full dashboard for existing roles (avoids flash of empty).
+  const allow = (key: string) =>
+    permissionsLoading ? true : can(key);
+
+  const showQuickNew = allow('action.dashboard.quick_new_reservation');
+  const showQuickBookings = allow('action.dashboard.quick_bookings');
+  const showQuickCheckIn = allow('action.dashboard.quick_check_in');
+  const showQuickCheckOut = allow('action.dashboard.quick_check_out');
+  const showQuickActions =
+    showQuickNew || showQuickBookings || showQuickCheckIn || showQuickCheckOut;
+
+  const showRoomStats = allow('action.dashboard.view_room_stats');
+  const showArrivalCards = allow('action.dashboard.view_arrivals_departures');
+  const showRevenueCards = allow('action.dashboard.view_revenue') && Boolean(data.revenue);
+  const showOccupancyChart = allow('action.dashboard.view_occupancy_chart');
+  const showRevenueChart = allow('action.dashboard.view_revenue_chart');
+  const showArrivalsList = allow('action.dashboard.view_arrivals_list');
+  const showRoomService = allow('action.dashboard.view_room_service');
 
   // Room status distribution for pie chart
   const roomStatusData = [
@@ -161,85 +183,124 @@ function HotelAdminDashboard({
     date: format(new Date(d.date), 'MMM dd'),
   })) || [];
 
+  const hasAnyVisible =
+    showQuickActions ||
+    showRoomStats ||
+    showArrivalCards ||
+    showRevenueCards ||
+    showOccupancyChart ||
+    showRevenueChart ||
+    showArrivalsList ||
+    showRoomService;
+
+  if (!permissionsLoading && !hasAnyVisible) {
+    return (
+      <div className="rounded-lg border border-border/80 bg-muted/30 px-6 py-10 text-center text-sm text-muted-foreground">
+        Dashboard is available, but no visibility permissions are granted for this role.
+        Ask an admin to enable Dashboard details under Roles &amp; Permissions.
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       {/* Quick Actions */}
-      <div className="flex flex-wrap gap-3">
-        <Button
-          className="bg-amber-600 hover:bg-amber-700 text-white"
-          onClick={handleNewReservation}
-        >
-          <CalendarCheck2 className="w-4 h-4 mr-2" />
-          New Reservation
-        </Button>
-        <Button
-          variant="outline"
-          className="border-sky-600 text-sky-700 hover:bg-sky-50"
-          onClick={() => onNavigate?.('bookings')}
-        >
-          <CalendarCheck2 className="w-4 h-4 mr-2" />
-          Bookings
-        </Button>
-        <Button
-          variant="outline"
-          className="border-emerald-600 text-emerald-700 hover:bg-emerald-50"
-          onClick={() => onNavigate?.('bookings')}
-        >
-          <LogIn className="w-4 h-4 mr-2" />
-          Check-in
-        </Button>
-        <Button
-          variant="outline"
-          className="border-border text-muted-foreground hover:bg-muted"
-          onClick={() => onNavigate?.('bookings')}
-        >
-          <LogOut className="w-4 h-4 mr-2" />
-          Check-out
-        </Button>
-      </div>
+      {showQuickActions && (
+        <div className="flex flex-wrap gap-3">
+          {showQuickNew && (
+            <Button
+              className="bg-amber-600 hover:bg-amber-700 text-white"
+              onClick={handleNewReservation}
+            >
+              <CalendarCheck2 className="w-4 h-4 mr-2" />
+              New Reservation
+            </Button>
+          )}
+          {showQuickBookings && (
+            <Button
+              variant="outline"
+              className="border-sky-600 text-sky-700 hover:bg-sky-50"
+              onClick={() => onNavigate?.('bookings')}
+            >
+              <CalendarCheck2 className="w-4 h-4 mr-2" />
+              Bookings
+            </Button>
+          )}
+          {showQuickCheckIn && (
+            <Button
+              variant="outline"
+              className="border-emerald-600 text-emerald-700 hover:bg-emerald-50"
+              onClick={() => onNavigate?.('bookings')}
+            >
+              <LogIn className="w-4 h-4 mr-2" />
+              Check-in
+            </Button>
+          )}
+          {showQuickCheckOut && (
+            <Button
+              variant="outline"
+              className="border-border text-muted-foreground hover:bg-muted"
+              onClick={() => onNavigate?.('bookings')}
+            >
+              <LogOut className="w-4 h-4 mr-2" />
+              Check-out
+            </Button>
+          )}
+        </div>
+      )}
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-        <StatCard
-          title="Total Rooms"
-          value={rooms.total}
-          icon={<BedDouble className="w-5 h-5" />}
-          color="slate"
-        />
-        <StatCard
-          title="Occupied"
-          value={rooms.occupied}
-          icon={<BedDouble className="w-5 h-5" />}
-          color="red"
-        />
-        <StatCard
-          title="Available"
-          value={rooms.available}
-          icon={<CheckCircle2 className="w-5 h-5" />}
-          color="emerald"
-        />
-        <StatCard
-          title="Cleaning"
-          value={rooms.cleaning}
-          icon={<SprayCan className="w-5 h-5" />}
-          color="amber"
-        />
-        <StatCard
-          title="Today's Arrivals"
-          value={checkIns?.count || 0}
-          icon={<LogIn className="w-5 h-5" />}
-          color="emerald"
-        />
-        <StatCard
-          title="Today's Check-outs"
-          value={checkOuts?.count || 0}
-          icon={<LogOut className="w-5 h-5" />}
-          color="slate"
-        />
-      </div>
+      {(showRoomStats || showArrivalCards) && (
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+          {showRoomStats && (
+            <>
+              <StatCard
+                title="Total Rooms"
+                value={rooms.total}
+                icon={<BedDouble className="w-5 h-5" />}
+                color="slate"
+              />
+              <StatCard
+                title="Occupied"
+                value={rooms.occupied}
+                icon={<BedDouble className="w-5 h-5" />}
+                color="red"
+              />
+              <StatCard
+                title="Available"
+                value={rooms.available}
+                icon={<CheckCircle2 className="w-5 h-5" />}
+                color="emerald"
+              />
+              <StatCard
+                title="Cleaning"
+                value={rooms.cleaning}
+                icon={<SprayCan className="w-5 h-5" />}
+                color="amber"
+              />
+            </>
+          )}
+          {showArrivalCards && (
+            <>
+              <StatCard
+                title="Today's Arrivals"
+                value={checkIns?.count || 0}
+                icon={<LogIn className="w-5 h-5" />}
+                color="emerald"
+              />
+              <StatCard
+                title="Today's Check-outs"
+                value={checkOuts?.count || 0}
+                icon={<LogOut className="w-5 h-5" />}
+                color="slate"
+              />
+            </>
+          )}
+        </div>
+      )}
 
-      {/* Revenue stats for admin */}
-      {data.revenue && (
+      {/* Revenue stats */}
+      {showRevenueCards && data.revenue && (
         <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
           <StatCard
             title="Hotel Revenue"
@@ -263,164 +324,172 @@ function HotelAdminDashboard({
       )}
 
       {/* Charts Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Occupancy Donut Chart */}
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Room Occupancy</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center gap-6">
-              <div className="w-48 h-48">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={roomStatusData}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={45}
-                      outerRadius={75}
-                      paddingAngle={3}
-                      dataKey="value"
-                    >
-                      {roomStatusData.map((entry, index) => (
-                        <Cell key={index} fill={entry.color} />
-                      ))}
-                    </Pie>
-                    <Tooltip />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-              <div className="space-y-3 flex-1">
-                <div className="text-center">
-                  <p className="text-3xl font-bold text-amber-700">{rooms.occupancyRate}%</p>
-                  <p className="text-xs text-muted-foreground">Occupancy Rate</p>
-                </div>
-                <div className="space-y-1.5">
-                  {roomStatusData.map((d) => (
-                    <div key={d.name} className="flex items-center gap-2 text-sm">
-                      <div className="w-3 h-3 rounded-full" style={{ backgroundColor: d.color }} />
-                      <span className="flex-1 text-muted-foreground">{d.name}</span>
-                      <span className="font-medium">{d.value}</span>
+      {(showOccupancyChart || showRevenueChart) && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {showOccupancyChart && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Room Occupancy</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-center gap-6">
+                  <div className="w-48 h-48">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={roomStatusData}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={45}
+                          outerRadius={75}
+                          paddingAngle={3}
+                          dataKey="value"
+                        >
+                          {roomStatusData.map((entry, index) => (
+                            <Cell key={index} fill={entry.color} />
+                          ))}
+                        </Pie>
+                        <Tooltip />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div className="space-y-3 flex-1">
+                    <div className="text-center">
+                      <p className="text-3xl font-bold text-amber-700">{rooms.occupancyRate}%</p>
+                      <p className="text-xs text-muted-foreground">Occupancy Rate</p>
                     </div>
-                  ))}
+                    <div className="space-y-1.5">
+                      {roomStatusData.map((d) => (
+                        <div key={d.name} className="flex items-center gap-2 text-sm">
+                          <div className="w-3 h-3 rounded-full" style={{ backgroundColor: d.color }} />
+                          <span className="flex-1 text-muted-foreground">{d.name}</span>
+                          <span className="font-medium">{d.value}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+              </CardContent>
+            </Card>
+          )}
 
-        {/* Revenue Line Chart (admin only) or Bar Chart */}
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">
-              {data.revenue ? '7-Day Revenue' : 'Room Status Distribution'}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {data.revenue && revenueChartData.length > 0 ? (
-              <ResponsiveContainer width="100%" height={200}>
-                <LineChart data={revenueChartData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                  <XAxis dataKey="date" tick={{ fontSize: 11 }} stroke="#94a3b8" />
-                  <YAxis tick={{ fontSize: 11 }} stroke="#94a3b8" />
-                  <Tooltip
-                    formatter={(value: number) => [`৳${value.toLocaleString()}`, 'Revenue']}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="amount"
-                    stroke="#d97706"
-                    strokeWidth={2}
-                    dot={{ fill: '#d97706', r: 4 }}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-            ) : (
-              <ResponsiveContainer width="100%" height={200}>
-                <BarChart data={roomStatusData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                  <XAxis dataKey="name" tick={{ fontSize: 11 }} stroke="#94a3b8" />
-                  <YAxis tick={{ fontSize: 11 }} stroke="#94a3b8" />
-                  <Tooltip />
-                  <Bar dataKey="value" radius={[4, 4, 0, 0]}>
-                    {roomStatusData.map((entry, index) => (
-                      <Cell key={index} fill={entry.color} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+          {showRevenueChart && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">
+                  {data.revenue ? '7-Day Revenue' : 'Room Status Distribution'}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {data.revenue && revenueChartData.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={200}>
+                    <LineChart data={revenueChartData}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                      <XAxis dataKey="date" tick={{ fontSize: 11 }} stroke="#94a3b8" />
+                      <YAxis tick={{ fontSize: 11 }} stroke="#94a3b8" />
+                      <Tooltip
+                        formatter={(value: number) => [`৳${value.toLocaleString()}`, 'Revenue']}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="amount"
+                        stroke="#d97706"
+                        strokeWidth={2}
+                        dot={{ fill: '#d97706', r: 4 }}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <ResponsiveContainer width="100%" height={200}>
+                    <BarChart data={roomStatusData}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                      <XAxis dataKey="name" tick={{ fontSize: 11 }} stroke="#94a3b8" />
+                      <YAxis tick={{ fontSize: 11 }} stroke="#94a3b8" />
+                      <Tooltip />
+                      <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+                        {roomStatusData.map((entry, index) => (
+                          <Cell key={index} fill={entry.color} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      )}
 
       {/* Recent Bookings & Room Service */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Recent Bookings */}
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">Today&apos;s Arrivals</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="max-h-64 overflow-y-auto custom-scrollbar">
-              {(checkIns?.items || []).length > 0 ? (
-                <div className="space-y-3">
-                  {(checkIns?.items || []).slice(0, 5).map((booking: any) => (
-                    <div key={booking.id} className="flex items-center gap-3 p-2 rounded-lg bg-muted/50">
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">{booking.customer?.name}</p>
-                        <p className="text-xs text-muted-foreground">
-                          Room {booking.room?.roomNumber} • {booking.room?.type?.name}
-                        </p>
-                      </div>
-                      <StatusBadge status={booking.status} />
+      {(showArrivalsList || showRoomService) && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {showArrivalsList && (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">Today&apos;s Arrivals</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="max-h-64 overflow-y-auto custom-scrollbar">
+                  {(checkIns?.items || []).length > 0 ? (
+                    <div className="space-y-3">
+                      {(checkIns?.items || []).slice(0, 5).map((booking: any) => (
+                        <div key={booking.id} className="flex items-center gap-3 p-2 rounded-lg bg-muted/50">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium truncate">{booking.customer?.name}</p>
+                            <p className="text-xs text-muted-foreground">
+                              Room {booking.room?.roomNumber} • {booking.room?.type?.name}
+                            </p>
+                          </div>
+                          <StatusBadge status={booking.status} />
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  ) : (
+                    <p className="text-sm text-muted-foreground text-center py-4">No arrivals for this business day</p>
+                  )}
                 </div>
-              ) : (
-                <p className="text-sm text-muted-foreground text-center py-4">No arrivals for this business day</p>
-              )}
-            </div>
-          </CardContent>
-        </Card>
+              </CardContent>
+            </Card>
+          )}
 
-        {/* Room Service Orders */}
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">Room Service Orders</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="max-h-64 overflow-y-auto custom-scrollbar">
-              {(data.roomServiceOrders || []).length > 0 ? (
-                <div className="space-y-3">
-                  {(data.roomServiceOrders || []).slice(0, 5).map((order: any) => (
-                    <div key={order.id} className="flex items-center gap-3 p-2 rounded-lg bg-muted/50">
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium">
-                          Room {order.room?.roomNumber}
-                          <span className="text-muted-foreground font-normal ml-2">
-                            {order.orderNumber}
-                          </span>
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {order.items?.map((i: any) => i.menuItem?.name).join(', ') || 'No items'}
-                        </p>
-                      </div>
-                      <div className="text-right">
-                        <StatusBadge status={order.status} />
-                        <p className="text-xs text-muted-foreground mt-1">৳{order.totalAmount}</p>
-                      </div>
+          {showRoomService && (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">Room Service Orders</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="max-h-64 overflow-y-auto custom-scrollbar">
+                  {(data.roomServiceOrders || []).length > 0 ? (
+                    <div className="space-y-3">
+                      {(data.roomServiceOrders || []).slice(0, 5).map((order: any) => (
+                        <div key={order.id} className="flex items-center gap-3 p-2 rounded-lg bg-muted/50">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium">
+                              Room {order.room?.roomNumber}
+                              <span className="text-muted-foreground font-normal ml-2">
+                                {order.orderNumber}
+                              </span>
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {order.items?.map((i: any) => i.menuItem?.name).join(', ') || 'No items'}
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <StatusBadge status={order.status} />
+                            <p className="text-xs text-muted-foreground mt-1">৳{order.totalAmount}</p>
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  ) : (
+                    <p className="text-sm text-muted-foreground text-center py-4">No active room service orders</p>
+                  )}
                 </div>
-              ) : (
-                <p className="text-sm text-muted-foreground text-center py-4">No active room service orders</p>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      )}
     </div>
   );
 }

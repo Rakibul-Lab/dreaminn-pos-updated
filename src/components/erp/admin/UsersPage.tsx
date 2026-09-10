@@ -33,10 +33,25 @@ interface UserData {
   email: string
   name: string
   role: string
+  accessRoleId: string | null
+  accessRole: {
+    id: string
+    label: string
+    isSystem: boolean
+    baseRole: string
+  } | null
   phone: string | null
   avatar: string | null
   active: boolean
   createdAt: string
+}
+
+type AccessRoleOption = {
+  id: string
+  label: string
+  isSystem: boolean
+  baseRole: string
+  permissionCount: number
 }
 
 const roleIcons: Record<string, React.ReactNode> = {
@@ -65,7 +80,7 @@ export default function UsersPage() {
     name: '',
     email: '',
     password: '',
-    role: 'HOTEL_STAFF',
+    accessRoleId: '',
     phone: '',
     avatar: null as string | null,
   })
@@ -82,17 +97,47 @@ export default function UsersPage() {
     enabled: !!user && canAccessAdmin(user?.role),
   })
 
+  const { data: accessRolesData } = useQuery({
+    queryKey: ['access-roles-for-users'],
+    queryFn: async () => {
+      const res = await api.get<{
+        success: boolean
+        data: { roles: AccessRoleOption[] }
+      }>('/permissions')
+      return res.data
+    },
+    enabled: !!user && canAccessAdmin(user?.role),
+  })
+
+  const accessRoles = accessRolesData?.roles ?? []
+  const defaultAccessRoleId =
+    accessRoles.find((r) => r.isSystem && r.baseRole === 'HOTEL_STAFF')?.id ||
+    accessRoles[0]?.id ||
+    ''
+
   const createMutation = useMutation({
     mutationFn: async () => {
-      return api.post('/users', form)
+      return api.post('/users', {
+        name: form.name,
+        email: form.email,
+        password: form.password,
+        phone: form.phone || null,
+        avatar: form.avatar,
+        accessRoleId: form.accessRoleId,
+      })
     },
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ['users'] })
+      queryClient.invalidateQueries({ queryKey: ['permissions-catalog'] })
       toast({ title: 'User Created', description: res.message || 'User created successfully' })
       closeDialog()
     },
-    onError: () => {
-      toast({ title: 'Error', description: 'Failed to create user', variant: 'destructive' })
+    onError: (error: Error) => {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to create user',
+        variant: 'destructive',
+      })
     },
   })
 
@@ -102,6 +147,8 @@ export default function UsersPage() {
     },
     onSuccess: (res: any) => {
       queryClient.invalidateQueries({ queryKey: ['users'] })
+      queryClient.invalidateQueries({ queryKey: ['permissions-catalog'] })
+      queryClient.invalidateQueries({ queryKey: ['my-permissions'] })
       toast({ title: 'User Updated', description: res.message || 'User updated successfully' })
 
       if (user && res?.data?.id === user.id) {
@@ -116,8 +163,12 @@ export default function UsersPage() {
 
       closeDialog()
     },
-    onError: () => {
-      toast({ title: 'Error', description: 'Failed to update user', variant: 'destructive' })
+    onError: (error: Error) => {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to update user',
+        variant: 'destructive',
+      })
     },
   })
 
@@ -137,7 +188,14 @@ export default function UsersPage() {
   const closeDialog = () => {
     setShowDialog(false)
     setEditingUser(null)
-    setForm({ name: '', email: '', password: '', role: 'HOTEL_STAFF', phone: '', avatar: null })
+    setForm({
+      name: '',
+      email: '',
+      password: '',
+      accessRoleId: defaultAccessRoleId,
+      phone: '',
+      avatar: null,
+    })
     setAvatarInputKey((k) => k + 1)
   }
 
@@ -147,7 +205,7 @@ export default function UsersPage() {
       name: u.name,
       email: u.email,
       password: '',
-      role: u.role,
+      accessRoleId: u.accessRoleId || u.accessRole?.id || defaultAccessRoleId,
       phone: u.phone || '',
       avatar: u.avatar || null,
     })
@@ -157,7 +215,14 @@ export default function UsersPage() {
 
   const openAddDialog = () => {
     setEditingUser(null)
-    setForm({ name: '', email: '', password: '', role: 'HOTEL_STAFF', phone: '', avatar: null })
+    setForm({
+      name: '',
+      email: '',
+      password: '',
+      accessRoleId: defaultAccessRoleId,
+      phone: '',
+      avatar: null,
+    })
     setAvatarInputKey((k) => k + 1)
     setShowDialog(true)
   }
@@ -187,12 +252,16 @@ export default function UsersPage() {
       toast({ title: 'Invalid email', description: 'Enter a valid email address', variant: 'destructive' })
       return
     }
+    if (!form.accessRoleId) {
+      toast({ title: 'Role required', description: 'Select an access role for this user', variant: 'destructive' })
+      return
+    }
     if (editingUser) {
       const data: Record<string, unknown> = {
         id: editingUser.id,
         name: form.name,
         email: form.email,
-        role: form.role,
+        accessRoleId: form.accessRoleId,
         phone: form.phone || null,
         avatar: form.avatar,
       }
@@ -215,6 +284,12 @@ export default function UsersPage() {
   }
 
   const users = usersData?.data || []
+
+  const roleLabelForUser = (u: UserData) =>
+    u.accessRole?.label || formatRoleLabel(u.role)
+
+  const roleColorKeyForUser = (u: UserData) =>
+    u.accessRole?.baseRole || u.role
 
   return (
     <div className="space-y-4">
@@ -285,9 +360,12 @@ export default function UsersPage() {
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground">{u.email}</TableCell>
                       <TableCell>
-                        <Badge variant="outline" className={`${roleColors[u.role] || ''} flex items-center gap-1 w-fit`}>
-                          {roleIcons[u.role]}
-                          {formatRoleLabel(u.role)}
+                        <Badge
+                          variant="outline"
+                          className={`${roleColors[roleColorKeyForUser(u)] || ''} flex items-center gap-1 w-fit`}
+                        >
+                          {roleIcons[roleColorKeyForUser(u)]}
+                          {roleLabelForUser(u)}
                         </Badge>
                       </TableCell>
                       <TableCell className="text-sm">{u.phone || '-'}</TableCell>
@@ -397,17 +475,25 @@ export default function UsersPage() {
               />
             </div>
             <div className="space-y-2">
-              <Label>Role</Label>
-              <Select value={form.role} onValueChange={(v) => setForm((f) => ({ ...f, role: v }))}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+              <Label>Access role</Label>
+              <Select
+                value={form.accessRoleId || undefined}
+                onValueChange={(v) => setForm((f) => ({ ...f, accessRoleId: v }))}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select access role" />
+                </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="ADMIN">Admin</SelectItem>
-                  <SelectItem value="HOTEL_STAFF">Hotel Manager</SelectItem>
-                  <SelectItem value="HOTEL_FD">Hotel F.D.</SelectItem>
-                  <SelectItem value="HOUSEKEEPER">Housekeeper</SelectItem>
-                  <SelectItem value="RESTAURANT_STAFF">Restaurant Staff</SelectItem>
+                  {accessRoles.map((role) => (
+                    <SelectItem key={role.id} value={role.id}>
+                      {role.label}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
+              <p className="text-xs text-muted-foreground">
+                Includes system roles and any custom roles you created under Roles &amp; Permissions.
+              </p>
             </div>
             <div className="space-y-2">
               <Label>Phone (optional)</Label>
@@ -422,7 +508,15 @@ export default function UsersPage() {
             <Button variant="outline" onClick={closeDialog}>Cancel</Button>
             <Button
               className="bg-amber-600 hover:bg-amber-700 text-white"
-              disabled={!form.name || !form.email || emailBlocking || (!editingUser && !form.password) || createMutation.isPending || updateMutation.isPending}
+              disabled={
+                !form.name ||
+                !form.email ||
+                !form.accessRoleId ||
+                emailBlocking ||
+                (!editingUser && !form.password) ||
+                createMutation.isPending ||
+                updateMutation.isPending
+              }
               onClick={handleSubmit}
             >
               {createMutation.isPending || updateMutation.isPending ? 'Saving...' : editingUser ? 'Update User' : 'Create User'}

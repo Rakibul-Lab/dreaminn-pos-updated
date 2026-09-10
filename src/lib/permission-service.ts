@@ -64,26 +64,6 @@ export async function ensureAccessRolesSeeded(db: PermissionDb): Promise<void> {
                 skipDuplicates: true,
               })
             }
-          } else {
-            // Add any newly introduced catalog keys that this system role should have.
-            const have = new Set(
-              (
-                await db.accessRolePermission.findMany({
-                  where: { accessRoleId: existing.id },
-                  select: { permissionKey: true },
-                })
-              ).map((r) => r.permissionKey)
-            )
-            const missing = permissionKeys.filter((key) => !have.has(key))
-            if (missing.length > 0) {
-              await db.accessRolePermission.createMany({
-                data: missing.map((permissionKey) => ({
-                  accessRoleId: existing.id,
-                  permissionKey,
-                })),
-                skipDuplicates: true,
-              })
-            }
           }
         }
 
@@ -108,6 +88,41 @@ export async function ensureAccessRolesSeeded(db: PermissionDb): Promise<void> {
     })
   }
   await seedPromise
+  // Always merge newly added catalog keys onto system roles (safe after hot reload).
+  await syncSystemRoleCatalogGaps(db)
+}
+
+async function syncSystemRoleCatalogGaps(db: PermissionDb): Promise<void> {
+  try {
+    for (const def of SYSTEM_ACCESS_ROLE_DEFS) {
+      const existing = await db.accessRole.findUnique({ where: { key: def.key } })
+      if (!existing) continue
+      const permissionKeys = uniqueValidKeys(
+        defaultPermissionKeysForRole(def.baseRole),
+        def.baseRole === 'ADMIN'
+      )
+      const have = new Set(
+        (
+          await db.accessRolePermission.findMany({
+            where: { accessRoleId: existing.id },
+            select: { permissionKey: true },
+          })
+        ).map((r) => r.permissionKey)
+      )
+      const missing = permissionKeys.filter((key) => !have.has(key))
+      if (missing.length > 0) {
+        await db.accessRolePermission.createMany({
+          data: missing.map((permissionKey) => ({
+            accessRoleId: existing.id,
+            permissionKey,
+          })),
+          skipDuplicates: true,
+        })
+      }
+    }
+  } catch (error) {
+    console.warn('System role catalog sync skipped:', error)
+  }
 }
 
 /** @deprecated alias */
@@ -148,9 +163,8 @@ export async function getAccessRolePermissionKeys(
     where: { accessRoleId },
     select: { permissionKey: true },
   })
-  if (rows.length === 0 && baseRole) {
-    return defaultPermissionKeysForRole(baseRole)
-  }
+  // Empty is intentional for new custom roles (0 permissions). Do not fall back
+  // to base-role defaults — that would silently grant full menu access.
   const keys = new Set(rows.map((r) => r.permissionKey))
   for (const key of ALWAYS_GRANTED_PERMISSION_KEYS) keys.add(key)
   if (baseRole === 'ADMIN') {
@@ -299,15 +313,8 @@ export async function createCustomAccessRole(
   const clash = await db.accessRole.findUnique({ where: { key } })
   if (clash) key = `${key}_${Date.now().toString(36)}`
 
-  const source = await db.accessRole.findFirst({
-    where: { baseRole: base as RoleType, isSystem: true },
-  })
-  const seedKeys =
-    input.permissionKeys && input.permissionKeys.length > 0
-      ? input.permissionKeys
-      : source
-        ? await getAccessRolePermissionKeys(db, source.id, base)
-        : defaultPermissionKeysForRole(base)
+  // New custom roles always start with zero permissions unless keys are provided.
+  const seedKeys = Array.isArray(input.permissionKeys) ? input.permissionKeys : []
 
   const created = await db.accessRole.create({
     data: {

@@ -190,9 +190,10 @@ export async function POST(request: NextRequest) {
       label,
       description: body?.description ?? null,
       baseRole,
+      // Custom roles start empty unless the client sends an explicit list.
       permissionKeys: Array.isArray(body?.permissionKeys)
         ? body.permissionKeys.map(String)
-        : undefined,
+        : [],
     })
 
     await logActivity(

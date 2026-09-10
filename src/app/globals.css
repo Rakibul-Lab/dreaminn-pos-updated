@@ -225,6 +225,31 @@
   background-color: oklch(0.26 0.05 160) !important;
 }
 
+/* Day Close gate banner — readable contrast in dark mode */
+.dark .day-close-gate-banner {
+  background-color: oklch(0.28 0.06 75) !important;
+  border-color: oklch(0.72 0.14 75 / 0.75) !important;
+  color: oklch(0.96 0.02 85) !important;
+}
+.dark .day-close-gate-banner-title {
+  color: oklch(0.97 0.02 85) !important;
+}
+.dark .day-close-gate-banner-body {
+  color: oklch(0.9 0.04 85) !important;
+}
+.dark .day-close-gate-banner-icon {
+  color: oklch(0.82 0.14 75) !important;
+}
+.dark .day-close-gate-banner-action {
+  background-color: oklch(0.35 0.07 75) !important;
+  border-color: oklch(0.72 0.14 75 / 0.65) !important;
+  color: oklch(0.97 0.02 85) !important;
+}
+.dark .day-close-gate-banner-action:hover {
+  background-color: oklch(0.4 0.08 75) !important;
+  color: oklch(0.98 0.02 85) !important;
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
@@ -234,10 +259,55 @@
   }
 }
 
-/* Custom scrollbar styles */
+/* Global: slim scrollbars, hidden until hover / focus / active scroll surface */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+*:hover,
+*:focus-within {
+  scrollbar-color: color-mix(in oklch, var(--muted-foreground) 45%, transparent) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: transparent;
+  border-radius: 999px;
+}
+
+*:hover::-webkit-scrollbar-thumb,
+*:focus-within::-webkit-scrollbar-thumb {
+  background-color: color-mix(in oklch, var(--muted-foreground) 45%, transparent);
+}
+
+*:hover::-webkit-scrollbar-thumb:hover,
+*:focus-within::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in oklch, var(--muted-foreground) 70%, transparent);
+}
+
+/* Keep legacy class in sync with global thin auto-hide scrollbars */
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+.custom-scrollbar:hover,
+.custom-scrollbar:focus-within {
+  scrollbar-color: color-mix(in oklch, var(--muted-foreground) 45%, transparent) transparent;
+}
+
 .custom-scrollbar::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 4px;
+  height: 4px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-track {
@@ -245,20 +315,17 @@
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: oklch(0.8 0 0);
-  border-radius: 3px;
+  background-color: transparent;
+  border-radius: 999px;
 }
 
-.custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: oklch(0.65 0 0);
+.custom-scrollbar:hover::-webkit-scrollbar-thumb,
+.custom-scrollbar:focus-within::-webkit-scrollbar-thumb {
+  background-color: color-mix(in oklch, var(--muted-foreground) 45%, transparent);
 }
 
-.dark .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: oklch(0.45 0 0);
-}
-
-.dark .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: oklch(0.55 0 0);
+.custom-scrollbar:hover::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in oklch, var(--muted-foreground) 70%, transparent);
 }
 
 /* Reservations list: sticky header (collapse breaks sticky in Chrome/Safari) */
@@ -492,6 +559,27 @@
   padding: 10mm 10mm 12mm;
   font-size: 9pt !important;
   line-height: 1.35 !important;
+  background-color: #fff !important;
+  color: #000 !important;
+}
+
+/* Keep invoice paper white in dark mode (black text needs a light surface) */
+.invoice-print-page,
+.print-container.invoice-print-page {
+  background-color: #fff !important;
+  color: #000 !important;
+}
+
+.dark .invoice-print-page,
+.dark .print-container.invoice-print-page,
+.dark .invoice-a4-sheet {
+  background-color: #fff !important;
+  color: #000 !important;
+  border-color: #d4d4d8 !important;
+}
+
+.dark .invoice-a4-sheet :is(.bg-card, .bg-background, .bg-muted, .bg-muted\/50) {
+  background-color: #fff !important;
 }
 
 .invoice-a4-sheet .invoice-pdf-header,

@@ -357,7 +357,7 @@ function ERPApp() {
   })
 
   const allowedPageKeys = useMemo(() => {
-    if (myPermissions?.pageKeys?.length) {
+    if (myPermissions?.pageKeys) {
       return new Set(myPermissions.pageKeys)
     }
     const fallback = defaultPermissionKeysForRole(user?.role || '')
@@ -663,7 +663,10 @@ function ERPApp() {
       {/* Main Content */}
       <main
         className={cn(
-          'flex-1 flex flex-col min-h-screen transition-[margin] duration-300 ease-in-out',
+          'flex flex-1 flex-col transition-[margin] duration-300 ease-in-out',
+          currentPage === 'roles-permissions'
+            ? 'h-svh max-h-svh min-h-0 overflow-hidden'
+            : 'min-h-screen',
           sidebarCollapsed ? 'lg:ml-16' : 'lg:ml-60'
         )}
       >
@@ -830,11 +833,21 @@ function ERPApp() {
         )}
 
         {/* Page Content */}
-        <div key={`${currentPage}-${pageRefreshNonce}`} className="flex-1 p-4 md:p-6 overflow-auto">
+        <div
+          key={`${currentPage}-${pageRefreshNonce}`}
+          className={cn(
+            'flex-1 p-4 md:p-6',
+            currentPage === 'roles-permissions'
+              ? 'flex min-h-0 flex-col overflow-hidden'
+              : 'overflow-auto'
+          )}
+        >
           {renderPage()}
         </div>
 
-        <AppDevelopedByFooter showProductLine />
+        {currentPage !== 'roles-permissions' && (
+          <AppDevelopedByFooter showProductLine />
+        )}
       </main>
     </div>
   )

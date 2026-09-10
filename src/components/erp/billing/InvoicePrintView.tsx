@@ -619,12 +619,12 @@ export function InvoicePrintView({
 
       <main
         ref={documentRef}
-        className="print-container invoice-print-page mx-auto max-w-4xl rounded-xl border border-border bg-card p-6 text-black print:border-0 print:bg-white print:p-0 print:shadow-none print:text-black"
+        className="print-container invoice-print-page mx-auto max-w-4xl rounded-xl border border-border bg-white p-6 text-black shadow-sm print:border-0 print:bg-white print:p-0 print:shadow-none print:text-black"
       >
         <div className="invoice-a4-sheet text-black font-bold text-[9pt] print:border-0">
           <div className="invoice-pdf-header mb-4 flex items-start justify-between border-b border-border pb-3">
             <div className="flex items-center gap-2">
-              <div className="h-10 w-10 overflow-hidden rounded-lg border border-border bg-background print:bg-white">
+              <div className="h-10 w-10 overflow-hidden rounded-lg border border-border bg-white print:bg-white">
                 <Image
                   src="/brand-logo.png"
                   alt="RRP Dream Inn logo"

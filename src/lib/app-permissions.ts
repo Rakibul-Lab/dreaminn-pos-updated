@@ -82,6 +82,87 @@ function action(
 /** Full catalog: open-page keys + detailed in-page actions. */
 export const APP_PERMISSION_CATALOG: AppPermissionDef[] = [
   page('hotel-dashboard', 'Dashboard', 'RRP Dream Inn', 'Hotel operations overview'),
+  action(
+    'hotel-dashboard',
+    'dashboard',
+    'view_room_stats',
+    'View room status cards',
+    'RRP Dream Inn',
+    'Total, occupied, available, cleaning counts'
+  ),
+  action(
+    'hotel-dashboard',
+    'dashboard',
+    'view_arrivals_departures',
+    'View arrival & check-out cards',
+    'RRP Dream Inn',
+    'Today’s arrivals and check-outs summary'
+  ),
+  action(
+    'hotel-dashboard',
+    'dashboard',
+    'view_revenue',
+    'View revenue & due cards',
+    'RRP Dream Inn',
+    'Hotel revenue, today’s revenue, and total due'
+  ),
+  action(
+    'hotel-dashboard',
+    'dashboard',
+    'view_occupancy_chart',
+    'View occupancy chart',
+    'RRP Dream Inn'
+  ),
+  action(
+    'hotel-dashboard',
+    'dashboard',
+    'view_revenue_chart',
+    'View revenue chart',
+    'RRP Dream Inn',
+    '7-day revenue trend'
+  ),
+  action(
+    'hotel-dashboard',
+    'dashboard',
+    'view_arrivals_list',
+    'View today’s arrivals list',
+    'RRP Dream Inn'
+  ),
+  action(
+    'hotel-dashboard',
+    'dashboard',
+    'view_room_service',
+    'View room service orders',
+    'RRP Dream Inn'
+  ),
+  action(
+    'hotel-dashboard',
+    'dashboard',
+    'quick_new_reservation',
+    'Quick action: New reservation',
+    'RRP Dream Inn'
+  ),
+  action(
+    'hotel-dashboard',
+    'dashboard',
+    'quick_bookings',
+    'Quick action: Bookings',
+    'RRP Dream Inn'
+  ),
+  action(
+    'hotel-dashboard',
+    'dashboard',
+    'quick_check_in',
+    'Quick action: Check-in',
+    'RRP Dream Inn'
+  ),
+  action(
+    'hotel-dashboard',
+    'dashboard',
+    'quick_check_out',
+    'Quick action: Check-out',
+    'RRP Dream Inn'
+  ),
 
   page('rooms', 'Rooms', 'RRP Dream Inn', 'Room board and status'),
   action('rooms', 'rooms', 'create', 'Add room', 'RRP Dream Inn'),
@@ -179,6 +260,41 @@ export const APP_PERMISSION_CATALOG: AppPermissionDef[] = [
   action('business-day-reports', 'business_day_reports', 'export', 'Export business day reports', 'Analytics'),
 
   page('admin-dashboard', 'Admin Overview', 'System'),
+  action(
+    'admin-dashboard',
+    'admin_dashboard',
+    'view_stats',
+    'View overview stats',
+    'System'
+  ),
+  action(
+    'admin-dashboard',
+    'admin_dashboard',
+    'view_revenue',
+    'View revenue summary',
+    'System'
+  ),
+  action(
+    'admin-dashboard',
+    'admin_dashboard',
+    'view_revenue_chart',
+    'View revenue chart',
+    'System'
+  ),
+  action(
+    'admin-dashboard',
+    'admin_dashboard',
+    'view_activity',
+    'View recent activity',
+    'System'
+  ),
+  action(
+    'admin-dashboard',
+    'admin_dashboard',
+    'navigate_modules',
+    'Use module shortcuts',
+    'System'
+  ),
 
   page('users', 'Users', 'System', 'Create and manage user accounts'),
   action('users', 'users', 'create', 'Add user', 'System'),

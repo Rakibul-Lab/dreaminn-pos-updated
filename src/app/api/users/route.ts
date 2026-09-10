@@ -39,6 +39,10 @@ export async function GET(request: NextRequest) {
           email: true,
           name: true,
           role: true,
+          accessRoleId: true,
+          accessRole: {
+            select: { id: true, label: true, isSystem: true, baseRole: true },
+          },
           phone: true,
           active: true,
           avatar: true,
@@ -121,6 +125,9 @@ export async function POST(request: NextRequest) {
         name: true,
         role: true,
         accessRoleId: true,
+        accessRole: {
+          select: { id: true, label: true, isSystem: true, baseRole: true },
+        },
         phone: true,
         avatar: true,
         active: true,
@@ -211,6 +218,9 @@ export async function PUT(request: NextRequest) {
         name: true,
         role: true,
         accessRoleId: true,
+        accessRole: {
+          select: { id: true, label: true, isSystem: true, baseRole: true },
+        },
         phone: true,
         avatar: true,
         active: true,

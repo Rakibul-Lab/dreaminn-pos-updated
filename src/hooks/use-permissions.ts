@@ -33,14 +33,15 @@ export function usePermissions() {
   })
 
   const keys = useMemo(() => {
-    if (query.data?.permissionKeys?.length) {
+    // Honor an empty matrix (new custom roles start with 0 permissions).
+    if (query.data?.permissionKeys) {
       return new Set(query.data.permissionKeys)
     }
     return new Set(defaultPermissionKeysForRole(user?.role || ''))
   }, [query.data, user?.role])
 
   const pageKeys = useMemo(() => {
-    if (query.data?.pageKeys?.length) {
+    if (query.data?.pageKeys) {
       return new Set(query.data.pageKeys)
     }
     return new Set(

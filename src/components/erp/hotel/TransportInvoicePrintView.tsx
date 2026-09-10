@@ -163,12 +163,12 @@ export function TransportInvoicePrintView({
 
       <div
         ref={documentRef}
-        className="print-container invoice-print-page mx-auto max-w-4xl rounded-xl border border-border bg-card p-6 text-black shadow-sm print:border-0 print:bg-white print:p-0 print:shadow-none"
+        className="print-container invoice-print-page mx-auto max-w-4xl rounded-xl border border-border bg-white p-6 text-black shadow-sm print:border-0 print:bg-white print:p-0 print:shadow-none"
       >
         <div className="invoice-a4-sheet text-black font-bold text-[9pt] print:border-0">
           <div className="invoice-pdf-header invoice-pdf-header-grid mb-4 grid grid-cols-1 items-start gap-4 border-b border-border pb-3 md:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)_auto]">
             <div className="invoice-pdf-header-brand flex min-w-0 items-start gap-2">
-              <div className="h-10 w-10 shrink-0 overflow-hidden rounded-lg border border-border bg-background print:bg-white">
+              <div className="h-10 w-10 shrink-0 overflow-hidden rounded-lg border border-border bg-white print:bg-white">
                 <Image
                   src="/brand-logo.png"
                   alt="RRP Dream Inn logo"

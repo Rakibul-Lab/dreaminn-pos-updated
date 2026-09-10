@@ -1,12 +1,16 @@
 'use client'
 
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useMemo } from 'react'
 import dynamic from 'next/dynamic'
 import Image from 'next/image'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useAuthStore, canAccessHotel } from '@/lib/auth-store'
 import { CURRENT_PAGE_STORAGE_KEY } from '@/lib/session'
 import { formatRoleLabel } from '@/lib/roles'
+import {
+  defaultPermissionKeysForRole,
+  pageKeyFromPermission,
+} from '@/lib/app-permissions'
 import { cn } from '@/lib/utils'
 import { useAuthHydration } from '@/hooks/use-auth-hydration'
 import { api } from '@/lib/api-client'
@@ -15,7 +19,7 @@ import {
   ScrollText, Package, LogOut, Hotel, Menu, X,
   Bed, CalendarCheck, UserCircle, SprayCan,
   Tag, Bell, Loader2, User,
-  ChevronLeft, ChevronRight, Building2, Landmark, Lock, CalendarClock, Coffee, Car,
+  ChevronLeft, ChevronRight, Building2, Landmark, Lock, CalendarClock, Coffee, Car, ShieldCheck,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -87,6 +91,9 @@ const ReportsPage = dynamicPage(() => import('@/components/erp/reports/ReportsPa
 const AdminDashboard = dynamicPage(() => import('@/components/erp/admin/AdminDashboard'))
 const SettingsPage = dynamicPage(() => import('@/components/erp/admin/SettingsPage'))
 const UsersPage = dynamicPage(() => import('@/components/erp/admin/UsersPage'))
+const RolesPermissionsPage = dynamicPage(
+  () => import('@/components/erp/admin/RolesPermissionsPage')
+)
 const ActivityLogsPage = dynamicPage(() => import('@/components/erp/admin/ActivityLogsPage'))
 const InventoryPage = dynamicPage(() => import('@/components/erp/admin/InventoryPage'))
 const DayClosePage = dynamicPage(() => import('@/components/erp/admin/DayClosePage'))
@@ -100,7 +107,7 @@ const ProfilePage = dynamicPage(() =>
 type PageKey = 
   | 'hotel-dashboard' | 'rooms' | 'room-types' | 'bookings' | 'customers' | 'company-ledger' | 'housekeeping' | 'hotel-beverage-sales' | 'transport-sales'
   | 'invoices' | 'payments' | 'deposits' | 'reports' | 'day-close' | 'business-day-reports'
-  | 'admin-dashboard' | 'users' | 'settings' | 'logs' | 'inventory'
+  | 'admin-dashboard' | 'users' | 'roles-permissions' | 'settings' | 'logs' | 'inventory'
   | 'profile'
 
 interface NavItem {
@@ -145,6 +152,7 @@ const navItems: NavItem[] = [
   // Admin
   { key: 'admin-dashboard', label: 'Admin Overview', icon: <LayoutDashboard className="h-4 w-4" />, allowedRoles: ['ADMIN'], group: 'System' },
   { key: 'users', label: 'Users', icon: <Users className="h-4 w-4" />, allowedRoles: ['ADMIN'], group: 'System' },
+  { key: 'roles-permissions', label: 'Roles & Permissions', icon: <ShieldCheck className="h-4 w-4" />, allowedRoles: ['ADMIN'], group: 'System' },
   { key: 'inventory', label: 'Inventory', icon: <Package className="h-4 w-4" />, allowedRoles: ['ADMIN'], group: 'System' },
   { key: 'settings', label: 'Settings', icon: <Settings className="h-4 w-4" />, allowedRoles: ['ADMIN'], group: 'System' },
   { key: 'logs', label: 'Activity Logs', icon: <ScrollText className="h-4 w-4" />, allowedRoles: ['ADMIN'], group: 'System' },
@@ -297,6 +305,7 @@ const pageTitles: Record<PageKey, string> = {
   'business-day-reports': 'Business Day Reports',
   'admin-dashboard': 'Admin Dashboard',
   'users': 'User Management',
+  'roles-permissions': 'Roles & Permissions',
   'settings': 'System Settings',
   'logs': 'Activity Logs',
   'inventory': 'Inventory Management',
@@ -333,10 +342,39 @@ function ERPApp() {
     return () => clearInterval(timer)
   }, [])
 
+  const { data: myPermissions } = useQuery({
+    queryKey: ['my-permissions', user?.id],
+    queryFn: async () => {
+      const res = await api.get<{
+        success: boolean
+        data: { pageKeys: string[]; permissionKeys: string[] }
+      }>('/permissions/me')
+      return res.data
+    },
+    enabled: Boolean(user?.id),
+    staleTime: 30_000,
+    retry: 1,
+  })
+
+  const allowedPageKeys = useMemo(() => {
+    if (myPermissions?.pageKeys?.length) {
+      return new Set(myPermissions.pageKeys)
+    }
+    const fallback = defaultPermissionKeysForRole(user?.role || '')
+      .map((key) => pageKeyFromPermission(key))
+      .filter((key): key is NonNullable<typeof key> => Boolean(key))
+    return new Set(fallback)
+  }, [myPermissions, user?.role])
+
   const isPageAllowedForRole = useCallback((page: PageKey, role: string | undefined): boolean => {
     if (!role) return false
-    return navItems.some((item) => item.key === page && item.allowedRoles.includes(role))
-  }, [])
+    if (allowedPageKeys.has(page)) return true
+    // Before /permissions/me resolves, still honour the legacy nav allow-list.
+    if (!myPermissions) {
+      return navItems.some((item) => item.key === page && item.allowedRoles.includes(role))
+    }
+    return false
+  }, [allowedPageKeys, myPermissions])
 
   const getSavedPage = useCallback((): PageKey | null => {
     if (typeof window === 'undefined') return null
@@ -350,13 +388,16 @@ function ERPApp() {
     if (!user?.role) return
 
     const savedPage = getSavedPage()
+    const preferredDefault = getDefaultPage(user.role)
     const targetPage =
       savedPage && isPageAllowedForRole(savedPage, user.role)
         ? savedPage
-        : getDefaultPage(user.role)
+        : isPageAllowedForRole(preferredDefault, user.role)
+          ? preferredDefault
+          : (([...allowedPageKeys][0] as PageKey | undefined) || preferredDefault)
 
     setCurrentPage((prev) => (prev === targetPage ? prev : targetPage))
-  }, [user?.id, user?.role, getSavedPage, isPageAllowedForRole])
+  }, [user?.id, user?.role, getSavedPage, isPageAllowedForRole, allowedPageKeys])
 
   // Persist current section so refresh lands on same page.
   useEffect(() => {
@@ -372,10 +413,17 @@ function ERPApp() {
     logout()
   }, [logout])
 
-  // Get allowed nav items based on role
-  const allowedNavItems = navItems.filter(
-    (item) => user && item.allowedRoles.includes(user.role)
-  )
+  // Get allowed nav items based on effective page permissions.
+  // Some pages are listed under more than one group (e.g. Rooms); keep the
+  // role-matched group when possible so the sidebar stays tidy.
+  const allowedNavItems = navItems.filter((item) => {
+    if (!user || !allowedPageKeys.has(item.key)) return false
+    const duplicates = navItems.filter((n) => n.key === item.key)
+    if (duplicates.length <= 1) return true
+    const roleMatch = duplicates.find((n) => n.allowedRoles.includes(user.role))
+    if (roleMatch) return item === roleMatch
+    return item === duplicates[0]
+  })
 
   const roleBadgeColors: Record<string, string> = {
     ADMIN: 'bg-red-50 text-red-700 border-red-200',
@@ -386,6 +434,7 @@ function ERPApp() {
   }
 
   const handlePageNavigation = useCallback((page: PageKey) => {
+    if (!isPageAllowedForRole(page, user?.role)) return
     setHeaderLoading(true)
     setCurrentPage((prev) => {
       if (prev === page) {
@@ -393,7 +442,7 @@ function ERPApp() {
       }
       return page
     })
-  }, [])
+  }, [isPageAllowedForRole, user?.role])
 
   useEffect(() => {
     if (!headerLoading) return
@@ -421,6 +470,7 @@ function ERPApp() {
       case 'business-day-reports': return <BusinessDayReportsPage />
       case 'admin-dashboard': return <AdminDashboard onNavigate={handlePageNavigation} />
       case 'users': return <UsersPage />
+      case 'roles-permissions': return <RolesPermissionsPage />
       case 'settings': return <SettingsPage />
       case 'logs': return <ActivityLogsPage />
       case 'inventory': return <InventoryPage />

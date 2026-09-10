@@ -32,8 +32,39 @@ model User {
   hotelBeverageSales HotelBeverageSale[]
   transportSales     TransportSale[]
   reservationEntries ReservationEntry[]
+  permissions       UserPermission[]
 
   @@map("users")
+}
+
+/** Pages / menu sections a role may open in the ERP shell. */
+model RolePermission {
+  id             String   @id @default(cuid())
+  role           RoleType
+  permissionKey  String   @map("permission_key")
+  createdAt      DateTime @default(now())
+
+  @@unique([role, permissionKey])
+  @@index([role])
+  @@map("role_permissions")
+}
+
+/**
+ * Per-user overrides on top of the role matrix.
+ * granted=true adds access; granted=false removes a role default.
+ */
+model UserPermission {
+  id             String   @id @default(cuid())
+  userId         String   @map("user_id")
+  permissionKey  String   @map("permission_key")
+  granted        Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, permissionKey])
+  @@index([userId])
+  @@map("user_permissions")
 }
 
 model RoomType {

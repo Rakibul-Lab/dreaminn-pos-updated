@@ -7,6 +7,14 @@ export type AppRole =
   | 'RESTAURANT_STAFF'
   | 'HOUSEKEEPER';
 
+export const APP_ROLES: AppRole[] = [
+  'ADMIN',
+  'HOTEL_STAFF',
+  'HOTEL_FD',
+  'RESTAURANT_STAFF',
+  'HOUSEKEEPER',
+];
+
 export const ROLE_LABELS: Record<AppRole, string> = {
   ADMIN: 'Admin',
   HOTEL_STAFF: 'Hotel Manager',

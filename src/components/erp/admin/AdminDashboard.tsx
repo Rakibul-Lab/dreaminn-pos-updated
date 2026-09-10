@@ -9,7 +9,7 @@ import {
 } from 'recharts'
 import {
   LayoutDashboard, BedDouble, Users, Activity,
-  Database, ScrollText, AlertTriangle, TrendingUp, ArrowUpRight, CalendarCheck
+  Database, ScrollText, AlertTriangle, TrendingUp, ArrowUpRight, CalendarCheck, ShieldCheck
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -31,7 +31,7 @@ const revenueChartConfig: ChartConfig = {
 export default function AdminDashboard({
   onNavigate,
 }: {
-  onNavigate?: (page: 'bookings' | 'hotel-dashboard') => void
+  onNavigate?: (page: string) => void
 } = {}) {
   const { user } = useAuthStore()
 
@@ -239,11 +239,26 @@ export default function AdminDashboard({
                       <Button variant="outline" size="sm" onClick={handleSeedDB}>
                         <Database className="h-3 w-3 mr-1" /> Seed DB
                       </Button>
-                      <Button variant="outline" size="sm" asChild>
-                        <a href="#/admin/users"><Users className="h-3 w-3 mr-1" /> Users</a>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => onNavigate?.('users')}
+                      >
+                        <Users className="h-3 w-3 mr-1" /> Users
                       </Button>
-                      <Button variant="outline" size="sm" asChild>
-                        <a href="#/admin/logs"><ScrollText className="h-3 w-3 mr-1" /> Logs</a>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => onNavigate?.('roles-permissions')}
+                      >
+                        <ShieldCheck className="h-3 w-3 mr-1" /> Roles
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => onNavigate?.('logs')}
+                      >
+                        <ScrollText className="h-3 w-3 mr-1" /> Logs
                       </Button>
                     </div>
                   </div>

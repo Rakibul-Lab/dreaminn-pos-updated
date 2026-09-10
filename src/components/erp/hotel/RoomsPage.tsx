@@ -20,6 +20,7 @@ import { toast } from 'sonner';
 import { FileDown, Grid3X3, List, Loader2, LogIn, LogOut, Plus, Search, SprayCan, CalendarPlus, CreditCard, CheckCircle2, Play, Users, UtensilsCrossed, CalendarRange, Wrench, FilePenLine, Receipt } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuthStore, canManageRoomInventory, isHotelFrontDesk, isRoomsViewOnly, canPerformRoomCleaning, isHousekeeper } from '@/lib/auth-store';
+import { usePermissions } from '@/hooks/use-permissions';
 import { downloadRoomsPdf, type RoomExportRecord } from '@/lib/rooms-export';
 import { getRoomNightlyTotal } from '@/lib/room-pricing';
 import { openNewReservationTab } from '@/lib/reservation-navigation';
@@ -148,12 +149,26 @@ interface HousekeepingTaskLite {
 export function RoomsPage() {
   const queryClient = useQueryClient();
   const user = useAuthStore((s) => s.user);
-  const canManageRooms = canManageRoomInventory(user?.role);
-  const isStatusOnly = isHotelFrontDesk(user?.role);
-  const isViewOnly = isRoomsViewOnly(user?.role);
+  const { can } = usePermissions();
+  const canManageRooms =
+    can('action.rooms.create') ||
+    can('action.rooms.edit') ||
+    canManageRoomInventory(user?.role);
+  const isStatusOnly =
+    can('action.rooms.change_status') &&
+    !can('action.rooms.create') &&
+    (isHotelFrontDesk(user?.role) || !canManageRoomInventory(user?.role));
+  const canCleanRooms =
+    can('action.rooms.start_cleaning') ||
+    can('action.rooms.complete_cleaning') ||
+    canPerformRoomCleaning(user?.role);
   const isHousekeeperUser = isHousekeeper(user?.role);
-  const canCleanRooms = canPerformRoomCleaning(user?.role);
-  const showRoomActions = canCleanRooms || !isViewOnly;
+  const isViewOnly =
+    isRoomsViewOnly(user?.role) &&
+    !can('action.rooms.reserve') &&
+    !can('action.rooms.check_in') &&
+    !can('action.rooms.check_out');
+  const showRoomActions = canCleanRooms || !isViewOnly || can('action.rooms.reserve');
   const FLOOR_OPTIONS = [8, 9, 10];
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [exportingPdf, setExportingPdf] = useState(false);
@@ -615,7 +630,7 @@ export function RoomsPage() {
     const btnClass = compact ? 'h-7 px-2 text-[10px]' : 'h-8 px-2 text-xs';
 
     if (viewIsFuture && displayStatus === 'AVAILABLE') {
-      if (isViewOnly) return null;
+      if (isViewOnly || !can('action.rooms.reserve')) return null;
       return (
         <Button
           type="button"
@@ -640,6 +655,7 @@ export function RoomsPage() {
       if (!canCleanRooms) return null;
       const hkTask = getRoomHousekeepingTask(room);
       if (hkTask?.status === 'IN_PROGRESS' && hkTask.id) {
+        if (!can('action.rooms.complete_cleaning')) return null;
         return (
           <Button
             type="button"
@@ -656,6 +672,7 @@ export function RoomsPage() {
           </Button>
         );
       }
+      if (!can('action.rooms.start_cleaning')) return null;
       return (
         <Button
           type="button"
@@ -678,6 +695,7 @@ export function RoomsPage() {
     const canCheckIn =
       displayStatus === 'RESERVED' &&
       booking?.status === 'RESERVED' &&
+      can('action.rooms.check_in') &&
       canBookingCheckIn({
         isInitialReservation: booking.isInitialReservation,
         nidPhysicallyReceived: booking.nidPhysicallyReceived,
@@ -687,69 +705,77 @@ export function RoomsPage() {
     if (displayStatus === 'OCCUPIED' && booking?.status === 'CHECKED_IN') {
       return (
         <div className="flex flex-wrap gap-1">
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className={cn('border-orange-500 text-orange-700 hover:bg-orange-50 bg-white/90', btnClass)}
-            onClick={(e) => {
-              e.stopPropagation();
-              setRestaurantBillBookingId(booking.id);
-              setRestaurantBillGuestLabel(booking.customerName);
-              setRestaurantBillRoomNumber(room.roomNumber);
-              setRestaurantBillDialogOpen(true);
-            }}
-            title="Add restaurant bill"
-          >
-            <UtensilsCrossed className="w-3 h-3 mr-1" />
-            F&B
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className={cn('border-violet-500 text-violet-700 hover:bg-violet-50 bg-white/90', btnClass)}
-            onClick={(e) => {
-              e.stopPropagation();
-              setAddPaymentBookingId(booking.id);
-              setAddPaymentDialogOpen(true);
-            }}
-            title="Add payment"
-          >
-            <CreditCard className="w-3 h-3 mr-1" />
-            Pay
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className={cn('border-amber-500 text-amber-700 hover:bg-amber-50 bg-white/90', btnClass)}
-            onClick={(e) => {
-              e.stopPropagation();
-              generateInvoiceMutation.mutate(booking.id);
-            }}
-            disabled={generateInvoiceMutation.isPending}
-            title="Open invoice"
-          >
-            {generateInvoiceMutation.isPending ? (
-              <Loader2 className="w-3 h-3 mr-1 animate-spin" />
-            ) : (
-              <Receipt className="w-3 h-3 mr-1" />
-            )}
-            Invoice
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            className={cn('bg-yellow-600 hover:bg-yellow-700 text-white', btnClass)}
-            onClick={(e) => {
-              e.stopPropagation();
-              openCheckoutTab(booking.id);
-            }}
-          >
-            <LogOut className="w-3 h-3 mr-1" />
-            Check-out
-          </Button>
+          {can('action.rooms.add_restaurant_bill') && (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className={cn('border-orange-500 text-orange-700 hover:bg-orange-50 bg-white/90', btnClass)}
+              onClick={(e) => {
+                e.stopPropagation();
+                setRestaurantBillBookingId(booking.id);
+                setRestaurantBillGuestLabel(booking.customerName);
+                setRestaurantBillRoomNumber(room.roomNumber);
+                setRestaurantBillDialogOpen(true);
+              }}
+              title="Add restaurant bill"
+            >
+              <UtensilsCrossed className="w-3 h-3 mr-1" />
+              F&B
+            </Button>
+          )}
+          {can('action.rooms.pay') && (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className={cn('border-violet-500 text-violet-700 hover:bg-violet-50 bg-white/90', btnClass)}
+              onClick={(e) => {
+                e.stopPropagation();
+                setAddPaymentBookingId(booking.id);
+                setAddPaymentDialogOpen(true);
+              }}
+              title="Add payment"
+            >
+              <CreditCard className="w-3 h-3 mr-1" />
+              Pay
+            </Button>
+          )}
+          {can('action.rooms.generate_invoice') && (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className={cn('border-amber-500 text-amber-700 hover:bg-amber-50 bg-white/90', btnClass)}
+              onClick={(e) => {
+                e.stopPropagation();
+                generateInvoiceMutation.mutate(booking.id);
+              }}
+              disabled={generateInvoiceMutation.isPending}
+              title="Open invoice"
+            >
+              {generateInvoiceMutation.isPending ? (
+                <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+              ) : (
+                <Receipt className="w-3 h-3 mr-1" />
+              )}
+              Invoice
+            </Button>
+          )}
+          {can('action.rooms.check_out') && (
+            <Button
+              type="button"
+              size="sm"
+              className={cn('bg-yellow-600 hover:bg-yellow-700 text-white', btnClass)}
+              onClick={(e) => {
+                e.stopPropagation();
+                openCheckoutTab(booking.id);
+              }}
+            >
+              <LogOut className="w-3 h-3 mr-1" />
+              Check-out
+            </Button>
+          )}
         </div>
       );
     }

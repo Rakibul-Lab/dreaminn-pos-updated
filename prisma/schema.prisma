@@ -14,6 +14,7 @@ model User {
   name              String
   password          String
   role              RoleType           @default(HOTEL_STAFF)
+  accessRoleId      String?            @map("access_role_id")
   active            Boolean            @default(true)
   phone             String?
   avatar            String?            @db.LongText
@@ -33,11 +34,47 @@ model User {
   transportSales     TransportSale[]
   reservationEntries ReservationEntry[]
   permissions       UserPermission[]
+  accessRole        AccessRole?        @relation(fields: [accessRoleId], references: [id], onDelete: SetNull)
 
+  @@index([accessRoleId])
   @@map("users")
 }
 
-/** Pages / menu sections a role may open in the ERP shell. */
+/**
+ * Named access roles (system + custom). Custom roles keep a base RoleType so
+ * existing requireRole() API gates still work.
+ */
+model AccessRole {
+  id          String                 @id @default(cuid())
+  key         String                 @unique
+  label       String
+  description String?
+  baseRole    RoleType               @map("base_role")
+  isSystem    Boolean                @default(false) @map("is_system")
+  active      Boolean                @default(true)
+  sortOrder   Int                    @default(100) @map("sort_order")
+  createdAt   DateTime               @default(now())
+  updatedAt   DateTime               @updatedAt
+  permissions AccessRolePermission[]
+  users       User[]
+
+  @@index([baseRole])
+  @@map("access_roles")
+}
+
+model AccessRolePermission {
+  id            String     @id @default(cuid())
+  accessRoleId  String     @map("access_role_id")
+  permissionKey String     @map("permission_key")
+  createdAt     DateTime   @default(now())
+  accessRole    AccessRole @relation(fields: [accessRoleId], references: [id], onDelete: Cascade)
+
+  @@unique([accessRoleId, permissionKey])
+  @@index([accessRoleId])
+  @@map("access_role_permissions")
+}
+
+/** @deprecated Prefer AccessRolePermission — kept for older installs during migration. */
 model RolePermission {
   id             String   @id @default(cuid())
   role           RoleType

@@ -65,18 +65,37 @@ export async function POST(request: NextRequest) {
     if (authResult instanceof Response) return authResult;
 
     const body = await request.json();
-    const { name, email, password, role, phone, avatar } = body;
+    const { name, email, password, role, phone, avatar, accessRoleId } = body;
 
-    if (!name || !email || !password || !role) {
-      return errorResponse('Name, email, password, and role are required');
+    if (!name || !email || !password) {
+      return errorResponse('Name, email, and password are required');
     }
 
     const emailError = getEmailValidationError(email, false);
     if (emailError) return errorResponse(emailError);
 
+    let resolvedRole = role;
+    let resolvedAccessRoleId: string | null = accessRoleId || null;
+
+    if (accessRoleId) {
+      const accessRole = await db.accessRole.findUnique({ where: { id: accessRoleId } });
+      if (!accessRole || !accessRole.active) {
+        return errorResponse('Access role not found', 404);
+      }
+      resolvedRole = accessRole.baseRole;
+      resolvedAccessRoleId = accessRole.id;
+    }
+
     const validRoles = ['ADMIN', 'HOTEL_STAFF', 'HOTEL_FD', 'RESTAURANT_STAFF', 'HOUSEKEEPER'];
-    if (!validRoles.includes(role)) {
+    if (!resolvedRole || !validRoles.includes(resolvedRole)) {
       return errorResponse('Invalid role. Must be ADMIN, HOTEL_STAFF, HOTEL_FD, RESTAURANT_STAFF, or HOUSEKEEPER');
+    }
+
+    if (!resolvedAccessRoleId) {
+      const systemRole = await db.accessRole.findFirst({
+        where: { baseRole: resolvedRole, isSystem: true, active: true },
+      });
+      resolvedAccessRoleId = systemRole?.id ?? null;
     }
 
     const existing = await db.user.findUnique({ where: { email } });
@@ -91,7 +110,8 @@ export async function POST(request: NextRequest) {
         name,
         email,
         password: hashedPassword,
-        role,
+        role: resolvedRole,
+        accessRoleId: resolvedAccessRoleId,
         phone: phone || null,
         avatar: avatar || null,
       },
@@ -100,6 +120,7 @@ export async function POST(request: NextRequest) {
         email: true,
         name: true,
         role: true,
+        accessRoleId: true,
         phone: true,
         avatar: true,
         active: true,
@@ -111,7 +132,7 @@ export async function POST(request: NextRequest) {
       authResult.id,
       'CREATE_USER',
       'admin',
-      JSON.stringify({ userId: user.id, email, role })
+      JSON.stringify({ userId: user.id, email, role: resolvedRole, accessRoleId: resolvedAccessRoleId })
     );
 
     return successResponse(user, 'User created successfully', 201);
@@ -128,7 +149,7 @@ export async function PUT(request: NextRequest) {
     if (authResult instanceof Response) return authResult;
 
     const body = await request.json();
-    const { id, name, email, role, phone, active, avatar } = body;
+    const { id, name, email, role, phone, active, avatar, accessRoleId } = body;
 
     if (!id) {
       return errorResponse('User ID is required');
@@ -147,12 +168,29 @@ export async function PUT(request: NextRequest) {
     const updateData: Record<string, unknown> = {};
     if (name !== undefined) updateData.name = name;
     if (email !== undefined) updateData.email = email;
-    if (role !== undefined) {
+    if (accessRoleId !== undefined) {
+      if (accessRoleId) {
+        const accessRole = await db.accessRole.findUnique({
+          where: { id: String(accessRoleId) },
+        });
+        if (!accessRole || !accessRole.active) {
+          return errorResponse('Access role not found', 404);
+        }
+        updateData.accessRoleId = accessRole.id;
+        updateData.role = accessRole.baseRole;
+      } else {
+        updateData.accessRoleId = null;
+      }
+    } else if (role !== undefined) {
       const validRoles = ['ADMIN', 'HOTEL_STAFF', 'HOTEL_FD', 'RESTAURANT_STAFF', 'HOUSEKEEPER'];
       if (!validRoles.includes(role)) {
         return errorResponse('Invalid role. Must be ADMIN, HOTEL_STAFF, HOTEL_FD, RESTAURANT_STAFF, or HOUSEKEEPER');
       }
       updateData.role = role;
+      const systemRole = await db.accessRole.findFirst({
+        where: { baseRole: role, isSystem: true, active: true },
+      });
+      if (systemRole) updateData.accessRoleId = systemRole.id;
     }
     if (phone !== undefined) updateData.phone = phone;
     if (avatar !== undefined) updateData.avatar = avatar;
@@ -172,6 +210,7 @@ export async function PUT(request: NextRequest) {
         email: true,
         name: true,
         role: true,
+        accessRoleId: true,
         phone: true,
         avatar: true,
         active: true,

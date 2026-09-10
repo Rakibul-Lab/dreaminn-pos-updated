@@ -21,6 +21,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { Plus, Search, LogIn, LogOut, XCircle, Receipt, FileText, FilePenLine, CalendarRange, FileSpreadsheet, FileDown, Loader2, CreditCard, IdCard, ArrowRightLeft, Eye, UtensilsCrossed, ChevronDown } from 'lucide-react';
+import { usePermissions } from '@/hooks/use-permissions';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { BookingIdUploadDialog } from './BookingIdUploadDialog';
 import { BookingAddPaymentDialog } from './BookingAddPaymentDialog';
@@ -323,6 +324,7 @@ function BookingListRoomCell({ item }: { item: ReservationEntryRow }) {
 export function BookingsPage() {
   const queryClient = useQueryClient();
   const user = useAuthStore((s) => s.user);
+  const { can } = usePermissions();
   const { times, formatCheckIn, formatCheckOut } = useHotelTimes();
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [entryScopeFilter, setEntryScopeFilter] = useState<'business_day' | 'all'>('business_day');
@@ -642,41 +644,49 @@ export function BookingsPage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button
-            variant="outline"
-            onClick={() => void handleExportExcel()}
-            disabled={!!exporting || isLoading}
-          >
-            {exporting === 'excel' ? (
-              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-            ) : (
-              <FileSpreadsheet className="w-4 h-4 mr-2" />
-            )}
-            Export Excel
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => void handleExportPdf()}
-            disabled={!!exporting || isLoading}
-          >
-            {exporting === 'pdf' ? (
-              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-            ) : (
-              <FileDown className="w-4 h-4 mr-2" />
-            )}
-            Export PDF
-          </Button>
-          <Button variant="outline" onClick={openRegistrationFormTab}>
-            <FileText className="w-4 h-4 mr-2" />
-            Registration Form
-          </Button>
-          <Button
-            className="bg-amber-600 hover:bg-amber-700 text-white"
-            onClick={handleNewReservation}
-          >
-            <Plus className="w-4 h-4 mr-2" />
-            New Reservation
-          </Button>
+          {can('action.bookings.export') && (
+            <Button
+              variant="outline"
+              onClick={() => void handleExportExcel()}
+              disabled={!!exporting || isLoading}
+            >
+              {exporting === 'excel' ? (
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              ) : (
+                <FileSpreadsheet className="w-4 h-4 mr-2" />
+              )}
+              Export Excel
+            </Button>
+          )}
+          {can('action.bookings.export') && (
+            <Button
+              variant="outline"
+              onClick={() => void handleExportPdf()}
+              disabled={!!exporting || isLoading}
+            >
+              {exporting === 'pdf' ? (
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              ) : (
+                <FileDown className="w-4 h-4 mr-2" />
+              )}
+              Export PDF
+            </Button>
+          )}
+          {can('action.bookings.print_registration') && (
+            <Button variant="outline" onClick={openRegistrationFormTab}>
+              <FileText className="w-4 h-4 mr-2" />
+              Registration Form
+            </Button>
+          )}
+          {can('action.bookings.create') && (
+            <Button
+              className="bg-amber-600 hover:bg-amber-700 text-white"
+              onClick={handleNewReservation}
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              New Reservation
+            </Button>
+          )}
         </div>
       </div>
 
@@ -1038,7 +1048,8 @@ export function BookingsPage() {
                   </td>
                   <td className="col-actions">
                     <div className="bl-actions">
-                      {(booking.status === 'RESERVED' || booking.status === 'CHECKED_IN') && (
+                      {(booking.status === 'RESERVED' || booking.status === 'CHECKED_IN') &&
+                        can('action.bookings.edit') && (
                         <Button
                           variant="outline"
                           size="icon"
@@ -1055,7 +1066,7 @@ export function BookingsPage() {
                           <FilePenLine className="w-3 h-3" />
                         </Button>
                       )}
-                      {booking.status === 'RESERVED' && (
+                      {booking.status === 'RESERVED' && can('action.bookings.check_in') && (
                         <span
                           className="inline-flex"
                           title={
@@ -1105,7 +1116,8 @@ export function BookingsPage() {
                         </span>
                       )}
                       {(booking.nidPhysicallyReceived === true || booking.isInitialReservation) &&
-                        (booking.status === 'RESERVED' || booking.status === 'CHECKED_IN') && (
+                        (booking.status === 'RESERVED' || booking.status === 'CHECKED_IN') &&
+                        can('action.bookings.upload_id') && (
                           <Button
                             variant="outline"
                             size="icon"
@@ -1129,6 +1141,7 @@ export function BookingsPage() {
                       )}
                       {booking.status === 'CHECKED_IN' && (
                         <>
+                          {can('action.bookings.add_restaurant_bill') && (
                           <Button
                             variant="outline"
                             size="icon"
@@ -1141,6 +1154,8 @@ export function BookingsPage() {
                           >
                             <UtensilsCrossed className="w-3 h-3" />
                           </Button>
+                          )}
+                          {can('action.bookings.pay') && (
                           <Button
                             variant="outline"
                             size="icon"
@@ -1153,6 +1168,8 @@ export function BookingsPage() {
                           >
                             <CreditCard className="w-3 h-3" />
                           </Button>
+                          )}
+                          {can('action.bookings.check_out') && (
                           <Button
                             variant="outline"
                             size="icon"
@@ -1162,9 +1179,10 @@ export function BookingsPage() {
                           >
                             <LogOut className="w-3 h-3" />
                           </Button>
+                          )}
                         </>
                       )}
-                      {booking.status === 'RESERVED' && (
+                      {booking.status === 'RESERVED' && can('action.bookings.cancel') && (
                         <Button
                           variant="ghost"
                           size="icon"
@@ -1176,6 +1194,7 @@ export function BookingsPage() {
                           <XCircle className="w-3 h-3" />
                         </Button>
                       )}
+                      {can('action.bookings.print_reservation') && (
                       <Button
                         variant="outline"
                         size="icon"
@@ -1185,7 +1204,9 @@ export function BookingsPage() {
                       >
                         <FileText className="w-3 h-3" />
                       </Button>
-                      {(booking.status === 'CHECKED_IN' || booking.status === 'CHECKED_OUT') && (
+                      )}
+                      {(booking.status === 'CHECKED_IN' || booking.status === 'CHECKED_OUT') &&
+                        can('action.bookings.generate_invoice') && (
                         <Button
                           variant="outline"
                           size="icon"

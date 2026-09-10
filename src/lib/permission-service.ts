@@ -3,35 +3,103 @@ import {
   ADMIN_LOCKED_PERMISSION_KEYS,
   ALWAYS_GRANTED_PERMISSION_KEYS,
   APP_PERMISSION_CATALOG,
+  SYSTEM_ACCESS_ROLE_DEFS,
   applyPermissionOverrides,
   defaultPermissionKeysForRole,
   isKnownPermissionKey,
+  slugifyRoleKey,
   type AppPageKey,
 } from '@/lib/app-permissions'
-import { APP_ROLES, type AppRole } from '@/lib/roles'
+import type { AppRole } from '@/lib/roles'
 
-type PermissionDb = Pick<PrismaClient, 'rolePermission' | 'userPermission' | 'user'>
+type PermissionDb = Pick<
+  PrismaClient,
+  'rolePermission' | 'userPermission' | 'user' | 'accessRole' | 'accessRolePermission'
+>
 
 let seedPromise: Promise<void> | null = null
 
-export async function ensureRolePermissionsSeeded(db: PermissionDb): Promise<void> {
+function uniqueValidKeys(keys: string[], roleIsAdmin = false): string[] {
+  const valid = [...new Set(keys.filter((key) => isKnownPermissionKey(key)))]
+  for (const key of ALWAYS_GRANTED_PERMISSION_KEYS) {
+    if (!valid.includes(key)) valid.push(key)
+  }
+  if (roleIsAdmin) {
+    for (const key of ADMIN_LOCKED_PERMISSION_KEYS) {
+      if (!valid.includes(key)) valid.push(key)
+    }
+  }
+  return valid.sort()
+}
+
+export async function ensureAccessRolesSeeded(db: PermissionDb): Promise<void> {
   if (!seedPromise) {
     seedPromise = (async () => {
       try {
-        const count = await db.rolePermission.count()
-        if (count > 0) return
+        for (const def of SYSTEM_ACCESS_ROLE_DEFS) {
+          const existing = await db.accessRole.findUnique({ where: { key: def.key } })
+          const permissionKeys = uniqueValidKeys(
+            defaultPermissionKeysForRole(def.baseRole),
+            def.baseRole === 'ADMIN'
+          )
 
-        const rows = APP_ROLES.flatMap((role) =>
-          defaultPermissionKeysForRole(role).map((permissionKey) => ({
-            role: role as RoleType,
-            permissionKey,
-          }))
-        )
-        if (rows.length === 0) return
-        await db.rolePermission.createMany({ data: rows, skipDuplicates: true })
+          if (!existing) {
+            const created = await db.accessRole.create({
+              data: {
+                key: def.key,
+                label: def.label,
+                description: def.description,
+                baseRole: def.baseRole as RoleType,
+                isSystem: true,
+                active: true,
+                sortOrder: def.sortOrder,
+              },
+            })
+            if (permissionKeys.length > 0) {
+              await db.accessRolePermission.createMany({
+                data: permissionKeys.map((permissionKey) => ({
+                  accessRoleId: created.id,
+                  permissionKey,
+                })),
+                skipDuplicates: true,
+              })
+            }
+          } else {
+            // Add any newly introduced catalog keys that this system role should have.
+            const have = new Set(
+              (
+                await db.accessRolePermission.findMany({
+                  where: { accessRoleId: existing.id },
+                  select: { permissionKey: true },
+                })
+              ).map((r) => r.permissionKey)
+            )
+            const missing = permissionKeys.filter((key) => !have.has(key))
+            if (missing.length > 0) {
+              await db.accessRolePermission.createMany({
+                data: missing.map((permissionKey) => ({
+                  accessRoleId: existing.id,
+                  permissionKey,
+                })),
+                skipDuplicates: true,
+              })
+            }
+          }
+        }
+
+        // Backfill user.accessRoleId from RoleType when empty.
+        const systemRoles = await db.accessRole.findMany({
+          where: { isSystem: true },
+          select: { id: true, baseRole: true },
+        })
+        for (const role of systemRoles) {
+          await db.user.updateMany({
+            where: { role: role.baseRole, accessRoleId: null },
+            data: { accessRoleId: role.id },
+          })
+        }
       } catch (error) {
-        // Tables may be missing until the production SQL migration is applied.
-        console.warn('Role permissions seed skipped:', error)
+        console.warn('Access roles seed skipped:', error)
         seedPromise = null
       }
     })().catch((error) => {
@@ -42,25 +110,68 @@ export async function ensureRolePermissionsSeeded(db: PermissionDb): Promise<voi
   await seedPromise
 }
 
+/** @deprecated alias */
+export const ensureRolePermissionsSeeded = ensureAccessRolesSeeded
+
+export async function listAccessRoles(db: PermissionDb) {
+  await ensureAccessRolesSeeded(db)
+  return db.accessRole.findMany({
+    where: { active: true },
+    include: {
+      _count: { select: { permissions: true, users: true } },
+    },
+    orderBy: [{ sortOrder: 'asc' }, { label: 'asc' }],
+  })
+}
+
+export async function resolveAccessRoleForUser(
+  db: PermissionDb,
+  user: { id: string; role: string; accessRoleId?: string | null }
+) {
+  await ensureAccessRolesSeeded(db)
+  if (user.accessRoleId) {
+    const role = await db.accessRole.findUnique({ where: { id: user.accessRoleId } })
+    if (role && role.active) return role
+  }
+  return db.accessRole.findFirst({
+    where: { baseRole: user.role as RoleType, isSystem: true, active: true },
+  })
+}
+
+export async function getAccessRolePermissionKeys(
+  db: PermissionDb,
+  accessRoleId: string,
+  baseRole?: string
+): Promise<string[]> {
+  await ensureAccessRolesSeeded(db)
+  const rows = await db.accessRolePermission.findMany({
+    where: { accessRoleId },
+    select: { permissionKey: true },
+  })
+  if (rows.length === 0 && baseRole) {
+    return defaultPermissionKeysForRole(baseRole)
+  }
+  const keys = new Set(rows.map((r) => r.permissionKey))
+  for (const key of ALWAYS_GRANTED_PERMISSION_KEYS) keys.add(key)
+  if (baseRole === 'ADMIN') {
+    for (const key of ADMIN_LOCKED_PERMISSION_KEYS) keys.add(key)
+  }
+  return [...keys]
+}
+
 export async function getRolePermissionKeys(
   db: PermissionDb,
   role: string
 ): Promise<string[]> {
   try {
-    await ensureRolePermissionsSeeded(db)
-    const rows = await db.rolePermission.findMany({
-      where: { role: role as RoleType },
-      select: { permissionKey: true },
+    await ensureAccessRolesSeeded(db)
+    const accessRole = await db.accessRole.findFirst({
+      where: { baseRole: role as RoleType, isSystem: true, active: true },
     })
-    if (rows.length === 0) {
-      return defaultPermissionKeysForRole(role)
+    if (accessRole) {
+      return getAccessRolePermissionKeys(db, accessRole.id, role)
     }
-    const keys = new Set(rows.map((r) => r.permissionKey))
-    for (const key of ALWAYS_GRANTED_PERMISSION_KEYS) keys.add(key)
-    if (role === 'ADMIN') {
-      for (const key of ADMIN_LOCKED_PERMISSION_KEYS) keys.add(key)
-    }
-    return [...keys]
+    return defaultPermissionKeysForRole(role)
   } catch (error) {
     console.warn('getRolePermissionKeys fallback:', error)
     return defaultPermissionKeysForRole(role)
@@ -70,19 +181,26 @@ export async function getRolePermissionKeys(
 export async function getEffectivePermissionKeys(
   db: PermissionDb,
   userId: string,
-  role: string
+  role: string,
+  accessRoleId?: string | null
 ): Promise<string[]> {
   try {
-    const [roleKeys, overrides] = await Promise.all([
-      getRolePermissionKeys(db, role),
-      db.userPermission.findMany({
-        where: { userId },
-        select: { permissionKey: true, granted: true },
-      }),
-    ])
+    const userRole = await resolveAccessRoleForUser(db, {
+      id: userId,
+      role,
+      accessRoleId,
+    })
+    const roleKeys = userRole
+      ? await getAccessRolePermissionKeys(db, userRole.id, userRole.baseRole)
+      : await getRolePermissionKeys(db, role)
+
+    const overrides = await db.userPermission.findMany({
+      where: { userId },
+      select: { permissionKey: true, granted: true },
+    })
 
     const effective = applyPermissionOverrides(roleKeys, overrides)
-    if (role === 'ADMIN') {
+    if (role === 'ADMIN' || userRole?.baseRole === 'ADMIN') {
       for (const key of ADMIN_LOCKED_PERMISSION_KEYS) effective.add(key)
     }
     return [...effective]
@@ -94,31 +212,65 @@ export async function getEffectivePermissionKeys(
 
 export async function userHasPagePermission(
   db: PermissionDb,
-  user: { id: string; role: string },
+  user: { id: string; role: string; accessRoleId?: string | null },
   pageKey: AppPageKey | string
 ): Promise<boolean> {
-  const keys = await getEffectivePermissionKeys(db, user.id, user.role)
+  const keys = await getEffectivePermissionKeys(
+    db,
+    user.id,
+    user.role,
+    user.accessRoleId
+  )
   return keys.includes(`page.${pageKey}`)
 }
 
+export async function userHasPermission(
+  db: PermissionDb,
+  user: { id: string; role: string; accessRoleId?: string | null },
+  permissionKey: string
+): Promise<boolean> {
+  const keys = await getEffectivePermissionKeys(
+    db,
+    user.id,
+    user.role,
+    user.accessRoleId
+  )
+  return keys.includes(permissionKey)
+}
+
+export async function replaceAccessRolePermissions(
+  db: PermissionDb,
+  accessRoleId: string,
+  permissionKeys: string[],
+  options?: { isAdminRole?: boolean }
+): Promise<string[]> {
+  const valid = uniqueValidKeys(permissionKeys, options?.isAdminRole === true)
+  await db.accessRolePermission.deleteMany({ where: { accessRoleId } })
+  if (valid.length > 0) {
+    await db.accessRolePermission.createMany({
+      data: valid.map((permissionKey) => ({ accessRoleId, permissionKey })),
+      skipDuplicates: true,
+    })
+  }
+  return valid
+}
+
+/** Legacy RoleType matrix writer — also updates matching system AccessRole. */
 export async function replaceRolePermissions(
   db: PermissionDb,
   role: AppRole,
   permissionKeys: string[]
 ): Promise<string[]> {
-  const valid = [
-    ...new Set(permissionKeys.filter((key) => isKnownPermissionKey(key))),
-  ]
-
-  for (const key of ALWAYS_GRANTED_PERMISSION_KEYS) {
-    if (!valid.includes(key)) valid.push(key)
+  await ensureAccessRolesSeeded(db)
+  const accessRole = await db.accessRole.findFirst({
+    where: { baseRole: role as RoleType, isSystem: true },
+  })
+  if (accessRole) {
+    return replaceAccessRolePermissions(db, accessRole.id, permissionKeys, {
+      isAdminRole: role === 'ADMIN',
+    })
   }
-  if (role === 'ADMIN') {
-    for (const key of ADMIN_LOCKED_PERMISSION_KEYS) {
-      if (!valid.includes(key)) valid.push(key)
-    }
-  }
-
+  const valid = uniqueValidKeys(permissionKeys, role === 'ADMIN')
   await db.rolePermission.deleteMany({ where: { role: role as RoleType } })
   if (valid.length > 0) {
     await db.rolePermission.createMany({
@@ -129,31 +281,125 @@ export async function replaceRolePermissions(
       skipDuplicates: true,
     })
   }
-  return valid.sort()
+  return valid
 }
 
-/**
- * Persist only diffs vs the role defaults so future role changes still apply
- * where the user was left on “inherit”.
- */
+export async function createCustomAccessRole(
+  db: PermissionDb,
+  input: {
+    label: string
+    description?: string | null
+    baseRole: AppRole
+    permissionKeys?: string[]
+  }
+) {
+  await ensureAccessRolesSeeded(db)
+  const base = input.baseRole
+  let key = slugifyRoleKey(input.label)
+  const clash = await db.accessRole.findUnique({ where: { key } })
+  if (clash) key = `${key}_${Date.now().toString(36)}`
+
+  const source = await db.accessRole.findFirst({
+    where: { baseRole: base as RoleType, isSystem: true },
+  })
+  const seedKeys =
+    input.permissionKeys && input.permissionKeys.length > 0
+      ? input.permissionKeys
+      : source
+        ? await getAccessRolePermissionKeys(db, source.id, base)
+        : defaultPermissionKeysForRole(base)
+
+  const created = await db.accessRole.create({
+    data: {
+      key,
+      label: input.label.trim(),
+      description: input.description?.trim() || null,
+      baseRole: base as RoleType,
+      isSystem: false,
+      active: true,
+      sortOrder: 200,
+    },
+  })
+
+  await replaceAccessRolePermissions(db, created.id, seedKeys, {
+    isAdminRole: base === 'ADMIN',
+  })
+
+  return created
+}
+
+export async function updateCustomAccessRole(
+  db: PermissionDb,
+  accessRoleId: string,
+  input: {
+    label?: string
+    description?: string | null
+    baseRole?: AppRole
+    active?: boolean
+  }
+) {
+  const existing = await db.accessRole.findUnique({ where: { id: accessRoleId } })
+  if (!existing) throw new Error('Role not found')
+  if (existing.isSystem && input.baseRole && input.baseRole !== existing.baseRole) {
+    throw new Error('System role base type cannot be changed')
+  }
+
+  return db.accessRole.update({
+    where: { id: accessRoleId },
+    data: {
+      label: input.label?.trim() || existing.label,
+      description:
+        input.description !== undefined
+          ? input.description?.trim() || null
+          : existing.description,
+      baseRole: (input.baseRole as RoleType | undefined) || existing.baseRole,
+      active: input.active ?? existing.active,
+    },
+  })
+}
+
+export async function deleteCustomAccessRole(db: PermissionDb, accessRoleId: string) {
+  const existing = await db.accessRole.findUnique({
+    where: { id: accessRoleId },
+    include: { _count: { select: { users: true } } },
+  })
+  if (!existing) throw new Error('Role not found')
+  if (existing.isSystem) throw new Error('System roles cannot be deleted')
+  if (existing._count.users > 0) {
+    throw new Error('Reassign users before deleting this role')
+  }
+  await db.accessRole.delete({ where: { id: accessRoleId } })
+}
+
 export async function replaceUserPermissionOverrides(
   db: PermissionDb,
   userId: string,
   role: string,
-  desiredKeys: string[]
+  desiredKeys: string[],
+  accessRoleId?: string | null
 ): Promise<{ grants: string[]; denials: string[]; effective: string[] }> {
-  const roleKeys = new Set(await getRolePermissionKeys(db, role))
+  const accessRole = await resolveAccessRoleForUser(db, {
+    id: userId,
+    role,
+    accessRoleId,
+  })
+  const roleKeys = new Set(
+    accessRole
+      ? await getAccessRolePermissionKeys(db, accessRole.id, accessRole.baseRole)
+      : await getRolePermissionKeys(db, role)
+  )
   const desired = new Set(
     desiredKeys.filter((key) => isKnownPermissionKey(key))
   )
   for (const key of ALWAYS_GRANTED_PERMISSION_KEYS) desired.add(key)
-  if (role === 'ADMIN') {
+  if (role === 'ADMIN' || accessRole?.baseRole === 'ADMIN') {
     for (const key of ADMIN_LOCKED_PERMISSION_KEYS) desired.add(key)
   }
 
   const grants: string[] = []
   const denials: string[] = []
-  for (const key of APP_PERMISSION_CATALOG.map((p) => p.key)) {
+  for (const def of APP_PERMISSION_CATALOG) {
+    const key = def.key
     const inRole = roleKeys.has(key)
     const inDesired = desired.has(key)
     if (inDesired && !inRole) grants.push(key)

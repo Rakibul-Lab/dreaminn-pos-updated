@@ -101,7 +101,7 @@ function resolveChargeableNightsFromDate(
       return { error: 'Departure date must be within the early-checkout window' }
     }
     return {
-      nights: chargeableNightsForDepartureDate(actualCheckIn, until),
+      nights: chargeableNightsForDepartureDate(actualCheckIn, until, checkIn),
       until,
     }
   }
@@ -145,7 +145,11 @@ export function computeStayAdjustmentPreview(
   const asOf = params.asOf ?? new Date()
   const bookedNights = countBookedNights(params.checkIn, params.checkOut)
   const actualCheckIn = params.actualCheckIn ?? params.checkIn
-  const actualStayNights = countActualStayNights(actualCheckIn, asOf)
+  const actualStayNights = countActualStayNights(
+    actualCheckIn,
+    asOf,
+    params.checkIn
+  )
   const nightlyRate = params.nightlyRate
   const availability = getStayAdjustmentAvailability(
     params.checkIn,

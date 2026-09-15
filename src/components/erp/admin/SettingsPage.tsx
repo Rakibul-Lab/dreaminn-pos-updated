@@ -103,6 +103,8 @@ export default function SettingsPage() {
     for (const group of sortedGroups) {
       for (const item of grouped[group] || []) {
         if (item.key === 'late_checkout_hours') continue
+        if (item.key === 'auto_next_day_bill_time') continue
+        if (item.key === 'early_arrival_night_cutoff') continue
         const def = getSettingDefinition(item.key)
         const original =
           def?.inputType === 'time'
@@ -148,6 +150,8 @@ export default function SettingsPage() {
   const hasPendingChanges = sortedGroups.some((group) =>
     (grouped[group] || []).some((item) => {
       if (item.key === 'late_checkout_hours') return false
+      if (item.key === 'auto_next_day_bill_time') return false
+      if (item.key === 'early_arrival_night_cutoff') return false
       const def = getSettingDefinition(item.key)
       const original =
         def?.inputType === 'time' ? toTimeInputValue(item.value, def.value) : item.value
@@ -226,7 +230,12 @@ export default function SettingsPage() {
               </CardHeader>
               <CardContent className="space-y-4">
                 {items
-                  .filter((item) => item.key !== 'late_checkout_hours')
+                  .filter(
+                    (item) =>
+                      item.key !== 'late_checkout_hours' &&
+                      item.key !== 'auto_next_day_bill_time' &&
+                      item.key !== 'early_arrival_night_cutoff'
+                  )
                   .map((item, index) => {
                   const def = getSettingDefinition(item.key)
                   const label =

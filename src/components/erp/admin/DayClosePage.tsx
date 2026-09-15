@@ -189,12 +189,17 @@ export default function DayClosePage() {
         }
       )
     },
-    onSuccess: (res: { success?: boolean; message?: string; data?: { nextBusinessDate?: string } }) => {
+    onSuccess: (res: {
+      success?: boolean
+      message?: string
+      data?: { nextBusinessDate?: string; autoNextDayBills?: number }
+    }) => {
       queryClient.invalidateQueries({ queryKey: ['day-close-status'] })
       queryClient.invalidateQueries({ queryKey: ['day-close-history'] })
       queryClient.invalidateQueries({ queryKey: ['business-date'] })
       queryClient.invalidateQueries({ queryKey: ['dashboard'] })
       queryClient.invalidateQueries({ queryKey: ['reports'] })
+      queryClient.invalidateQueries({ queryKey: ['bookings'] })
       toast({
         title: 'Business day closed',
         description: res.message || `Next business date: ${res.data?.nextBusinessDate}`,
@@ -374,7 +379,9 @@ export default function DayClosePage() {
             <AlertDialogTitle>Close business day {businessDate || ''}?</AlertDialogTitle>
             <AlertDialogDescription>
               Are you sure you want to close the day? The daily sales report will be locked
-              as it stands now and cannot be reopened.
+              as it stands now and cannot be reopened. In-house guests whose checkout falls
+              on this business day (or earlier) will automatically receive a next-day room
+              charge.
               {status?.cashClosingBalancePreview != null
                 ? ` Cash on hand carried to the next day: ৳${status.cashClosingBalancePreview.toLocaleString()}.`
                 : ''}

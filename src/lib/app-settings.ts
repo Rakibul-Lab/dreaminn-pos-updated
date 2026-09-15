@@ -6,6 +6,9 @@ import {
   DEFAULT_CHECK_IN_TIME,
   DEFAULT_CHECK_OUT_TIME,
   normalizeTimeHHmm,
+  isStayDatePickerRangeValid,
+  countHotelStayNights,
+  resolveEffectiveStayArrivalForNights,
   type HotelTimes,
 } from '@/lib/hotel-times'
 import {
@@ -43,6 +46,10 @@ export function mergeSettingsWithDefaults(
 
   // Drop deprecated restaurant service charge from admin UI merges
   byKey.delete('service_charge_percent')
+  // Auto next-day bill is tied to Day Close — no longer a settings time
+  byKey.delete('auto_next_day_bill_time')
+  // Removed early-arrival night cutoff (extra nights come from Day Close only)
+  byKey.delete('early_arrival_night_cutoff')
 
   return Array.from(byKey.values()).map((r) => ({
     id: r.id,
@@ -132,12 +139,17 @@ export async function computeLateCheckoutFee(
 }
 
 /**
- * Time on the check-out day after which an un-departed guest is auto-billed for
- * the next night. Standard 2:00 PM, editable from hotel settings.
+ * Late checkout flat charge and deadline hour (from check_out_time when set).
  */
-export async function getAutoNextDayBillTime(): Promise<string> {
-  const raw = await readSettingValue('auto_next_day_bill_time')
-  return normalizeTimeHHmm(raw, DEF_BY_KEY.get('auto_next_day_bill_time')?.value ?? '14:00')
+export async function getLateCheckoutSettings(): Promise<{
+  charge: number
+  checkoutHour: number
+}> {
+  const chargeRaw = await readSettingValue('late_checkout_charge')
+  const times = await getHotelCheckInOutTimes()
+  const charge = parsePercent(chargeRaw, parseFloat(DEF_BY_KEY.get('late_checkout_charge')?.value ?? '500'))
+  const checkoutHour = checkoutHourFromTime(times.checkOutTime)
+  return { charge, checkoutHour }
 }
 
 export async function getHotelCheckInOutTimes(): Promise<HotelTimes> {
@@ -164,11 +176,33 @@ export async function resolveBookingCheckInOut(
   options?: { walkInNow?: boolean }
 ): Promise<{ checkIn: Date; checkOut: Date; nights: number }> {
   const times = await getHotelCheckInOutTimes()
+  const now = new Date()
 
   if (options?.walkInNow) {
-    const walkIn = buildWalkInStay(new Date(), times)
+    const checkInStr =
+      typeof checkIn === 'string' ? checkIn : datePickerValueFromDate(checkIn)
+    const checkOutStr =
+      typeof checkOut === 'string' ? checkOut : datePickerValueFromDate(checkOut)
+
+    // Honor the selected stay span (e.g. 2 nights). Only fall back to a default
+    // 1-night walk-in when the picker range is missing/invalid.
+    if (isStayDatePickerRangeValid(checkInStr, checkOutStr)) {
+      const resolved = resolveStayFromDatePickers(checkInStr, checkOutStr, times)
+      const arrivalForNights = resolveEffectiveStayArrivalForNights(
+        resolved.checkIn,
+        now,
+        times.checkInTime
+      )
+      return {
+        checkIn: now,
+        checkOut: resolved.checkOut,
+        nights: countHotelStayNights(arrivalForNights, resolved.checkOut),
+      }
+    }
+
+    const walkIn = buildWalkInStay(now, times)
     return {
-      checkIn: walkIn.checkIn,
+      checkIn: now,
       checkOut: walkIn.checkOut,
       nights: walkIn.nights,
     }
@@ -190,17 +224,6 @@ function datePickerValueFromDate(date: Date): string {
   const m = String(date.getMonth() + 1).padStart(2, '0')
   const d = String(date.getDate()).padStart(2, '0')
   return `${y}-${m}-${d}`
-}
-
-export async function getLateCheckoutSettings(): Promise<{
-  charge: number
-  checkoutHour: number
-}> {
-  const chargeRaw = await readSettingValue('late_checkout_charge')
-  const times = await getHotelCheckInOutTimes()
-  const charge = parsePercent(chargeRaw, parseFloat(DEF_BY_KEY.get('late_checkout_charge')?.value ?? '500'))
-  const checkoutHour = checkoutHourFromTime(times.checkOutTime)
-  return { charge, checkoutHour }
 }
 
 export async function getEarlyCheckoutSettings(): Promise<{

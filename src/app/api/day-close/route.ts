@@ -17,6 +17,7 @@ import {
   resolveSuggestedOpeningBalance,
   saveDraftOpeningBalance,
 } from '@/lib/daily-sales-balance'
+import { processStayExtensionsOnBusinessDayClose } from '@/lib/auto-stay-extension'
 
 /** GET — day-close history or open-day status */
 export async function GET(request: NextRequest) {
@@ -91,6 +92,11 @@ export async function POST(request: NextRequest) {
     }
 
     const { openedAt } = await getOpenBusinessDayWindow()
+
+    // Night audit: bill +1 night for in-house guests whose checkout falls on/before
+    // this business day — before the close snapshot so folios are up to date.
+    const stayExtensions = await processStayExtensionsOnBusinessDayClose(db, businessDate)
+
     const closedAt = new Date()
     const baseSnapshot = await buildDayCloseSnapshot(businessDate, openedAt, closedAt)
 
@@ -150,18 +156,27 @@ export async function POST(request: NextRequest) {
         closedBusinessDate: businessDate,
         nextBusinessDate: nextDate,
         nextDayOpeningCash,
+        autoNextDayBills: stayExtensions.extendedCount,
+        stayExtensions: stayExtensions.extensions,
         snapshot,
       })
     )
+
+    const extensionNote =
+      stayExtensions.extendedCount > 0
+        ? ` Auto next-day bill added for ${stayExtensions.extendedCount} in-house guest(s).`
+        : ''
 
     return successResponse(
       {
         closedBusinessDate: businessDate,
         nextBusinessDate: nextDate,
         nextDayOpeningCash,
+        autoNextDayBills: stayExtensions.extendedCount,
+        stayExtensions: stayExtensions.extensions,
         snapshot,
       },
-      `Business day ${businessDate} closed. Now operating on ${nextDate}. Tomorrow's opening cash: ৳${nextDayOpeningCash.toLocaleString()}.`
+      `Business day ${businessDate} closed. Now operating on ${nextDate}. Tomorrow's opening cash: ৳${nextDayOpeningCash.toLocaleString()}.${extensionNote}`
     )
   } catch (error) {
     console.error('Day close error:', error)

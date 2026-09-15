@@ -84,13 +84,41 @@ export function applyHotelTimeToBookingInput(
 }
 
 /**
- * Hotel nights: arrival day (check-in time) → departure day (check-out time).
- * Example: May 19 @ 2:00 PM → May 20 @ 12:00 PM = 1 night.
+ * Hotel nights: calendar departure day − arrival day (minimum 1).
+ * Example: May 19 → May 20 = 1 night. Extra nights are added only on business-day close.
  */
 export function countHotelStayNights(checkIn: Date, checkOut: Date): number {
   if (checkOut <= checkIn) return 0
   const nights = differenceInCalendarDays(startOfDay(checkOut), startOfDay(checkIn))
   return Math.max(1, nights)
+}
+
+/**
+ * Calendar day used when physical arrival differs from reserved check-in.
+ * Never rewrites stored dates — used only for night / stay calculations.
+ */
+export function resolveEffectiveStayArrivalDay(
+  scheduledCheckIn: Date,
+  actualCheckIn?: Date | null
+): Date {
+  const scheduledDay = startOfDay(scheduledCheckIn)
+  if (!actualCheckIn) return scheduledDay
+
+  const actual = new Date(actualCheckIn)
+  if (Number.isNaN(actual.getTime())) return scheduledDay
+
+  const actualDay = startOfDay(actual)
+  return actualDay.getTime() < scheduledDay.getTime() ? actualDay : scheduledDay
+}
+
+/** Build a datetime used only for night math (arrival day @ scheduled check-in time). */
+export function resolveEffectiveStayArrivalForNights(
+  scheduledCheckIn: Date,
+  actualCheckIn?: Date | null,
+  hotelCheckInTime: string = DEFAULT_CHECK_IN_TIME
+): Date {
+  const day = resolveEffectiveStayArrivalDay(scheduledCheckIn, actualCheckIn)
+  return applyHotelTimeToDate(day, hotelCheckInTime)
 }
 
 /** @deprecated Use countHotelStayNights */
@@ -152,8 +180,8 @@ export function resolveStayFromDatePickers(
 }
 
 /**
- * Walk-in / check-in now: guest stays until tomorrow at configured checkout time.
- * Stored check-in is the current moment; checkout is next calendar day at checkout time.
+ * Walk-in / check-in now: guest stays until the calendar day after arrival
+ * at the configured checkout time.
  */
 export function buildWalkInStay(
   now: Date = new Date(),
@@ -168,7 +196,10 @@ export function buildWalkInStay(
     checkOutDate: datePickerValue(departureDay),
     checkIn: now,
     checkOut,
-    nights: countHotelStayNights(now, checkOut),
+    nights: countHotelStayNights(
+      applyHotelTimeToDate(arrivalDay, times.checkInTime),
+      checkOut
+    ),
   }
 }
 

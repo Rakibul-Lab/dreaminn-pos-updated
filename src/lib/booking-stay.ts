@@ -6,16 +6,31 @@ import {
   isSameDay,
   startOfDay,
 } from 'date-fns'
-import { countHotelStayNights } from '@/lib/hotel-times'
+import {
+  countHotelStayNights,
+  resolveEffectiveStayArrivalDay,
+  resolveEffectiveStayArrivalForNights,
+} from '@/lib/hotel-times'
 
 /** Nights between reservation check-in and check-out (hotel departure − arrival days). */
 export function countBookedNights(checkIn: Date, checkOut: Date): number {
   return countHotelStayNights(checkIn, checkOut)
 }
 
-/** Nights from actual check-in through as-of date (minimum 1). */
-export function countActualStayNights(actualCheckIn: Date, checkoutAt: Date = new Date()): number {
-  return countHotelStayNights(actualCheckIn, checkoutAt)
+/**
+ * Nights from effective arrival through as-of date (minimum 1).
+ * Extra nights beyond the reserved stay are added on business-day close.
+ */
+export function countActualStayNights(
+  actualCheckIn: Date,
+  checkoutAt: Date = new Date(),
+  scheduledCheckIn?: Date | null
+): number {
+  const arrival = resolveEffectiveStayArrivalForNights(
+    scheduledCheckIn ?? actualCheckIn,
+    actualCheckIn
+  )
+  return countHotelStayNights(arrival, checkoutAt)
 }
 
 export type StayAdjustmentMode = 'shrink' | 'extend'
@@ -88,10 +103,10 @@ export function getStayAdjustmentAvailability(
     earlyDepartureDisabledReason =
       'Early departure is not available for a one-night (or same-day) reservation.'
   } else if (!canEarlyDeparture) {
-    if (isSameDay(today, scheduledOut)) {
+    if (isSameDay(today, scheduledOutDay)) {
       earlyDepartureDisabledReason =
         'Guest is on the scheduled checkout day — use Check-out instead of early departure.'
-    } else if (isAfter(today, scheduledOut)) {
+    } else if (isAfter(today, scheduledOutDay)) {
       earlyDepartureDisabledReason = 'The reserved stay period has already ended.'
     } else {
       earlyDepartureDisabledReason = 'Early departure is not available for this stay.'
@@ -115,7 +130,7 @@ export function maxEarlyDepartureDate(checkOut: Date): Date {
 
 /** Earliest departure date that charges at least one night after actual check-in. */
 export function minEarlyDepartureDate(actualCheckIn: Date, checkIn: Date): Date {
-  const base = startOfDay(actualCheckIn ?? checkIn)
+  const base = resolveEffectiveStayArrivalDay(checkIn, actualCheckIn)
   return addDays(base, 1)
 }
 
@@ -126,11 +141,19 @@ export function minExtendedCheckoutDate(checkOut: Date): Date {
 
 export function chargeableNightsForDepartureDate(
   actualCheckIn: Date,
-  departureDate: Date
+  departureDate: Date,
+  scheduledCheckIn?: Date | null
 ): number {
-  return Math.max(1, differenceInCalendarDays(startOfDay(departureDate), startOfDay(actualCheckIn)))
+  const arrivalDay = resolveEffectiveStayArrivalDay(
+    scheduledCheckIn ?? actualCheckIn,
+    actualCheckIn
+  )
+  return Math.max(1, differenceInCalendarDays(startOfDay(departureDate), arrivalDay))
 }
 
-export function chargeableNightsForExtendedCheckout(checkIn: Date, extendedCheckOut: Date): number {
+export function chargeableNightsForExtendedCheckout(
+  checkIn: Date,
+  extendedCheckOut: Date
+): number {
   return countBookedNights(checkIn, extendedCheckOut)
 }

@@ -775,7 +775,6 @@ export async function prepareCreditTransfers(
   asOf: Date
 ): Promise<PreparedCreditTransfer[]> {
   const prepared: PreparedCreditTransfer[] = []
-
   for (const source of sources) {
     const restaurantOrders = await db.restaurantOrder.findMany({
       where: { bookingId: source.id, status: { not: 'CANCELLED' } },
@@ -799,7 +798,12 @@ export async function prepareCreditTransfers(
 
     prepared.push({
       booking: source,
-      settlement: computeTransferSourceSettlement(source, restaurantOrders, payments, asOf),
+      settlement: computeTransferSourceSettlement(
+        source,
+        restaurantOrders,
+        payments,
+        asOf
+      ),
       restaurantOrders,
       restaurantOrdersWithItems,
       payments,

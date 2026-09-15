@@ -30,7 +30,6 @@ import { readCurrentBusinessDateString } from '@/lib/business-date';
 import { isArrivalOnOrBeforeBusinessDate } from '@/lib/room-effective-status';
 import { getRoomNightlyTotal } from '@/lib/room-pricing';
 import { Prisma, RoleType } from '@prisma/client';
-import { processAllOverdueStayExtensions } from '@/lib/auto-stay-extension';
 import { ensureCustomerRegistrationNumber, generateGuestRegistrationNumber } from '@/lib/guest-registration-number';
 import { getCorporateGuestMissingFields, getPhysicalIdMissingFields, isReservationGuestProfileComplete } from '@/lib/reservation-completion-fields';
 import { hasBookingCompany } from '@/lib/booking-company';
@@ -125,10 +124,6 @@ export async function GET(request: NextRequest) {
     const search = searchParams.get('search')?.trim();
     // Lookup callers (payment/booking pickers) need real bookings only, never reservation entries.
     const bookingsOnly = searchParams.get('records') === 'bookings';
-
-    if (!bookingsOnly) {
-      await processAllOverdueStayExtensions(db);
-    }
 
     const skip = (page - 1) * limit;
 

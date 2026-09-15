@@ -125,8 +125,13 @@ export type BookingDiscountInput = BookingStayNightsInput & {
 
 export function resolveBookingDiscount(input: BookingDiscountInput) {
   const enabled = input.discountEnabled === true
-  const type = parseBookingDiscountType(input.discountType)
-  const value = enabled ? Math.max(0, Number(input.discountValue) || 0) : 0
+  let type = parseBookingDiscountType(input.discountType)
+  let value = enabled ? Math.max(0, Number(input.discountValue) || 0) : 0
+  // Percentages above 100 are almost always a fixed BDT amount entered on the
+  // wrong control (e.g. 1000 meant ৳1000, not 1000%).
+  if (enabled && type === 'PERCENTAGE' && value > 100) {
+    type = 'FIXED'
+  }
   const nights = resolveDiscountNights(input)
   return { enabled, type, value, nights }
 }

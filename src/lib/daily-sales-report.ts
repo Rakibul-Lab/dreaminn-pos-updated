@@ -1053,11 +1053,28 @@ export async function buildDailySalesDetailReport(
         : null
 
     const sortAt = (invoice.issuedAt ?? invoice.createdAt).toISOString()
-    const extraCharges = Math.max(0, invoice.extraCharges)
-    const nonRoomCharges = restaurantGross + extraCharges
+    const extraChargesGross = Math.max(0, invoice.extraCharges)
     // The invoice keeps the rack rate and the discount apart. Only what the guest
     // was actually billed is a sale, so the sheet foots with the money collected.
-    const roomBilled = Math.max(0, invoice.roomCharges - Math.max(0, invoice.discount))
+    const roomBilledGross = Math.max(0, invoice.roomCharges - Math.max(0, invoice.discount))
+
+    // Whatever already sits on the folio was taken as a payment and reported on the
+    // day it was taken. Writing the charge rows at their gross counts that money a
+    // second time: a ৳10,860 company folio with a ৳10,000 advance behind it showed
+    // the whole ৳10,860 as owed on the sheet instead of the ৳860 still standing.
+    // The advance is worked off the room first so the restaurant keeps the credit
+    // for what it billed.
+    let advanceLeft = Math.max(0, invoice.paidAmount)
+    const netOfAdvance = (gross: number): number => {
+      if (gross <= 0 || advanceLeft <= 0.005) return gross
+      const applied = Math.min(gross, advanceLeft)
+      advanceLeft = Number((advanceLeft - applied).toFixed(2))
+      return Number((gross - applied).toFixed(2))
+    }
+    const roomBilled = netOfAdvance(roomBilledGross)
+    const extraCharges = netOfAdvance(extraChargesGross)
+    const restaurantBilled = netOfAdvance(restaurantGross)
+    const nonRoomCharges = restaurantBilled + extraCharges
     const guestName = booking.customer.name
     const room = booking.room.roomNumber
     const regNo = resolveBookingRegistrationNumber(booking) || null
@@ -1099,13 +1116,13 @@ export async function buildDailySalesDetailReport(
 
     // Restaurant food and hotel extras are different sales. Bundling them under
     // "Food & service sale" made a half-day charge read as restaurant revenue.
-    if (restaurantGross > 0) {
+    if (restaurantBilled > 0) {
       const billPayment = restaurantBillRemark
-        ? resolveCheckoutFoodPaymentAllocation(booking.id, restaurantOrders, restaurantGross)
+        ? resolveCheckoutFoodPaymentAllocation(booking.id, restaurantOrders, restaurantBilled)
         : { cash: 0, card: 0, mbanking: 0 }
       const foodCompanyBill =
         roomBilled > 0 || extraCharges > 0 ? 0 : companyBill
-      const foodLineTotal = resolveChargeLineTotal(restaurantGross, {
+      const foodLineTotal = resolveChargeLineTotal(restaurantBilled, {
         companyBill: foodCompanyBill,
         cash: billPayment.cash,
         card: billPayment.card,
@@ -1120,7 +1137,7 @@ export async function buildDailySalesDetailReport(
         room,
         regNo,
         roomAmount: 0,
-        otherService: restaurantGross,
+        otherService: restaurantBilled,
         cash: billPayment.cash,
         card: billPayment.card,
         mbanking: billPayment.mbanking,
@@ -1135,7 +1152,7 @@ export async function buildDailySalesDetailReport(
 
     if (extraCharges > 0) {
       const extraCompanyBill =
-        roomBilled > 0 || restaurantGross > 0 ? 0 : companyBill
+        roomBilled > 0 || restaurantBilled > 0 ? 0 : companyBill
       lines.push({
         id: `${invoice.id}-extra`,
         lineType: 'charge',
@@ -1160,25 +1177,32 @@ export async function buildDailySalesDetailReport(
       })
     }
 
-    if (roomBilled <= 0 && nonRoomCharges <= 0 && invoice.totalAmount > 0) {
-      lines.push({
-        id: invoice.id,
-        lineType: 'charge',
-        source: 'invoice',
-        guestName,
-        room,
-        regNo,
-        roomAmount: 0,
-        otherService: invoice.totalAmount,
-        cash: 0,
-        card: 0,
-        mbanking: 0,
-        companyBill,
-        remark: buildCheckoutInvoiceRoomRemark(invoice.invoiceNumber, companyRemark),
-        total: resolveChargeLineTotal(invoice.totalAmount, { companyBill }),
-        reference: invoice.invoiceNumber,
-        sortAt,
-      })
+    // An invoice with no itemised charges still has to show its total, less any
+    // money already taken against it.
+    const unitemised =
+      roomBilledGross <= 0 && restaurantGross <= 0 && extraChargesGross <= 0
+    if (unitemised && invoice.totalAmount > 0) {
+      const billed = netOfAdvance(invoice.totalAmount)
+      if (billed > 0) {
+        lines.push({
+          id: invoice.id,
+          lineType: 'charge',
+          source: 'invoice',
+          guestName,
+          room,
+          regNo,
+          roomAmount: 0,
+          otherService: billed,
+          cash: 0,
+          card: 0,
+          mbanking: 0,
+          companyBill,
+          remark: buildCheckoutInvoiceRoomRemark(invoice.invoiceNumber, companyRemark),
+          total: resolveChargeLineTotal(billed, { companyBill }),
+          reference: invoice.invoiceNumber,
+          sortAt,
+        })
+      }
     }
   }
 

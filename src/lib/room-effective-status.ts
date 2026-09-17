@@ -101,26 +101,9 @@ export function pickLiveActiveBooking(
   businessDate: string
 ): RoomBookingForDisplay | null {
   const checkedIn = bookings.filter((b) => b.status === 'CHECKED_IN')
-
-  // Prefer the stay that actually covers the open business date. A future
-  // CHECKED_IN row (data error / early check-in) must not hide today's guest.
-  const occupying = checkedIn.filter((b) => {
-    const ci = formatStayCalendarDate(b.checkIn)
-    const co = formatStayCalendarDate(b.checkOut)
-    return ci <= businessDate && co > businessDate
-  })
-  if (occupying.length) {
-    occupying.sort((a, b) => new Date(b.checkIn).getTime() - new Date(a.checkIn).getTime())
-    return occupying[0]
-  }
-
-  // Overstay: arrived on/before business date but checkout day already passed
-  const arrived = checkedIn.filter(
-    (b) => formatStayCalendarDate(b.checkIn) <= businessDate
-  )
-  if (arrived.length) {
-    arrived.sort((a, b) => new Date(b.checkIn).getTime() - new Date(a.checkIn).getTime())
-    return arrived[0]
+  if (checkedIn.length) {
+    checkedIn.sort((a, b) => new Date(b.checkIn).getTime() - new Date(a.checkIn).getTime())
+    return checkedIn[0]
   }
 
   const reserved = bookings.filter(

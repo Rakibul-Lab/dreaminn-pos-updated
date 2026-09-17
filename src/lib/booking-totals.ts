@@ -1,6 +1,6 @@
 import {
   computeHotelDiscountAmount,
-  resolveBookingDiscount,
+  parseBookingDiscountType,
   resolveDiscountNights,
   type BookingDiscountInput,
   type BookingStayNightsInput,
@@ -40,13 +40,12 @@ export function computeRoomBookingTotals(
 ) {
   const rate = effectiveVatRate(vatOptions)
   const vatApplied = rate > 0
-  const resolvedDiscount = resolveBookingDiscount(discount ?? {})
   const discountAmount = computeHotelDiscountAmount(
     totalRoomCharge,
-    resolvedDiscount.enabled,
-    resolvedDiscount.type,
-    resolvedDiscount.value,
-    resolvedDiscount.nights
+    discount?.discountEnabled === true,
+    parseBookingDiscountType(discount?.discountType),
+    Number(discount?.discountValue) || 0,
+    resolveDiscountNights(discount)
   )
   const taxableRoom = Math.max(0, totalRoomCharge - discountAmount)
   const vatAmount = (taxableRoom * rate) / 100
@@ -107,9 +106,9 @@ export function computeBookingDisplayVat(booking: BookingVatDisplayFields): Book
   const discountAmount = computeHotelDiscountAmount(
     booking.totalRoomCharge,
     discount.discountEnabled === true,
-    discount.discountType === 'FIXED' ? 'FIXED' : 'PERCENTAGE',
+    parseBookingDiscountType(discount.discountType),
     Number(discount.discountValue) || 0,
-    discount.nights ?? 1
+    resolveDiscountNights(discount)
   )
   const includedInRate = booking.vatApplied === false
 
@@ -151,23 +150,11 @@ export function bookingDiscountInput(
     discountValue?: number | null
   }
 ): BookingDiscountInput {
-  const resolved = resolveBookingDiscount({
+  return {
     discountEnabled: booking.discountEnabled === true,
-    discountType: booking.discountType,
+    discountType: parseBookingDiscountType(booking.discountType),
     discountValue: Math.max(0, Number(booking.discountValue) || 0),
     nights: resolveDiscountNights(booking),
-    checkIn: booking.checkIn,
-    checkOut: booking.checkOut,
-    totalRoomCharge: booking.totalRoomCharge,
-  })
-  return {
-    discountEnabled: resolved.enabled,
-    discountType: resolved.type,
-    discountValue: resolved.value,
-    nights: resolved.nights,
-    checkIn: booking.checkIn,
-    checkOut: booking.checkOut,
-    totalRoomCharge: booking.totalRoomCharge,
   }
 }
 

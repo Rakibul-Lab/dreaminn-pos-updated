@@ -82,7 +82,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const authResult = await requireRole(request, 'ADMIN' as RoleType, 'HOTEL_STAFF' as RoleType, 'HOTEL_FD' as RoleType)
+ authResult = await requireRole(request, 'ADMIN' as RoleType, 'HOTEL_STAFF' as RoleType, 'HOTEL_FD' as RoleType)
     if (authResult instanceof Response) return authResult
 
     const { id } = await params
@@ -136,15 +136,8 @@ export async function GET(
         earlyDepartureDisabledReason: availability.earlyDepartureDisabledReason,
         extendDisabledReason: availability.extendDisabledReason,
         adjustmentUnavailable: true,
-        bookedNights: countBookedNights(
-          booking.checkIn,
-          booking.checkOut,
-        ),
-        actualStayNights: countActualStayNights(
-          booking.actualCheckIn ?? booking.checkIn,
-          new Date(),
-          booking.checkIn,
-        ),
+        bookedNights: countBookedNights(booking.checkIn, booking.checkOut),
+        actualStayNights: countActualStayNights(booking.actualCheckIn ?? booking.checkIn),
         chargeableNights: 0,
         waivedNights: 0,
         chargeableUntilDate: '',
@@ -195,7 +188,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const authResult = await requireRole(request, 'ADMIN' as RoleType, 'HOTEL_STAFF' as RoleType, 'HOTEL_FD' as RoleType)
+ authResult = await requireRole(request, 'ADMIN' as RoleType, 'HOTEL_STAFF' as RoleType, 'HOTEL_FD' as RoleType)
     if (authResult instanceof Response) return authResult
 
     const { id } = await params

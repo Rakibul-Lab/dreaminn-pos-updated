@@ -1,35 +1,58 @@
 import { addDays, startOfDay } from 'date-fns'
 import type { PrismaClient } from '@prisma/client'
-import { getHotelCheckInOutTimes } from '@/lib/app-settings'
+import { getHotelCheckInOutTimes, getAutoNextDayBillTime } from '@/lib/app-settings'
 import {
   applyHotelTimeToBookingInput,
+  applyHotelTimeToDate,
   countHotelStayNights,
   datePickerValue,
+  formatTime12h,
 } from '@/lib/hotel-times'
 import { getRoomNightlyTotal } from '@/lib/room-pricing'
 import { bookingVatOptions, computeRoomBookingTotals, sumBookingNetPaid } from '@/lib/booking-totals'
 
-/** Only one extra night may be billed in a single day-close pass. */
+/**
+ * Default grace time: guests may check out until 2:00 PM on departure day; after
+ * that an extra night is added. Overridable via the `auto_next_day_bill_time` setting.
+ */
+export const AUTO_EXTENSION_GRACE_END_TIME = '14:00'
+
+/** Only one extra night may be billed in a single auto-extend pass. */
 const MAX_AUTO_EXTENSION_NIGHTS = 1
 
-/**
- * Guests still checked in whose reserved checkout falls on or before the
- * business day being closed are billed one additional night (night audit).
- */
-export function isEligibleForBusinessDayStayExtension(
+export function getAutoExtensionCutoff(
   checkOut: Date,
-  closedBusinessDate: string
+  now: Date = new Date(),
+  graceTime: string = AUTO_EXTENSION_GRACE_END_TIME
+): Date {
+  void now
+  return applyHotelTimeToDate(startOfDay(checkOut), graceTime)
+}
+
+export function isPastAutoExtensionCutoff(
+  checkOut: Date,
+  now: Date = new Date(),
+  graceTime: string = AUTO_EXTENSION_GRACE_END_TIME
 ): boolean {
-  return datePickerValue(startOfDay(checkOut)) <= closedBusinessDate
+  return now.getTime() > getAutoExtensionCutoff(checkOut, now, graceTime).getTime()
 }
 
 /**
- * Advance checkout by exactly one hotel night at the configured check-out time.
+ * Next checkout datetime after grace has passed on the current departure day.
+ *
+ * Only ever advances **one** night per run. Multi-day catch-up on every list/checkout
+ * refresh was stacking stays (3 → 9 → 12 nights) and inflating due.
  */
-export function resolveBusinessDayExtendedCheckout(
+export function resolveAutoExtendedCheckoutDate(
   currentCheckOut: Date,
+  now: Date,
+  graceTime: string,
   checkOutTime: string
 ): Date | null {
+  if (!isPastAutoExtensionCutoff(currentCheckOut, now, graceTime)) {
+    return null
+  }
+
   const target = applyHotelTimeToBookingInput(
     datePickerValue(addDays(startOfDay(currentCheckOut), 1)),
     checkOutTime
@@ -44,24 +67,12 @@ export function resolveBusinessDayExtendedCheckout(
 
 type ExtensionDb = Pick<PrismaClient, 'booking' | 'roomCharge'>
 
-export type StayExtensionResult = {
-  bookingId: string
-  registrationNumber: string | null
-  roomNumber: string
-  previousCheckOut: string
-  newCheckOut: string
-  nightsAdded: number
-}
-
-/**
- * Bill one extra night for a checked-in guest during business-day close.
- * Does not rewrite check-in; only advances check-out and room charges.
- */
-export async function extendCheckedInBookingForBusinessDayClose(
+export async function extendOverdueCheckedInBooking(
   db: ExtensionDb,
   bookingId: string,
-  closedBusinessDate: string
-): Promise<StayExtensionResult | null> {
+  now: Date = new Date(),
+  graceTime?: string
+): Promise<boolean> {
   const booking = await db.booking.findUnique({
     where: { id: bookingId },
     include: {
@@ -70,29 +81,32 @@ export async function extendCheckedInBookingForBusinessDayClose(
       charges: { select: { chargeType: true, amount: true, quantity: true } },
     },
   })
-  if (!booking || booking.status !== 'CHECKED_IN') return null
-
-  const currentCheckOut = new Date(booking.checkOut)
-  if (!isEligibleForBusinessDayStayExtension(currentCheckOut, closedBusinessDate)) {
-    return null
-  }
+  if (!booking || booking.status !== 'CHECKED_IN') return false
 
   const times = await getHotelCheckInOutTimes()
-  const checkOut = resolveBusinessDayExtendedCheckout(currentCheckOut, times.checkOutTime)
-  if (!checkOut) return null
+  const resolvedGrace = graceTime ?? (await getAutoNextDayBillTime())
+  const currentCheckOut = new Date(booking.checkOut)
+  const checkOut = resolveAutoExtendedCheckoutDate(
+    currentCheckOut,
+    now,
+    resolvedGrace,
+    times.checkOutTime
+  )
+  if (!checkOut) return false
 
   const nightlyRate = getRoomNightlyTotal(booking.room)
   const previousNights = countHotelStayNights(booking.checkIn, currentCheckOut)
   const nights = countHotelStayNights(booking.checkIn, checkOut)
   const extensions = Math.max(0, nights - previousNights)
-  if (extensions <= 0) return null
-  if (extensions > MAX_AUTO_EXTENSION_NIGHTS) return null
+  if (extensions <= 0) return false
+  // Hard stop if calendar math somehow jumps more than one night in a single run.
+  if (extensions > MAX_AUTO_EXTENSION_NIGHTS) return false
 
   const totalRoomCharge = nights * nightlyRate
   const totalPaid = sumBookingNetPaid(booking.payments)
-  const roomTotal = computeRoomBookingTotals(
+  const roomDue = computeRoomBookingTotals(
     totalRoomCharge,
-    0,
+    totalPaid,
     bookingVatOptions(booking),
     {
       discountEnabled: booking.discountEnabled === true,
@@ -103,21 +117,22 @@ export async function extendCheckedInBookingForBusinessDayClose(
       checkOut,
       totalRoomCharge,
     }
-  ).totalWithVat
+  ).dueAmount
+  // Keep bill-transfer placeholders and other posted extras in the stored due.
   const postedExtras = booking.charges
     .filter((c) => c.chargeType !== 'ROOM_RATE')
     .reduce((sum, c) => sum + c.amount * (c.quantity || 1), 0)
-  // Apply payments against the full folio (room after discount + extras), not room alone.
-  const dueAmount = Math.max(0, roomTotal + postedExtras - totalPaid)
-
-  const noteLine = `Auto next-day bill (+${extensions} night) on business day close ${closedBusinessDate}.`
+  const dueAmount = Math.max(0, roomDue + postedExtras)
 
   console.info(
-    `[auto-next-day-bill] day-close=${closedBusinessDate} booking=${bookingId} ` +
-      `reg=${booking.registrationNumber ?? '—'} room=${booking.room.roomNumber} ` +
-      `extended=${extensions} from=${currentCheckOut.toISOString()} to=${checkOut.toISOString()}`
+    `[auto-next-day-bill] booking=${bookingId} reg=${booking.registrationNumber ?? '—'} ` +
+      `grace=${resolvedGrace} (${formatTime12h(resolvedGrace)}) now=${now.toString()} ` +
+      `TZ=${process.env.TZ ?? 'system'} extended=${extensions} night(s) ` +
+      `from=${currentCheckOut.toString()} to=${checkOut.toString()}`
   )
 
+  // Folio ROOM_RATE rows must not disagree with the booking total — checkout
+  // used to prefer those rows and could keep showing a stale inflated charge.
   await db.roomCharge.deleteMany({
     where: { bookingId, chargeType: 'ROOM_RATE' },
   })
@@ -128,45 +143,30 @@ export async function extendCheckedInBookingForBusinessDayClose(
       checkOut,
       totalRoomCharge,
       dueAmount,
-      notes: booking.notes ? `${booking.notes}\n${noteLine}` : noteLine,
+      notes: booking.notes
+        ? `${booking.notes}\nAuto-extended ${extensions} night(s) after ${formatTime12h(resolvedGrace)} checkout grace.`
+        : `Auto-extended ${extensions} night(s) after ${formatTime12h(resolvedGrace)} checkout grace.`,
     },
   })
 
-  return {
-    bookingId,
-    registrationNumber: booking.registrationNumber,
-    roomNumber: booking.room.roomNumber,
-    previousCheckOut: currentCheckOut.toISOString(),
-    newCheckOut: checkOut.toISOString(),
-    nightsAdded: extensions,
-  }
+  return true
 }
 
-/**
- * Night audit: on closing business day D, add one night for every checked-in
- * guest whose reserved checkout is on or before D.
- */
-export async function processStayExtensionsOnBusinessDayClose(
+export async function processAllOverdueStayExtensions(
   db: ExtensionDb,
-  closedBusinessDate: string
-): Promise<{ extendedCount: number; extensions: StayExtensionResult[] }> {
+  now: Date = new Date()
+): Promise<number> {
+  const graceTime = await getAutoNextDayBillTime()
   const checkedIn = await db.booking.findMany({
     where: { status: 'CHECKED_IN' },
     select: { id: true, checkOut: true },
   })
 
-  const extensions: StayExtensionResult[] = []
+  let extended = 0
   for (const booking of checkedIn) {
-    if (!isEligibleForBusinessDayStayExtension(booking.checkOut, closedBusinessDate)) {
-      continue
-    }
-    const result = await extendCheckedInBookingForBusinessDayClose(
-      db,
-      booking.id,
-      closedBusinessDate
-    )
-    if (result) extensions.push(result)
+    if (!isPastAutoExtensionCutoff(booking.checkOut, now, graceTime)) continue
+    const didExtend = await extendOverdueCheckedInBooking(db, booking.id, now, graceTime)
+    if (didExtend) extended += 1
   }
-
-  return { extendedCount: extensions.length, extensions }
+  return extended
 }

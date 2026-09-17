@@ -22,14 +22,8 @@ export async function GET(request: NextRequest) {
     )
     if (authResult instanceof Response) return authResult
 
-    const [
-      hotelName,
-      vatPercent,
-      hotelTimes,
-      lateCheckout,
-      earlyCheckout,
-      businessDate,
-    ] = await Promise.all([
+    const [hotelName, vatPercent, hotelTimes, lateCheckout, earlyCheckout, businessDate] =
+      await Promise.all([
       getHotelName(),
       getHotelVatPercent(),
       getHotelCheckInOutTimes(),

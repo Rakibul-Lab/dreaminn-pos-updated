@@ -411,9 +411,13 @@ export function buildPoliceInHouseOnBusinessDayWhere(
         ],
       },
       {
-        // Police report shows only guests currently in house — checked out guests
-        // have left the property and should not appear regardless of timing.
-        status: 'CHECKED_IN',
+        OR: [
+          { status: 'CHECKED_IN' },
+          {
+            status: 'CHECKED_OUT',
+            actualCheckOut: { gt: closedAt },
+          },
+        ],
       },
     ],
   }

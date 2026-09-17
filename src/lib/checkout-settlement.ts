@@ -1,4 +1,4 @@
-import { computeHotelDiscountAmount, resolveBookingDiscount, taxableHotelAfterRoomDiscount } from '@/lib/booking-discount'
+import { computeHotelDiscountAmount, parseBookingDiscountType, taxableHotelAfterRoomDiscount } from '@/lib/booking-discount'
 import {
   bookingDiscountInput,
   bookingVatOptions,
@@ -209,11 +209,7 @@ export function computeCheckoutSettlement(
   const bookedRoomCharge = computeAdjustedRoomCharge(nightlyRate, bookedNights)
 
   const actualCheckIn = booking.actualCheckIn ?? booking.checkIn
-  const actualStayNights = countActualStayNights(
-    actualCheckIn,
-    asOf,
-    booking.checkIn
-  )
+  const actualStayNights = countActualStayNights(actualCheckIn, asOf)
 
   const individualRoomCharges = booking.charges
     .filter((c) => c.chargeType === 'ROOM_RATE')
@@ -273,21 +269,12 @@ export function computeCheckoutSettlement(
   const vatApplied = vatOpts.vatApplied !== false
   const hotelVatRate = vatApplied ? Math.max(0, vatOpts.vatPercent ?? 0) : 0
   // Discount applies to room charges only — never damage, late checkout, or other extras.
-  const resolvedDiscount = resolveBookingDiscount({
-    discountEnabled: params.discountEnabled === true,
-    discountType: params.discountType,
-    discountValue: Number(params.discountValue) || 0,
-    nights: chargeableNights,
-    checkIn: booking.checkIn,
-    checkOut: booking.checkOut,
-    totalRoomCharge: roomCharges,
-  })
   const discount = computeHotelDiscountAmount(
     roomCharges,
-    resolvedDiscount.enabled,
-    resolvedDiscount.type,
-    resolvedDiscount.value,
-    resolvedDiscount.nights
+    params.discountEnabled === true,
+    parseBookingDiscountType(params.discountType),
+    Number(params.discountValue) || 0,
+    chargeableNights
   )
   const taxableHotel = taxableHotelAfterRoomDiscount(roomCharges, discount, extraCharges)
   const hotelVat =

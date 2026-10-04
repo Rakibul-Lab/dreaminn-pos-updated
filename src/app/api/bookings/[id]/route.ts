@@ -4,12 +4,19 @@ import { requireHotelAccess, requireRole } from '@/lib/auth';
 import { successResponse, errorResponse, notFoundResponse, logActivity } from '@/lib/api-utils';
 import { ensureConfirmationNumber } from '@/lib/confirmation-number.server';
 import {
+  applyBookingPaymentToStoredDue,
   computeBookingRoomDue,
   resolveBookingDisplayDue,
   sumBookingFolioRestaurant,
   sumBookingPostedExtras,
 } from '@/lib/booking-totals';
-import { formatFormOfPayment, getAdvancePaymentMethod } from '@/lib/payment-method';
+import {
+  formatFormOfPayment,
+  getAdvancePaymentMethod,
+  isNonePaymentMethod,
+  parseReservationPaymentMethod,
+} from '@/lib/payment-method';
+import { resolveActiveBookingInvoiceId, syncInvoicePaymentTotals } from '@/lib/invoice-payments';
 import { RoleType } from '@prisma/client';
 import { resolveBookingCheckInOut } from '@/lib/app-settings';
 import { countBookedNights } from '@/lib/booking-stay';
@@ -32,7 +39,7 @@ import {
   ensureCompanyLedgerGuestFromCustomer,
   postCompanyLedgerBill,
 } from '@/lib/company-ledger-billing';
-import { readCurrentBusinessDateString } from '@/lib/business-date';
+import { readCurrentBusinessDateString, stampCurrentBusinessDate } from '@/lib/business-date';
 import { isArrivalOnOrBeforeBusinessDate } from '@/lib/room-effective-status';
 import { isolateBookingCustomer, reassignBookingPrimaryCustomer } from '@/lib/booking-customer-isolation';
 import { isValidPhone } from '@/lib/phone';
@@ -171,6 +178,21 @@ export async function PUT(
 
     if (existing.status !== 'RESERVED' && existing.status !== 'CHECKED_IN') {
       return errorResponse('Only active bookings (reserved or checked-in) can be edited');
+    }
+
+    const newPayments: Array<{ amount: number; method: ReturnType<typeof parseReservationPaymentMethod> }> = [];
+    if (Array.isArray(body.newPayments)) {
+      for (const row of body.newPayments as Array<{ amount?: unknown; method?: unknown }>) {
+        const amount = parseFloat(String(row?.amount ?? 0));
+        if (!Number.isFinite(amount) || amount <= 0) {
+          return errorResponse('Payment amount must be greater than 0');
+        }
+        const method = parseReservationPaymentMethod(row?.method);
+        if (isNonePaymentMethod(method)) {
+          return errorResponse('Select a form of payment for each payment');
+        }
+        newPayments.push({ amount: Number(amount.toFixed(2)), method });
+      }
     }
 
     const updateData: Record<string, unknown> = {};
@@ -745,6 +767,75 @@ export async function PUT(
       );
     }
 
+    // Money taken in the edit form is collected today, so it is stamped with the
+    // open business day and reported there. At checkout the invoice counts it as
+    // already paid, which keeps the stay from being billed a second time.
+    let recordedPaymentIds: string[] = [];
+    if (newPayments.length > 0) {
+      const businessDate = await stampCurrentBusinessDate();
+      const invoiceId = await resolveActiveBookingInvoiceId(db, id);
+      const inHouse = existing.status === 'CHECKED_IN';
+      const totalNew = newPayments.reduce((sum, line) => sum + line.amount, 0);
+
+      const created = await db.$transaction(
+        newPayments.map((line) =>
+          db.payment.create({
+            data: {
+              amount: line.amount,
+              method: line.method,
+              paymentType: inHouse ? 'PARTIAL' : 'ADVANCE',
+              businessDate,
+              bookingId: id,
+              invoiceId,
+              receivedBy: authResult.id,
+              notes: inHouse ? 'Payment added from booking edit' : 'Advance payment on reservation',
+            },
+            select: { id: true },
+          })
+        )
+      );
+      recordedPaymentIds = created.map((payment) => payment.id);
+
+      let dueAmount: number;
+      if (inHouse) {
+        dueAmount = applyBookingPaymentToStoredDue(booking.dueAmount ?? 0, totalNew);
+      } else {
+        const fresh = await db.booking.findUnique({
+          where: { id },
+          include: {
+            payments: { select: { amount: true, paymentType: true } },
+            invoices: {
+              where: { status: { not: 'CANCELLED' } },
+              orderBy: { createdAt: 'desc' },
+              take: 1,
+              select: { dueAmount: true, status: true },
+            },
+          },
+        });
+        dueAmount = fresh
+          ? resolveBookingDisplayDue(fresh, fresh.payments, fresh.invoices[0] ?? null)
+          : Math.max(0, (booking.dueAmount ?? 0) - totalNew);
+      }
+
+      await db.booking.update({
+        where: { id },
+        data: {
+          dueAmount,
+          ...(inHouse ? {} : { advancePayment: { increment: totalNew } }),
+        },
+      });
+
+      if (invoiceId) {
+        const synced = await syncInvoicePaymentTotals(db, invoiceId);
+        if (synced) {
+          await db.booking.update({
+            where: { id: synced.bookingId },
+            data: { dueAmount: synced.dueAmount },
+          });
+        }
+      }
+    }
+
     // Attaching a ledger to an existing stay has to reach the ledger straight away,
     // the way a converted reservation entry does. Re-posting is safe: the bill is
     // keyed on the booking and checkout later refreshes it with final amounts.
@@ -790,7 +881,7 @@ export async function PUT(
     }
 
     const bookingWithCompanions =
-      body.companions !== undefined
+      body.companions !== undefined || recordedPaymentIds.length > 0
         ? await db.booking.findUnique({
             where: { id },
             include: {
@@ -809,7 +900,26 @@ export async function PUT(
       JSON.stringify({ bookingId: id, changes: updateData })
     );
 
-    return successResponse(bookingWithCompanions, 'Booking updated successfully');
+    if (recordedPaymentIds.length > 0) {
+      await logActivity(
+        authResult.id,
+        'PAYMENT_CREATED',
+        'billing',
+        JSON.stringify({
+          bookingId: id,
+          paymentIds: recordedPaymentIds,
+          amount: newPayments.reduce((sum, line) => sum + line.amount, 0),
+          source: 'booking-edit',
+        })
+      );
+    }
+
+    return successResponse(
+      bookingWithCompanions,
+      recordedPaymentIds.length > 0
+        ? 'Booking updated and payment recorded'
+        : 'Booking updated successfully'
+    );
   } catch (error) {
     console.error('Booking update error:', error);
     return errorResponse('Failed to update booking', 500);

@@ -1298,6 +1298,9 @@ export function NewReservationWizard({
       queryClient.invalidateQueries({ queryKey: ['reservation-document', bookingId] })
       queryClient.invalidateQueries({ queryKey: ['company-ledger-options'] })
       queryClient.invalidateQueries({ queryKey: ['company-ledger'] })
+      queryClient.invalidateQueries({ queryKey: ['payments'] })
+      queryClient.invalidateQueries({ queryKey: ['daily-sales-report'] })
+      queryClient.invalidateQueries({ queryKey: ['sales-report'] })
 
     const messages: Record<typeof kind, string> = {
       initial: 'Initial reservation saved — complete ID details later from bookings',
@@ -1397,6 +1400,14 @@ export function NewReservationWizard({
           editPayload.isInitialReservation = completeInitial ? false : true
         } else if (completeInitial) {
           editPayload.isInitialReservation = false
+        }
+
+        const newPaymentLines = paymentLines.filter((line) => !line.id.startsWith('edit-'))
+        if (newPaymentLines.length > 0) {
+          editPayload.newPayments = newPaymentLines.map((line) => ({
+            amount: line.amount,
+            method: line.method,
+          }))
         }
 
         const res = (await api.put(`/bookings/${editBookingId}`, editPayload)) as {

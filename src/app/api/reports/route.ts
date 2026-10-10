@@ -20,6 +20,7 @@ import {
 } from '@/lib/hotel-pms-reports';
 import { buildHotelDiscountReportForDateRange } from '@/lib/hotel-daily-discount-report';
 import { buildHotelPoliceReport, buildHotelPoliceReportForDateRange } from '@/lib/hotel-police-report';
+import { buildMonthlyBusinessDaySalesReport } from '@/lib/daily-sales-report';
 
 function buildReportDateFilter(startDate: string | null, endDate: string | null): Record<string, unknown> {
   const dateFilter: Record<string, unknown> = {};
@@ -661,8 +662,18 @@ async function handleHotelDailySales(
   if (!canAccessHotel(user.role as 'ADMIN' | 'HOTEL_STAFF' | 'RESTAURANT_STAFF')) {
     return errorResponse('Access denied. HOTEL_STAFF or ADMIN only.', 403);
   }
-  const rangeWindow = resolveDateRangeReportWindow({ dateFrom: dateFromParam, dateTo: dateToParam });
-  const window = rangeWindow ?? await resolveBusinessDayReportWindow(businessDateParam);
+  if (dateFromParam || dateToParam) {
+    const dateFrom = (dateFromParam || businessDateParam || '').trim();
+    const dateTo = (dateToParam || businessDateParam || dateFrom).trim();
+    const monthlyReport = await buildMonthlyBusinessDaySalesReport(dateFrom, dateTo);
+    const rangeWindow = resolveDateRangeReportWindow({ dateFrom, dateTo });
+    const report = await buildHotelDailySalesReport(rangeWindow!);
+    return successResponse({
+      ...report,
+      monthlyReport,
+    });
+  }
+  const window = await resolveBusinessDayReportWindow(businessDateParam);
   const report = await buildHotelDailySalesReport(window);
   return successResponse(report);
 }

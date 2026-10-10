@@ -5,6 +5,7 @@ import { formatBusinessDateDisplay } from './business-date-format'
 import { HOTEL_NAME } from './reservation-terms'
 import { getLogoDataUrl } from './reservation-document-html'
 import { formatBdtForPdf } from './currency'
+import type { MonthlyBusinessDayReportData } from './daily-sales-report'
 import {
   PAPER_SALES_HEADERS,
   buildPaperSalesLines,
@@ -72,6 +73,7 @@ export type BusinessDayExportMeta = {
 }
 
 export type SalesReportData = {
+  monthlyReport?: MonthlyBusinessDayReportData
   businessDate: string
   businessDateDisplay?: string
   openingBalance?: number
@@ -342,6 +344,9 @@ async function writeDailySalesExcel(
   data: SalesReportData,
   meta: Omit<BusinessDayExportMeta, 'tab'>
 ): Promise<void> {
+  if (data.monthlyReport) {
+    return writeMonthlyBusinessDayExcel(data.monthlyReport, meta)
+  }
   const workbook = new ExcelJS.Workbook()
   const sheet = workbook.addWorksheet('Daily Sales')
   const logo = await loadExportLogo()
@@ -527,6 +532,9 @@ async function writeDailySalesPdf(
   data: SalesReportData,
   meta: Omit<BusinessDayExportMeta, 'tab'>
 ): Promise<void> {
+  if (data.monthlyReport) {
+    return writeMonthlyBusinessDayPdf(data.monthlyReport, meta)
+  }
   const logo = await loadExportLogo()
   const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait', compress: true })
   const pageWidth = pdf.internal.pageSize.getWidth()
@@ -538,7 +546,7 @@ async function writeDailySalesPdf(
   const paperLines = buildPaperSalesLines(data.lines)
   const totals = computePaperTotals(paperLines)
   const summary = buildPaperSummary(data)
-  const dateLabel = formatPaperDate(meta.businessDate, meta.businessDateDisplay)
+  const dateLabel = formatPaperDate(meta.businessDate, meta.businessDateDisplay).replace(/→|->/g, 'to')
 
   const mainColWidths = [14, 16, 22, 16, 14, 18, 18, 22, 24]
   const mainTableWidth = mainColWidths.reduce((s, w) => s + w, 0)
@@ -1774,3 +1782,307 @@ export async function downloadBusinessDayPolicePdf(
     meta
   )
 }
+
+function formatExportAmount(val: number): string {
+  if (!Number.isFinite(val) || val === 0) return '0'
+  return val.toLocaleString('en-US', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  })
+}
+
+async function writeMonthlyBusinessDayExcel(
+  monthlyData: MonthlyBusinessDayReportData,
+  meta: Omit<BusinessDayExportMeta, 'tab'>
+): Promise<void> {
+  const workbook = new ExcelJS.Workbook()
+  const sheet = workbook.addWorksheet('Monthly Business Day Report')
+  const logo = await loadExportLogo()
+  const { days = [], totals } = monthlyData
+
+  const dateLabel = meta.businessDateDisplay ?? `${monthlyData.dateFrom} to ${monthlyData.dateTo}`
+
+  sheet.getColumn(1).width = 14
+  sheet.getColumn(2).width = 14
+  sheet.getColumn(3).width = 14
+  sheet.getColumn(4).width = 16
+  sheet.getColumn(5).width = 16
+  sheet.getColumn(6).width = 14
+  sheet.getColumn(7).width = 14
+  sheet.getColumn(8).width = 16
+
+  let row = 1
+  sheet.getCell(row, 1).value = `Period: ${dateLabel}`
+  sheet.getCell(row, 1).font = { bold: true }
+
+  if (logo) {
+    const imageId = workbook.addImage({ base64: logo.base64, extension: 'png' })
+    sheet.addImage(imageId, {
+      tl: { col: 3.2, row: 0.15 },
+      ext: { width: 36, height: 36 },
+    })
+  }
+
+  sheet.mergeCells(1, 3, 1, 7)
+  const hotelCell = sheet.getCell(1, 3)
+  hotelCell.value = HOTEL_NAME
+  hotelCell.font = { bold: true, size: 13 }
+  hotelCell.alignment = { horizontal: 'center', vertical: 'middle' }
+
+  sheet.mergeCells(2, 3, 2, 7)
+  const titleCell = sheet.getCell(2, 3)
+  titleCell.value = 'Monthly Business Day Sales Report'
+  titleCell.font = { bold: true, size: 14 }
+  titleCell.alignment = { horizontal: 'center', vertical: 'middle' }
+
+  row = 4
+  const headers = ['Date', 'Cash', 'Card', 'Bank Payment', 'M.Finance', 'Due', 'Food Bill', 'Total']
+  headers.forEach((header, index) => {
+    const cell = sheet.getCell(row, index + 1)
+    cell.value = header
+    cell.font = { bold: true }
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: EXCEL_HEADER_FILL }
+    cell.alignment = { horizontal: index === 0 ? 'center' : 'right', wrapText: true }
+    setExcelBorder(cell)
+  })
+
+  row += 1
+  if (days.length) {
+    for (const d of days) {
+      const vals = [
+        d.formattedDate,
+        d.cash,
+        d.card,
+        d.bankPayment,
+        d.mFinance,
+        d.due,
+        d.foodBill,
+        d.total,
+      ]
+      vals.forEach((val, idx) => {
+        const cell = sheet.getCell(row, idx + 1)
+        cell.value = val
+        if (idx >= 1) cell.numFmt = '#,##0.00'
+        cell.alignment = { horizontal: idx === 0 ? 'center' : 'right' }
+        setExcelBorder(cell)
+      })
+      row += 1
+    }
+  }
+
+  const totalVals = [
+    'Total=',
+    totals?.cash ?? 0,
+    totals?.card ?? 0,
+    totals?.bankPayment ?? 0,
+    totals?.mFinance ?? 0,
+    totals?.due ?? 0,
+    totals?.foodBill ?? 0,
+    totals?.totalSales ?? 0,
+  ]
+  totalVals.forEach((val, idx) => {
+    const cell = sheet.getCell(row, idx + 1)
+    cell.value = val
+    cell.font = { bold: true }
+    if (idx >= 1) cell.numFmt = '#,##0.00'
+    cell.alignment = { horizontal: idx === 0 ? 'left' : 'right' }
+    setExcelBorder(cell)
+  })
+
+  row += 2
+  sheet.getCell(row, 7).value = 'Total Sales'
+  sheet.getCell(row, 7).font = { bold: true }
+  sheet.getCell(row, 8).value = totals?.totalSales ?? 0
+  sheet.getCell(row, 8).numFmt = '#,##0.00'
+  sheet.getCell(row, 8).font = { bold: true }
+
+  row += 1
+  sheet.getCell(row, 7).value = 'Company Due'
+  sheet.getCell(row, 7).font = { bold: true }
+  sheet.getCell(row, 8).value = totals?.companyDue ?? 0
+  sheet.getCell(row, 8).numFmt = '#,##0.00'
+  sheet.getCell(row, 8).font = { bold: true }
+
+  row += 1
+  sheet.getCell(row, 7).value = '='
+  sheet.getCell(row, 7).font = { bold: true, size: 12 }
+  sheet.getCell(row, 8).value = totals?.netSales ?? 0
+  sheet.getCell(row, 8).numFmt = '#,##0.00'
+  sheet.getCell(row, 8).font = { bold: true, size: 12 }
+
+  const buffer = await workbook.xlsx.writeBuffer()
+  triggerBrowserDownload(
+    new Blob([buffer], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    }),
+    fileName('sales', meta.businessDate, 'xlsx')
+  )
+}
+
+async function writeMonthlyBusinessDayPdf(
+  monthlyData: MonthlyBusinessDayReportData,
+  meta: Omit<BusinessDayExportMeta, 'tab'>
+): Promise<void> {
+  const logo = await loadExportLogo()
+  const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait', compress: true })
+  const pageWidth = pdf.internal.pageSize.getWidth()
+  const pageHeight = pdf.internal.pageSize.getHeight()
+  const marginX = 10
+  const marginTop = 10
+  let y = marginTop
+
+  const { days = [], totals } = monthlyData
+  const rawDateLabel = meta.businessDateDisplay ?? monthlyData.businessDateDisplay ?? `${monthlyData.dateFrom} to ${monthlyData.dateTo}`
+  const dateLabel = rawDateLabel.replace(/→|->/g, 'to')
+
+  const headers = ['Date', 'Cash', 'Card', 'Bank Payment', 'M.Finance', 'Due', 'Food Bill', 'Total']
+  const colWidths = [22, 24, 24, 26, 26, 22, 22, 24]
+  const tableWidth = colWidths.reduce((s, w) => s + w, 0)
+  const startX = (pageWidth - tableWidth) / 2
+
+  const title = HOTEL_NAME
+  const subTitle = 'Monthly Business Day Sales Report'
+
+  pdf.setFont('helvetica', 'bold')
+  pdf.setFontSize(14)
+  const titleWidth = pdf.getTextWidth(title)
+
+  pdf.setFontSize(12)
+  const subWidth = pdf.getTextWidth(subTitle)
+
+  const maxTextWidth = Math.max(titleWidth, subWidth)
+  const logoSize = 12
+
+  if (logo) {
+    const logoX = Math.max(marginX, (pageWidth - maxTextWidth) / 2 - logoSize - 4)
+    pdf.addImage(logo.dataUrl, 'PNG', logoX, y, logoSize, logoSize)
+  }
+
+  pdf.setFont('helvetica', 'bold')
+  pdf.setFontSize(14)
+  pdf.text(title, pageWidth / 2, y + 4, { align: 'center' })
+
+  pdf.setFontSize(12)
+  pdf.text(subTitle, pageWidth / 2, y + 10, { align: 'center' })
+  y += 16
+
+  pdf.setFont('helvetica', 'normal')
+  pdf.setFontSize(9)
+  const periodText = `Period: ${dateLabel}`
+  const periodWidth = pdf.getTextWidth(periodText)
+  pdf.text(periodText, (pageWidth - periodWidth) / 2, y)
+  y += 8
+
+  const drawTableHeader = () => {
+    pdf.setFillColor(235, 235, 235)
+    pdf.rect(startX, y, tableWidth, 7, 'F')
+    pdf.setFont('helvetica', 'bold')
+    pdf.setFontSize(7.5)
+    let x = startX
+    headers.forEach((header, i) => {
+      pdf.rect(x, y, colWidths[i]!, 7)
+      if (i === 0) pdf.text(header, x + colWidths[i]! / 2, y + 4.5, { align: 'center' })
+      else pdf.text(header, x + colWidths[i]! - 1.5, y + 4.5, { align: 'right' })
+      x += colWidths[i]!
+    })
+    y += 7
+  }
+
+  drawTableHeader()
+
+  pdf.setFont('helvetica', 'normal')
+  pdf.setFontSize(7.5)
+
+  for (const day of days) {
+    if (y > pageHeight - 25) {
+      pdf.addPage()
+      y = marginTop
+      drawTableHeader()
+      pdf.setFont('helvetica', 'normal')
+      pdf.setFontSize(7.5)
+    }
+
+    const rowVals = [
+      day.formattedDate,
+      formatExportAmount(day.cash),
+      formatExportAmount(day.card),
+      formatExportAmount(day.bankPayment),
+      formatExportAmount(day.mFinance),
+      formatExportAmount(day.due),
+      formatExportAmount(day.foodBill),
+      formatExportAmount(day.total),
+    ]
+
+    let x = startX
+    rowVals.forEach((text, i) => {
+      pdf.rect(x, y, colWidths[i]!, 5.5)
+      if (i === 0) {
+        pdf.text(text, x + colWidths[i]! / 2, y + 3.8, { align: 'center' })
+      } else {
+        if (i === 7) pdf.setFont('helvetica', 'bold')
+        pdf.text(text, x + colWidths[i]! - 1.5, y + 3.8, { align: 'right' })
+        if (i === 7) pdf.setFont('helvetica', 'normal')
+      }
+      x += colWidths[i]!
+    })
+    y += 5.5
+  }
+
+  if (y > pageHeight - 25) {
+    pdf.addPage()
+    y = marginTop
+    drawTableHeader()
+  }
+
+  const totalsVals = [
+    'Total=',
+    formatExportAmount(totals?.cash ?? 0),
+    formatExportAmount(totals?.card ?? 0),
+    formatExportAmount(totals?.bankPayment ?? 0),
+    formatExportAmount(totals?.mFinance ?? 0),
+    formatExportAmount(totals?.due ?? 0),
+    formatExportAmount(totals?.foodBill ?? 0),
+    formatExportAmount(totals?.totalSales ?? 0),
+  ]
+
+  pdf.setFillColor(245, 245, 245)
+  pdf.rect(startX, y, tableWidth, 6, 'F')
+  pdf.setFont('helvetica', 'bold')
+  pdf.setFontSize(8)
+
+  let x = startX
+  totalsVals.forEach((text, i) => {
+    pdf.rect(x, y, colWidths[i]!, 6)
+    if (i === 0) pdf.text(text, x + 2, y + 4.2)
+    else pdf.text(text, x + colWidths[i]! - 1.5, y + 4.2, { align: 'right' })
+    x += colWidths[i]!
+  })
+  y += 10
+
+  if (y > pageHeight - 25) {
+    pdf.addPage()
+    y = marginTop
+  }
+
+  const summaryX = startX + tableWidth - 60
+  pdf.setFontSize(8.5)
+  pdf.setFont('helvetica', 'bold')
+
+  pdf.text('Total Sales', summaryX, y)
+  pdf.text(formatExportAmount(totals?.totalSales ?? 0), startX + tableWidth - 1.5, y, { align: 'right' })
+  y += 5.5
+
+  pdf.text('Company Due', summaryX, y)
+  pdf.text(formatExportAmount(totals?.companyDue ?? 0), startX + tableWidth - 1.5, y, { align: 'right' })
+  y += 2
+
+  pdf.line(summaryX, y, startX + tableWidth, y)
+  y += 5.5
+
+  pdf.setFontSize(10)
+  pdf.text('=', summaryX, y)
+  pdf.text(formatExportAmount(totals?.netSales ?? 0), startX + tableWidth - 1.5, y, { align: 'right' })
+
+  pdf.save(fileName('sales', meta.businessDate, 'pdf'))
+}
+

@@ -52,6 +52,7 @@ import {
   type SalesReportData,
 } from '@/lib/business-day-reports-export'
 import { DailySalesPaperView } from '@/components/erp/admin/DailySalesPaperView'
+import { MonthlyBusinessDayPaperView } from '@/components/erp/admin/MonthlyBusinessDayPaperView'
 import type { PaperSalesInput } from '@/lib/daily-sales-paper-format'
 import { BusinessDaySummarySection } from '@/components/erp/admin/BusinessDaySummarySection'
 import {
@@ -91,12 +92,14 @@ type ReportResponse = {
   data?: Record<string, unknown>
 }
 
-type BusinessDatePreset = 'today' | 'yesterday' | 'custom' | 'closed'
+type BusinessDatePreset = 'today' | 'yesterday' | 'this_month' | 'last_month' | 'custom' | 'closed'
 type ReportDateMode = 'single' | 'range'
 
 const DATE_PRESET_OPTIONS: { value: BusinessDatePreset; label: string }[] = [
   { value: 'today', label: 'Business today' },
   { value: 'yesterday', label: 'Yesterday' },
+  { value: 'this_month', label: 'This month' },
+  { value: 'last_month', label: 'Last month' },
   { value: 'custom', label: 'Pick a date' },
   { value: 'closed', label: 'Closed business day' },
 ]
@@ -544,7 +547,27 @@ export default function BusinessDayReportsPage() {
             <Label>Date option</Label>
             <Select
               value={datePreset}
-              onValueChange={(v) => setDatePreset(v as BusinessDatePreset)}
+              onValueChange={(v) => {
+                const preset = v as BusinessDatePreset
+                setDatePreset(preset)
+                if (preset === 'this_month') {
+                  const now = new Date()
+                  const first = new Date(now.getFullYear(), now.getMonth(), 1)
+                  const last = new Date(now.getFullYear(), now.getMonth() + 1, 0)
+                  setRangeDateFrom(format(first, 'yyyy-MM-dd'))
+                  setRangeDateTo(format(last, 'yyyy-MM-dd'))
+                  setDateMode('range')
+                } else if (preset === 'last_month') {
+                  const now = new Date()
+                  const first = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+                  const last = new Date(now.getFullYear(), now.getMonth(), 0)
+                  setRangeDateFrom(format(first, 'yyyy-MM-dd'))
+                  setRangeDateTo(format(last, 'yyyy-MM-dd'))
+                  setDateMode('range')
+                } else {
+                  setDateMode('single')
+                }
+              }}
             >
               <SelectTrigger>
                 <SelectValue />
@@ -723,6 +746,8 @@ export default function BusinessDayReportsPage() {
           <TabsContent value="sales" className="space-y-4 mt-4">
             {loadingSales ? (
               <Skeleton className="h-[520px] w-full" />
+            ) : salesData?.monthlyReport ? (
+              <MonthlyBusinessDayPaperView data={salesData.monthlyReport} />
             ) : salesData ? (
               <DailySalesPaperView
                 data={{

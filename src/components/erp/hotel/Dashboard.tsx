@@ -16,7 +16,7 @@ import {
   SprayCan,
   TrendingUp,
   Users,
-  UserCheck,
+  Baby,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { openNewReservationTab } from '@/lib/reservation-navigation';
@@ -58,11 +58,15 @@ interface DashboardData {
   };
   guestStats?: {
     inHousePax: number;
+    inHouseAdults?: number;
+    inHouseChildren?: number;
     inHouseRooms: number;
-    businessDayPax: number;
-    businessDayRooms: number;
+    businessDayPax?: number;
+    businessDayRooms?: number;
   };
   inHousePax?: number;
+  inHouseChildren?: number;
+  inHouseAdults?: number;
   businessDayPax?: number;
   checkIns?: { count: number; items: any[]; expectedArrivals?: number };
   checkOuts?: { count: number; items: any[] };
@@ -160,9 +164,8 @@ function HotelAdminDashboard({
   const checkIns = data.checkIns || data.arrivals;
   const checkOuts = data.checkOuts || data.departures;
   const inHousePax = data.guestStats?.inHousePax ?? data.inHousePax ?? 0;
+  const inHouseChildren = data.guestStats?.inHouseChildren ?? data.inHouseChildren ?? 0;
   const inHouseRooms = data.guestStats?.inHouseRooms ?? 0;
-  const businessDayPax = data.guestStats?.businessDayPax ?? data.businessDayPax ?? 0;
-  const businessDayRooms = data.guestStats?.businessDayRooms ?? 0;
 
   // Until permissions load, show full dashboard for existing roles (avoids flash of empty).
   const allow = (key: string) =>
@@ -276,10 +279,10 @@ function HotelAdminDashboard({
               color="blue"
             />
             <StatCard
-              title="Business Day Guests"
-              value={`${businessDayPax} Pax`}
-              subtitle={`${businessDayRooms} booking${businessDayRooms === 1 ? '' : 's'} • Cumulative today`}
-              icon={<UserCheck className="w-5 h-5" />}
+              title="In-House Children"
+              value={`${inHouseChildren} ${inHouseChildren === 1 ? 'Child' : 'Children'}`}
+              subtitle="Real-time live count"
+              icon={<Baby className="w-5 h-5" />}
               color="purple"
             />
             {showArrivalCards && (

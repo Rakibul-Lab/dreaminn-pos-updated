@@ -271,7 +271,7 @@ export default function BusinessDayReportsPage() {
   const arrivalsData = arrivalsRes?.data
   const departuresData = departuresRes?.data
   const policeData = policeRes?.data as PoliceReportData | undefined
-  const policeGuests = policeData?.guests ?? []
+  const policeGuests = (policeData?.guests ?? []).filter((g) => g.guestRole !== 'child')
 
   const [policeSearchInput, setPoliceSearchInput] = useState('')
   const [policeSearchQuery, setPoliceSearchQuery] = useState('')
@@ -1420,26 +1420,37 @@ export default function BusinessDayReportsPage() {
           </TabsContent>
 
           <TabsContent value="police" className="space-y-4 mt-4 min-w-0 max-w-full">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <Card>
                 <CardContent className="p-4">
-                  <p className="text-sm text-muted-foreground">In-house bookings</p>
+                  <p className="text-sm text-muted-foreground">In-house rooms</p>
                   <p className="text-2xl font-bold text-slate-800">
                     {policeData?.totalCheckIns ?? 0}
                   </p>
                   <p className="text-xs text-muted-foreground mt-1">
-                    Bookings with guests in-house on the selected day(s)
+                    Rooms with guests in-house on the selected day(s)
                   </p>
                 </CardContent>
               </Card>
               <Card>
                 <CardContent className="p-4">
-                  <p className="text-sm text-muted-foreground">Guests listed</p>
+                  <p className="text-sm text-muted-foreground">Adults in-house</p>
                   <p className="text-2xl font-bold text-slate-800">
-                    {policeData?.guestCount ?? policeGuests.length}
+                    {policeData?.adultCount ?? policeGuests.length}
                   </p>
                   <p className="text-xs text-muted-foreground mt-1">
-                    Primary guests, companions, and children listed
+                    Primary guests and adult companions listed below
+                  </p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="p-4">
+                  <p className="text-sm text-muted-foreground">Children in-house</p>
+                  <p className="text-2xl font-bold text-purple-700">
+                    {policeData?.childCount ?? 0}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Children hosted in-house (not listed in police rows)
                   </p>
                 </CardContent>
               </Card>
@@ -1451,9 +1462,8 @@ export default function BusinessDayReportsPage() {
                   <div>
                     <CardTitle className="text-base">Police register — guests in-house</CardTitle>
                     <p className="text-sm text-muted-foreground font-normal">
-                      For law-enforcement reporting. Guests in-house at the end of{' '}
-                      <span className="font-medium text-foreground">{policeDateDisplay}</span>. Guests
-                      who checked out during the day are removed from that day onward.
+                      Guests in-house ({policeData?.totalCheckIns ?? 0} room(s), total {(policeData?.adultCount ?? policeGuests.length) + (policeData?.childCount ?? 0)} guest(s), {policeData?.adultCount ?? policeGuests.length} adult(s), {policeData?.childCount ?? 0} Child(s)) • For law-enforcement reporting on{' '}
+                      <span className="font-medium text-foreground">{policeDateDisplay}</span>.
                     </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">

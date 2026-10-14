@@ -8,7 +8,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from 'recharts'
 import {
-  LayoutDashboard, BedDouble, Users, UserCheck, Activity,
+  LayoutDashboard, BedDouble, Users, Baby, Activity,
   Database, ScrollText, AlertTriangle, TrendingUp, ArrowUpRight, CalendarCheck, ShieldCheck
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -63,11 +63,10 @@ export default function AdminDashboard({
   const recentActivities = d.recentActivities as Array<Record<string, unknown>> | undefined
   const checkIns = d.checkIns as { count: number; items: Array<Record<string, unknown>> } | undefined
   const checkOuts = d.checkOuts as { count: number; items: Array<Record<string, unknown>> } | undefined
-  const guestStats = d.guestStats as { inHousePax?: number; inHouseRooms?: number; businessDayPax?: number; businessDayRooms?: number } | undefined
+  const guestStats = d.guestStats as { inHousePax?: number; inHouseAdults?: number; inHouseChildren?: number; inHouseRooms?: number; businessDayPax?: number; businessDayRooms?: number } | undefined
   const inHousePax = guestStats?.inHousePax ?? (d.inHousePax as number) ?? 0
+  const inHouseChildren = guestStats?.inHouseChildren ?? (d.inHouseChildren as number) ?? 0
   const inHouseRooms = guestStats?.inHouseRooms ?? 0
-  const businessDayPax = guestStats?.businessDayPax ?? (d.businessDayPax as number) ?? 0
-  const businessDayRooms = guestStats?.businessDayRooms ?? 0
 
   const revenueByDay = charts?.revenueByDay || []
   const chartData = revenueByDay.map((d) => ({
@@ -137,12 +136,14 @@ export default function AdminDashboard({
             <Card className="border-l-4 border-l-purple-500">
               <CardContent className="p-4 flex items-center gap-4">
                 <div className="p-3 rounded-lg bg-purple-50 dark:bg-purple-950/50">
-                  <UserCheck className="h-6 w-6 text-purple-600 dark:text-purple-400" />
+                  <Baby className="h-6 w-6 text-purple-600 dark:text-purple-400" />
                 </div>
                 <div>
-                  <p className="text-sm text-muted-foreground">Business Day Guests</p>
-                  <p className="text-2xl font-bold text-purple-700 dark:text-purple-400">{businessDayPax} Pax</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">{businessDayRooms} booking{businessDayRooms === 1 ? '' : 's'} • Cumulative today</p>
+                  <p className="text-sm text-muted-foreground">In-House Children</p>
+                  <p className="text-2xl font-bold text-purple-700 dark:text-purple-400">
+                    {inHouseChildren} {inHouseChildren === 1 ? 'Child' : 'Children'}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Real-time live count</p>
                 </div>
               </CardContent>
             </Card>

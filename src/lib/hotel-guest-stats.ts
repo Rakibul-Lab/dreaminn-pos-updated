@@ -3,6 +3,8 @@ import { getCalendarDayBounds } from '@/lib/business-date'
 
 export type GuestPaxStats = {
   inHousePax: number
+  inHouseAdults: number
+  inHouseChildren: number
   inHouseRooms: number
   businessDayPax: number
   businessDayRooms: number
@@ -29,11 +31,24 @@ export function calculateBookingPax(booking: {
 }
 
 /**
+ * Calculates child count for a single booking:
+ * Max of child companions and declared children count.
+ */
+export function calculateBookingChildren(booking: {
+  children?: number | null
+  companions?: Array<{ companionType: string }>
+}): number {
+  const companions = booking.companions ?? []
+  const childCompanions = companions.filter((c) => c.companionType === 'CHILD').length
+  const children = Math.max(0, booking.children ?? 0)
+  return Math.max(childCompanions, children)
+}
+
+/**
  * Computes:
- * 1. Current In-House Guest Pax: Real-time count of all guests currently in-house (CHECKED_IN).
- *    Decreases immediately when a guest checks out.
+ * 1. Current In-House Guest Pax & Children: Real-time count of all guests and children currently in-house (CHECKED_IN).
+ *    Increases on check-in and decreases immediately when a guest checks out.
  * 2. Current Business Day Guest Pax: Cumulative count of all guests hosted during the current business day.
- *    Counts check-ins during the business day + active multi-day stays, and does NOT decrease upon check-out.
  */
 export async function computeDashboardGuestStats(
   businessDate: string,
@@ -59,8 +74,21 @@ export async function computeDashboardGuestStats(
   })
 
   let inHousePax = 0
+  let inHouseAdults = 0
+  let inHouseChildren = 0
   for (const b of liveInHouseBookings) {
-    inHousePax += calculateBookingPax(b)
+    const companions = b.companions ?? []
+    const adultCompanions = companions.filter((c) => c.companionType !== 'CHILD').length
+    const childCompanions = companions.filter((c) => c.companionType === 'CHILD').length
+    const adults = Math.max(1, b.adults ?? 1)
+    const children = Math.max(0, b.children ?? 0)
+
+    const adultPax = 1 + Math.max(adultCompanions, adults - 1)
+    const childPax = Math.max(childCompanions, children)
+
+    inHouseAdults += adultPax
+    inHouseChildren += childPax
+    inHousePax += (adultPax + childPax)
   }
 
   // 2. Current Business Day Guests: all bookings hosted on today's business day.
@@ -114,6 +142,8 @@ export async function computeDashboardGuestStats(
 
   return {
     inHousePax,
+    inHouseAdults,
+    inHouseChildren,
     inHouseRooms: liveInHouseBookings.length,
     businessDayPax,
     businessDayRooms: Math.max(businessDayBookings.length, liveInHouseBookings.length),

@@ -214,6 +214,8 @@ async function handleAdminDashboard() {
     inHouseGuests: { count: inHouseGuestCount, items: inHouseGuests },
     guestStats,
     inHousePax: guestStats.inHousePax,
+    inHouseChildren: guestStats.inHouseChildren,
+    inHouseAdults: guestStats.inHouseAdults,
     businessDayPax: guestStats.businessDayPax,
     rooms: {
       total: totalRooms,
@@ -375,6 +377,8 @@ async function handleHotelDashboard(role: 'HOTEL_STAFF' | 'HOTEL_FD') {
     inHouseGuests: { count: inHouseGuestCount, items: inHouseGuests },
     guestStats,
     inHousePax: guestStats.inHousePax,
+    inHouseChildren: guestStats.inHouseChildren,
+    inHouseAdults: guestStats.inHouseAdults,
     businessDayPax: guestStats.businessDayPax,
     activeBookings: { count: activeBookings.length, items: activeBookings },
     roomServiceOrders: recentRoomOrders,

@@ -47,6 +47,8 @@ export type PoliceReportData = {
   dateTo?: string
   totalCheckIns?: number
   guestCount?: number
+  adultCount?: number
+  childCount?: number
   guests?: Array<{
     id?: string
     guestName?: string
@@ -1831,16 +1833,26 @@ function policePdfColumns(includeBusinessDate: boolean): PdfColumn[] {
   return columns
 }
 
+export function formatPoliceInHouseSummary(data: PoliceReportData, fallbackAdultCount: number): string {
+  const roomsCount = data.totalCheckIns ?? 0
+  const adultsCount = data.adultCount ?? fallbackAdultCount
+  const childCount = data.childCount ?? 0
+  const totalGuests = adultsCount + childCount
+
+  return `Guests in-house (${roomsCount} room(s), total ${totalGuests} guest(s), ${adultsCount} adult(s), ${childCount} Child(s))`
+}
+
 export async function downloadBusinessDayPoliceExcel(
   data: PoliceReportData,
   meta: Omit<BusinessDayExportMeta, 'tab'>
 ): Promise<void> {
-  const guests = data.guests ?? []
+  const guests = (data.guests ?? []).filter((g) => g.guestRole !== 'child')
   const includeBusinessDate = isPoliceReportDateRange(data)
+  const heading = formatPoliceInHouseSummary(data, guests.length)
   await writeInHouseBookingExcelWorkbook(
     [
       {
-        heading: `Guests in-house (${data.totalCheckIns ?? 0} booking(s), ${data.guestCount ?? guests.length} guest(s))`,
+        heading,
         rows: guests.map((guest, idx) => mapPoliceGuestRow(guest, includeBusinessDate, idx + 1)),
       },
     ],
@@ -1852,13 +1864,14 @@ export async function downloadBusinessDayPolicePdf(
   data: PoliceReportData,
   meta: Omit<BusinessDayExportMeta, 'tab'>
 ): Promise<void> {
-  const guests = data.guests ?? []
+  const guests = (data.guests ?? []).filter((g) => g.guestRole !== 'child')
   const includeBusinessDate = isPoliceReportDateRange(data)
+  const heading = formatPoliceInHouseSummary(data, guests.length)
   const rows = guests.map((guest, idx) => mapPoliceGuestRow(guest, includeBusinessDate, idx + 1))
   await writeInHouseBookingPdf(
     [
       {
-        heading: `Guests in-house (${data.totalCheckIns ?? 0} booking(s), ${data.guestCount ?? guests.length} guest(s))`,
+        heading,
         columns: policePdfColumns(includeBusinessDate),
         rows,
       },

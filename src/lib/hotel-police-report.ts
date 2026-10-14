@@ -54,6 +54,8 @@ export type HotelPoliceReport = {
   dateTo?: string
   totalCheckIns: number
   guestCount: number
+  adultCount: number
+  childCount: number
   guests: PoliceReportGuestRow[]
 }
 
@@ -269,9 +271,8 @@ function collectBookingGuestRows(
   const rows: PoliceReportGuestRow[] = [mapPrimaryGuestRow(booking, checkIn, businessDate)]
 
   const adultCompanions = booking.companions.filter((c) => c.companionType !== 'CHILD')
-  const childCompanions = booking.companions.filter((c) => c.companionType === 'CHILD')
 
-  for (const companion of booking.companions) {
+  for (const companion of adultCompanions) {
     rows.push(mapCompanionRow(booking, companion, checkIn, businessDate))
   }
 
@@ -288,19 +289,7 @@ function collectBookingGuestRows(
     )
   }
 
-  const missingChildren = Math.max(0, booking.children) - childCompanions.length
-  for (let index = 0; index < missingChildren; index += 1) {
-    rows.push(
-      mapPlaceholderGuestRow(
-        booking,
-        checkIn,
-        businessDate,
-        `Child guest ${index + 1} (details not recorded)`,
-        'child'
-      )
-    )
-  }
-
+  // Children are not included as table rows on the police report
   return rows
 }
 
@@ -331,9 +320,13 @@ export async function buildHotelPoliceReport(window: BusinessDayWindow): Promise
   })
 
   const guests: PoliceReportGuestRow[] = []
+  let totalChildren = 0
 
   for (const booking of bookings) {
     guests.push(...collectBookingGuestRows(booking, businessDate))
+    const childCompanions = booking.companions.filter((c) => c.companionType === 'CHILD').length
+    const declaredChildren = Math.max(0, booking.children ?? 0)
+    totalChildren += Math.max(childCompanions, declaredChildren)
   }
 
   return {
@@ -342,6 +335,8 @@ export async function buildHotelPoliceReport(window: BusinessDayWindow): Promise
     businessDateDisplay: window.businessDateDisplay,
     totalCheckIns: bookings.length,
     guestCount: guests.length,
+    adultCount: guests.length,
+    childCount: totalChildren,
     guests,
   }
 }
@@ -410,7 +405,26 @@ export async function buildHotelPoliceReportForDateRange(
     return aTime - bTime
   })
 
-  const uniqueBookings = new Set(mergedGuests.map((g) => g.bookingId)).size
+  const uniqueBookingIds = Array.from(new Set(mergedGuests.map((g) => g.bookingId)))
+  let totalRangeChildren = 0
+  if (uniqueBookingIds.length > 0) {
+    const rangeBookings = await db.booking.findMany({
+      where: { id: { in: uniqueBookingIds } },
+      select: {
+        id: true,
+        children: true,
+        companions: {
+          where: { companionType: 'CHILD' },
+          select: { id: true },
+        },
+      },
+    })
+    for (const b of rangeBookings) {
+      const childCompanions = b.companions.length
+      const declaredChildren = Math.max(0, b.children ?? 0)
+      totalRangeChildren += Math.max(childCompanions, declaredChildren)
+    }
+  }
 
   return {
     reportType: 'hotel-police-report',
@@ -418,8 +432,10 @@ export async function buildHotelPoliceReportForDateRange(
     businessDateDisplay: formatPoliceReportDateDisplay(from, to),
     dateFrom: from,
     dateTo: to,
-    totalCheckIns: uniqueBookings,
+    totalCheckIns: uniqueBookingIds.length,
     guestCount: mergedGuests.length,
+    adultCount: mergedGuests.length,
+    childCount: totalRangeChildren,
     guests: mergedGuests,
   }
 }

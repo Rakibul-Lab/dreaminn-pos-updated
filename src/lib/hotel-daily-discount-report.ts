@@ -278,7 +278,7 @@ function formatDiscountReportDateDisplay(dateFrom?: string, dateTo?: string): st
   const from = dateFrom ?? dateTo!
   const to = dateTo ?? dateFrom!
   if (from === to) return formatBusinessDateDisplay(from)
-  return `${formatBusinessDateDisplay(from)} – ${formatBusinessDateDisplay(to)}`
+  return `${formatBusinessDateDisplay(from)} to ${formatBusinessDateDisplay(to)}`
 }
 
 async function fetchDiscountRecordsForWindow(window: BusinessDayWindow) {

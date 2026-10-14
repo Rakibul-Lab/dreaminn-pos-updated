@@ -7,7 +7,7 @@ import {
 } from '@/lib/business-date'
 import { expectedCompanionCount } from '@/lib/booking-companions'
 import { getBookingSourceLabel } from '@/lib/booking-company'
-import { formatGuestId } from '@/lib/id-type-label'
+import { DEFAULT_NATIONALITY, formatGuestId } from '@/lib/id-type-label'
 import { DEFAULT_GUEST_COMPANY } from '@/lib/reservation-terms'
 import { resolveBusinessDayReportWindow, type BusinessDayWindow } from '@/lib/hotel-pms-reports'
 
@@ -67,28 +67,65 @@ function formatCheckInDisplay(value: Date | null | undefined): { iso: string | n
   }
 }
 
-function formatCompanionIdDocument(companion: {
+function isBlankOrNa(value: string | null | undefined): boolean {
+  if (!value) return true
+  const v = value.trim().toUpperCase()
+  return v === '' || v === 'N/A' || v === 'NA' || v === '—' || v === '-'
+}
+
+function resolvePoliceGuestAddress(guestAddress: string | null | undefined): string | null {
+  if (!isBlankOrNa(guestAddress)) return guestAddress!.trim()
+  return null
+}
+
+function resolvePoliceGuestNationality(guestNationality: string | null | undefined): string {
+  if (!isBlankOrNa(guestNationality)) return guestNationality!.trim()
+  return DEFAULT_NATIONALITY
+}
+
+function resolvePoliceGuestMobile(guestPhone: string | null | undefined): string | null {
+  if (!isBlankOrNa(guestPhone)) return guestPhone!.trim()
+  return null
+}
+
+function resolveCompanionIdDocument(companion: {
   idType: string | null
   idNumber: string | null
-  company: string | null
-  designation: string | null
-  registrationNumber: string | null
+  registrationNumber?: string | null
 }): string {
-  const id = formatGuestId(companion.idType, companion.idNumber)
-  if (companion.idNumber?.trim()) return id
+  if (!isBlankOrNa(companion.idNumber)) {
+    return formatGuestId(companion.idType, companion.idNumber!.trim())
+  }
+  if (!isBlankOrNa(companion.registrationNumber)) {
+    return `Reg: ${companion.registrationNumber!.trim()}`
+  }
+  return '—'
+}
 
-  const corporate: string[] = []
-  if (companion.company?.trim()) corporate.push(companion.company.trim())
-  if (companion.designation?.trim()) corporate.push(companion.designation.trim())
-  if (companion.registrationNumber?.trim()) corporate.push(`Reg: ${companion.registrationNumber.trim()}`)
-  if (corporate.length) return corporate.join(' · ')
-
-  return id
+function resolvePrimaryGuestIdDocument(
+  customer: {
+    idType: string | null
+    idNumber: string | null
+    registrationNumber?: string | null
+  },
+  bookingRegistrationNumber?: string | null
+): string {
+  if (!isBlankOrNa(customer.idNumber)) {
+    return formatGuestId(customer.idType, customer.idNumber!.trim())
+  }
+  if (!isBlankOrNa(customer.registrationNumber)) {
+    return `Reg: ${customer.registrationNumber!.trim()}`
+  }
+  if (!isBlankOrNa(bookingRegistrationNumber)) {
+    return `Reg: ${bookingRegistrationNumber!.trim()}`
+  }
+  return '—'
 }
 
 function mapPrimaryGuestRow(
   booking: PoliceCompanyBooking & {
     id: string
+    registrationNumber?: string | null
     actualCheckIn: Date | null
     customer: {
       name: string
@@ -98,6 +135,7 @@ function mapPrimaryGuestRow(
       idType: string | null
       idNumber: string | null
       company: string | null
+      registrationNumber?: string | null
     }
     room: { roomNumber: string }
   },
@@ -108,10 +146,10 @@ function mapPrimaryGuestRow(
     id: booking.id,
     bookingId: booking.id,
     guestName: booking.customer.name,
-    mobile: booking.customer.phone?.trim() || null,
-    idDocument: formatGuestId(booking.customer.idType, booking.customer.idNumber),
-    address: booking.customer.address?.trim() || null,
-    nationality: booking.customer.nationality?.trim() || null,
+    mobile: resolvePoliceGuestMobile(booking.customer.phone),
+    idDocument: resolvePrimaryGuestIdDocument(booking.customer, booking.registrationNumber),
+    address: resolvePoliceGuestAddress(booking.customer.address),
+    nationality: resolvePoliceGuestNationality(booking.customer.nationality),
     company: resolvePoliceGuestCompany(booking, booking.customer.company),
     roomNumber: booking.room.roomNumber,
     checkInAt: checkIn.iso,
@@ -149,12 +187,10 @@ function mapCompanionRow(
     id: `${booking.id}-companion-${companion.id}`,
     bookingId: booking.id,
     guestName: companion.name,
-    mobile: companion.phone?.trim() || null,
-    idDocument: isChild
-      ? formatGuestId(companion.idType, companion.idNumber)
-      : formatCompanionIdDocument(companion),
-    address: companion.address?.trim() || null,
-    nationality: companion.nationality?.trim() || null,
+    mobile: resolvePoliceGuestMobile(companion.phone),
+    idDocument: resolveCompanionIdDocument(companion),
+    address: resolvePoliceGuestAddress(companion.address),
+    nationality: resolvePoliceGuestNationality(companion.nationality),
     company: resolvePoliceGuestCompany(booking, companion.company),
     roomNumber: booking.room.roomNumber,
     checkInAt: checkIn.iso,
@@ -183,7 +219,7 @@ function mapPlaceholderGuestRow(
     mobile: null,
     idDocument: '—',
     address: null,
-    nationality: null,
+    nationality: DEFAULT_NATIONALITY,
     company: resolvePoliceGuestCompany(booking),
     roomNumber: booking.room.roomNumber,
     checkInAt: checkIn.iso,
@@ -194,9 +230,11 @@ function mapPlaceholderGuestRow(
   }
 }
 
+
 function collectBookingGuestRows(
   booking: PoliceCompanyBooking & {
     id: string
+    registrationNumber?: string | null
     adults: number
     children: number
     actualCheckIn: Date | null
@@ -208,6 +246,7 @@ function collectBookingGuestRows(
       idType: string | null
       idNumber: string | null
       company: string | null
+      registrationNumber?: string | null
     }
     room: { roomNumber: string }
     companions: Array<{
@@ -282,6 +321,7 @@ export async function buildHotelPoliceReport(window: BusinessDayWindow): Promise
           idType: true,
           idNumber: true,
           company: true,
+          registrationNumber: true,
         },
       },
       room: { select: { roomNumber: true } },
@@ -311,7 +351,7 @@ function formatPoliceReportDateDisplay(dateFrom?: string, dateTo?: string): stri
   const from = dateFrom?.trim()
   const to = dateTo?.trim()
   if (from && to && from !== to) {
-    return `${formatBusinessDateDisplay(from)} → ${formatBusinessDateDisplay(to)}`
+    return `${formatBusinessDateDisplay(from)} to ${formatBusinessDateDisplay(to)}`
   }
   const single = from || to
   return single ? formatBusinessDateDisplay(single) : 'All dates'
@@ -326,11 +366,13 @@ export async function buildHotelPoliceReportForDateRange(
     return buildHotelPoliceReport(window)
   }
 
-  const from = (dateFrom ?? dateTo)!.trim()
-  const to = (dateTo ?? dateFrom)!.trim()
-  if (!isValidBusinessDateString(from) || !isValidBusinessDateString(to)) {
+  const rawFrom = (dateFrom ?? dateTo)!.trim()
+  const rawTo = (dateTo ?? dateFrom)!.trim()
+  if (!isValidBusinessDateString(rawFrom) || !isValidBusinessDateString(rawTo)) {
     throw new Error('Invalid police report date range')
   }
+
+  const [from, to] = rawFrom <= rawTo ? [rawFrom, rawTo] : [rawTo, rawFrom]
 
   if (from === to) {
     const window = await resolveBusinessDayReportWindow(from)
@@ -339,27 +381,36 @@ export async function buildHotelPoliceReportForDateRange(
 
   const seenGuestDayIds = new Set<string>()
   const mergedGuests: PoliceReportGuestRow[] = []
-  let totalCheckIns = 0
 
   let day = from
   while (day <= to) {
     const dayReport = await buildHotelPoliceReport(await resolveBusinessDayReportWindow(day))
-    totalCheckIns += dayReport.totalCheckIns
     for (const guest of dayReport.guests) {
-      const dedupeKey = `${guest.businessDate ?? day}:${guest.id}`
+      const rowBusinessDate = guest.businessDate ?? day
+      const dedupeKey = `${rowBusinessDate}:${guest.id}`
       if (seenGuestDayIds.has(dedupeKey)) continue
       seenGuestDayIds.add(dedupeKey)
-      mergedGuests.push(guest)
+      mergedGuests.push({
+        ...guest,
+        businessDate: rowBusinessDate,
+      })
     }
     if (day === to) break
     day = format(addDays(parseISO(`${day}T12:00:00`), 1), 'yyyy-MM-dd')
   }
 
   mergedGuests.sort((a, b) => {
+    const dateCmp = (a.businessDate || '').localeCompare(b.businessDate || '')
+    if (dateCmp !== 0) return dateCmp
+    const aRoom = Number(a.roomNumber) || 0
+    const bRoom = Number(b.roomNumber) || 0
+    if (aRoom !== bRoom) return aRoom - bRoom
     const aTime = a.checkInAt ? new Date(a.checkInAt).getTime() : 0
     const bTime = b.checkInAt ? new Date(b.checkInAt).getTime() : 0
     return aTime - bTime
   })
+
+  const uniqueBookings = new Set(mergedGuests.map((g) => g.bookingId)).size
 
   return {
     reportType: 'hotel-police-report',
@@ -367,7 +418,7 @@ export async function buildHotelPoliceReportForDateRange(
     businessDateDisplay: formatPoliceReportDateDisplay(from, to),
     dateFrom: from,
     dateTo: to,
-    totalCheckIns,
+    totalCheckIns: uniqueBookings,
     guestCount: mergedGuests.length,
     guests: mergedGuests,
   }

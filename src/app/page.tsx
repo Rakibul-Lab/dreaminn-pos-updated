@@ -50,10 +50,12 @@ function ErpPageLoader() {
   )
 }
 
-const dynamicPage = <T extends React.ComponentType<unknown>>(
+const dynamicPage = <
+  T extends React.ComponentType<any> | { default: React.ComponentType<any> }
+>(
   loader: () => Promise<T>
 ) =>
-  dynamic(loader, {
+  dynamic<any>(loader as any, {
     loading: () => <ErpPageLoader />,
   })
 
@@ -663,7 +665,7 @@ function ERPApp() {
       {/* Main Content */}
       <main
         className={cn(
-          'flex flex-1 flex-col transition-[margin] duration-300 ease-in-out',
+          'flex flex-1 flex-col transition-[margin] duration-300 ease-in-out min-w-0 max-w-full',
           currentPage === 'roles-permissions'
             ? 'h-svh max-h-svh min-h-0 overflow-hidden'
             : 'min-h-screen',
@@ -836,10 +838,10 @@ function ERPApp() {
         <div
           key={`${currentPage}-${pageRefreshNonce}`}
           className={cn(
-            'flex-1 p-4 md:p-6',
+            'flex-1 p-4 md:p-6 min-w-0 max-w-full',
             currentPage === 'roles-permissions'
               ? 'flex min-h-0 flex-col overflow-hidden'
-              : 'overflow-auto'
+              : 'overflow-y-auto overflow-x-hidden'
           )}
         >
           {renderPage()}

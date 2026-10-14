@@ -79,13 +79,13 @@ export function resolveDateRangeReportWindow(input: {
   const safeOpenedAt = openedAt ?? new Date(closedAt!.getTime())
   const safeClosedAt = closedAt ?? new Date(safeOpenedAt.getTime())
 
-  const fromLabel = dateFrom ? formatBusinessDateDisplay(dateFrom) : '—'
-  const toLabel = dateTo ? formatBusinessDateDisplay(dateTo) : '—'
+  const fromLabel = dateFrom ? formatBusinessDateDisplay(dateFrom) : '-'
+  const toLabel = dateTo ? formatBusinessDateDisplay(dateTo) : '-'
   const businessDate = dateFrom || dateTo
 
   return {
     businessDate,
-    businessDateDisplay: `${fromLabel} → ${toLabel}`,
+    businessDateDisplay: `${fromLabel} to ${toLabel}`,
     openedAt: safeOpenedAt,
     closedAt: safeClosedAt,
   }

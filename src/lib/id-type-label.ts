@@ -51,7 +51,9 @@ export function idTypeLabel(type?: string | null): string {
 }
 
 export function formatGuestId(type?: string | null, number?: string | null): string {
-  const label = idTypeLabel(type)
-  if (!number?.trim()) return label === '—' ? '—' : label
-  return `${label} · ${number.trim()}`
+  const num = number?.trim()
+  const rawLabel = type ? idTypeLabel(type) : ''
+  const label = rawLabel && rawLabel !== '—' ? rawLabel : 'NID'
+  if (!num) return type ? label : '—'
+  return `${label} · ${num}`
 }

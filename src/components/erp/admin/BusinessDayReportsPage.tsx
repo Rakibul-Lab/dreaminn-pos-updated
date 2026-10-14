@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { format, parseISO, subDays } from 'date-fns'
 import { api } from '@/lib/api-client'
@@ -26,6 +26,11 @@ import {
   FileDown,
   Loader2,
   Search,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
@@ -60,6 +65,8 @@ import {
   type ClosedBusinessDayOption,
 } from '@/components/erp/admin/ClosedBusinessDaySearchField'
 import { formatBusinessDateDisplay } from '@/lib/business-date-format'
+import { getPaginationPages } from '@/lib/pagination-pages'
+import { cn } from '@/lib/utils'
 
 function policeGuestRoleLabel(guest: {
   guestRole?: string
@@ -266,6 +273,182 @@ export default function BusinessDayReportsPage() {
   const policeData = policeRes?.data as PoliceReportData | undefined
   const policeGuests = policeData?.guests ?? []
 
+  const [policeSearchInput, setPoliceSearchInput] = useState('')
+  const [policeSearchQuery, setPoliceSearchQuery] = useState('')
+  const [policeSortField, setPoliceSortField] = useState<'checkIn' | 'room' | 'guestName' | 'businessDate' | 'company'>('checkIn')
+  const [policeSortDirection, setPoliceSortDirection] = useState<'asc' | 'desc'>('asc')
+  const [policePage, setPolicePage] = useState(1)
+  const [policePageSize, setPolicePageSize] = useState(10)
+
+  const policeTableWrapperRef = useRef<HTMLDivElement>(null)
+  const [isTableDragging, setIsTableDragging] = useState(false)
+  const dragStartXRef = useRef(0)
+  const dragStartScrollLeftRef = useRef(0)
+  const hasDraggedRef = useRef(false)
+
+  const getPoliceScrollTarget = useCallback((): HTMLElement | null => {
+    const wrapper = policeTableWrapperRef.current
+    if (!wrapper) return null
+    const inner = wrapper.querySelector<HTMLElement>('[data-slot="table-container"]')
+    if (inner && inner.scrollWidth > inner.clientWidth) {
+      return inner
+    }
+    if (wrapper.scrollWidth > wrapper.clientWidth) {
+      return wrapper
+    }
+    return inner || wrapper
+  }, [])
+
+  useEffect(() => {
+    const wrapper = policeTableWrapperRef.current
+    if (!wrapper) return
+
+    const handleWheel = (e: WheelEvent) => {
+      const target = getPoliceScrollTarget()
+      if (!target) return
+
+      const maxScroll = target.scrollWidth - target.clientWidth
+      if (maxScroll <= 0) return
+
+      const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY
+
+      const canScrollLeft = target.scrollLeft > 0 && delta < 0
+      const canScrollRight = target.scrollLeft < maxScroll - 1 && delta > 0
+
+      if (canScrollLeft || canScrollRight) {
+        e.preventDefault()
+        target.scrollLeft += delta * 1.15
+      }
+    }
+
+    wrapper.addEventListener('wheel', handleWheel, { passive: false })
+    return () => {
+      wrapper.removeEventListener('wheel', handleWheel)
+    }
+  }, [getPoliceScrollTarget])
+
+  const handleTableMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return
+    const target = e.target as HTMLElement
+    if (target.closest('button, input, select, a, [role="button"]')) return
+
+    const scrollTarget = getPoliceScrollTarget()
+    if (!scrollTarget) return
+
+    dragStartXRef.current = e.clientX
+    dragStartScrollLeftRef.current = scrollTarget.scrollLeft
+    hasDraggedRef.current = false
+    setIsTableDragging(true)
+  }
+
+  useEffect(() => {
+    if (!isTableDragging) return
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const scrollTarget = getPoliceScrollTarget()
+      if (!scrollTarget) return
+
+      const dx = e.clientX - dragStartXRef.current
+      if (Math.abs(dx) > 3) {
+        hasDraggedRef.current = true
+      }
+      scrollTarget.scrollLeft = dragStartScrollLeftRef.current - dx
+    }
+
+    const handleMouseUp = () => {
+      setIsTableDragging(false)
+    }
+
+    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener('mouseup', handleMouseUp)
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove)
+      window.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [isTableDragging, getPoliceScrollTarget])
+
+  const handleTableClickCapture = (e: React.MouseEvent) => {
+    if (hasDraggedRef.current) {
+      e.stopPropagation()
+      e.preventDefault()
+    }
+  }
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setPoliceSearchQuery(policeSearchInput.trim()), 200)
+    return () => window.clearTimeout(timer)
+  }, [policeSearchInput])
+
+  useEffect(() => {
+    setPolicePage(1)
+  }, [policeSearchQuery, policeSortField, policeSortDirection, selectedBusinessDate, rangeDateFrom, rangeDateTo, dateMode])
+
+  const togglePoliceSort = (field: 'checkIn' | 'room' | 'guestName' | 'businessDate' | 'company') => {
+    if (policeSortField === field) {
+      setPoliceSortDirection((prev) => (prev === 'asc' ? 'desc' : 'asc'))
+    } else {
+      setPoliceSortField(field)
+      setPoliceSortDirection('asc')
+    }
+  }
+
+  const sortedPoliceGuests = useMemo(() => {
+    let rows = [...policeGuests]
+
+    if (policeSearchQuery) {
+      const q = policeSearchQuery.toLowerCase()
+      rows = rows.filter((guest) =>
+        [
+          guest.guestName,
+          guest.roomNumber,
+          guest.mobile,
+          guest.idDocument,
+          guest.address,
+          guest.nationality,
+          guest.company,
+          guest.businessDate,
+        ].some((val) => val?.toLowerCase().includes(q))
+      )
+    }
+
+    rows.sort((a, b) => {
+      let cmp = 0
+      if (policeSortField === 'room') {
+        const roomA = Number(a.roomNumber) || 0
+        const roomB = Number(b.roomNumber) || 0
+        cmp = roomA !== roomB ? roomA - roomB : (a.roomNumber || '').localeCompare(b.roomNumber || '')
+      } else if (policeSortField === 'guestName') {
+        cmp = (a.guestName || '').localeCompare(b.guestName || '')
+      } else if (policeSortField === 'businessDate') {
+        cmp = (a.businessDate || '').localeCompare(b.businessDate || '')
+      } else if (policeSortField === 'company') {
+        cmp = (a.company || '').localeCompare(b.company || '')
+      } else {
+        const timeA = a.checkInAt ? new Date(a.checkInAt).getTime() : 0
+        const timeB = b.checkInAt ? new Date(b.checkInAt).getTime() : 0
+        cmp = timeA - timeB
+      }
+      return policeSortDirection === 'asc' ? cmp : -cmp
+    })
+
+    return rows
+  }, [policeGuests, policeSearchQuery, policeSortField, policeSortDirection])
+
+  const totalPoliceRows = sortedPoliceGuests.length
+  const totalPolicePages = Math.max(1, Math.ceil(totalPoliceRows / policePageSize))
+  const safePolicePage = Math.min(Math.max(1, policePage), totalPolicePages)
+
+  const paginatedPoliceGuests = useMemo(() => {
+    const start = (safePolicePage - 1) * policePageSize
+    return sortedPoliceGuests.slice(start, start + policePageSize)
+  }, [sortedPoliceGuests, safePolicePage, policePageSize])
+
+  const policeRangeStart = totalPoliceRows === 0 ? 0 : (safePolicePage - 1) * policePageSize + 1
+  const policeRangeEnd = Math.min(safePolicePage * policePageSize, totalPoliceRows)
+  const policePageNumbers = useMemo(() => {
+    return getPaginationPages(safePolicePage, totalPolicePages)
+  }, [safePolicePage, totalPolicePages])
+
   const dailySalesHotel = salesData?.hotel
   const dailySalesRestaurant = salesData?.restaurant
   const dailyCollectionsByMethod = collectionsData?.byMethod
@@ -430,7 +613,7 @@ export default function BusinessDayReportsPage() {
         await downloadBusinessDayCheckInOutExcel(buildCheckInOutData(), meta)
       } else if (activeTab === 'police') {
         if (!policeData) throw new Error('No police report data for this business day')
-        await downloadBusinessDayPoliceExcel(policeData, meta)
+        await downloadBusinessDayPoliceExcel({ ...policeData, guests: sortedPoliceGuests }, meta)
       }
       toast.success('Excel export ready', { id: toastId })
     } catch (err) {
@@ -463,7 +646,7 @@ export default function BusinessDayReportsPage() {
         await downloadBusinessDayCheckInOutPdf(buildCheckInOutData(), meta)
       } else if (activeTab === 'police') {
         if (!policeData) throw new Error('No police report data for this business day')
-        await downloadBusinessDayPolicePdf(policeData, meta)
+        await downloadBusinessDayPolicePdf({ ...policeData, guests: sortedPoliceGuests }, meta)
       }
       toast.success('PDF export ready', { id: toastId })
     } catch (err) {
@@ -475,7 +658,7 @@ export default function BusinessDayReportsPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 min-w-0 max-w-full">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold flex items-center gap-2">
@@ -638,7 +821,7 @@ export default function BusinessDayReportsPage() {
           </CardContent>
         </Card>
       ) : (
-        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as BusinessDayReportTab)}>
+        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as BusinessDayReportTab)} className="min-w-0 max-w-full">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <TabsList>
               <TabsTrigger value="summary">All summary</TabsTrigger>
@@ -678,7 +861,7 @@ export default function BusinessDayReportsPage() {
             </div>
           </div>
 
-          <TabsContent value="summary" className="space-y-4 mt-4">
+          <TabsContent value="summary" className="space-y-4 mt-4 min-w-0 max-w-full">
             <BusinessDaySummarySection
               isLoading={isLoadingSummary}
               salesBalances={salesBalances ?? null}
@@ -743,7 +926,7 @@ export default function BusinessDayReportsPage() {
             </div>
           </TabsContent>
 
-          <TabsContent value="sales" className="space-y-4 mt-4">
+          <TabsContent value="sales" className="space-y-4 mt-4 min-w-0 max-w-full">
             {loadingSales ? (
               <Skeleton className="h-[520px] w-full" />
             ) : salesData?.monthlyReport ? (
@@ -787,7 +970,7 @@ export default function BusinessDayReportsPage() {
             )}
           </TabsContent>
 
-          <TabsContent value="collections" className="space-y-4 mt-4">
+          <TabsContent value="collections" className="space-y-4 mt-4 min-w-0 max-w-full">
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <Card>
                 <CardContent className="p-4">
@@ -913,8 +1096,8 @@ export default function BusinessDayReportsPage() {
                       <TableBody>
                         {loadingCollections ? (
                           <TableRow><TableCell colSpan={5}><Skeleton className="h-8 w-full" /></TableCell></TableRow>
-                        ) : dailyCollectionPayments?.length ? dailyCollectionPayments.map((p) => (
-                          <TableRow key={String(p.id ?? p.at)}>
+                        ) : dailyCollectionPayments?.length ? dailyCollectionPayments.map((p, idx) => (
+                          <TableRow key={String(p.id ?? `${p.at}-${idx}`)}>
                             <TableCell className="text-xs">
                               {p.at ? format(parseISO(String(p.at)), 'dd MMM · HH:mm') : '—'}
                             </TableCell>
@@ -984,7 +1167,7 @@ export default function BusinessDayReportsPage() {
             </Card>
           </TabsContent>
 
-          <TabsContent value="discounts" className="space-y-4 mt-4">
+          <TabsContent value="discounts" className="space-y-4 mt-4 min-w-0 max-w-full">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <Card>
                 <CardContent className="p-4">
@@ -1021,7 +1204,7 @@ export default function BusinessDayReportsPage() {
               </Card>
             </div>
 
-            <Card>
+            <Card className="min-w-0 max-w-full overflow-hidden">
               <CardHeader className="pb-2 space-y-3">
                 <div>
                   <CardTitle className="text-base">Discount transactions</CardTitle>
@@ -1065,8 +1248,8 @@ export default function BusinessDayReportsPage() {
                   </p>
                 )}
               </CardHeader>
-              <CardContent className="p-0">
-                <div className="max-h-[520px] overflow-auto">
+              <CardContent className="p-0 min-w-0 max-w-full overflow-hidden">
+                <div className="max-h-[520px] overflow-auto w-full max-w-full">
                   <Table className="table-fixed min-w-[1080px]">
                     <TableHeader>
                       <TableRow>
@@ -1140,7 +1323,7 @@ export default function BusinessDayReportsPage() {
             </Card>
           </TabsContent>
 
-          <TabsContent value="checkin-checkout" className="space-y-4 mt-4">
+          <TabsContent value="checkin-checkout" className="space-y-4 mt-4 min-w-0 max-w-full">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Card>
                 <CardContent className="p-4">
@@ -1236,7 +1419,7 @@ export default function BusinessDayReportsPage() {
             </div>
           </TabsContent>
 
-          <TabsContent value="police" className="space-y-4 mt-4">
+          <TabsContent value="police" className="space-y-4 mt-4 min-w-0 max-w-full">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Card>
                 <CardContent className="p-4">
@@ -1262,67 +1445,229 @@ export default function BusinessDayReportsPage() {
               </Card>
             </div>
 
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base">Police register — guests in-house</CardTitle>
-                <p className="text-sm text-muted-foreground font-normal">
-                  For law-enforcement reporting. Guests in-house at the end of{' '}
-                  <span className="font-medium text-foreground">{policeDateDisplay}</span>. Guests
-                  who checked out during the day are removed from that day onward.
-                </p>
+            <Card className="min-w-0 max-w-full overflow-hidden">
+              <CardHeader className="pb-3">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                  <div>
+                    <CardTitle className="text-base">Police register — guests in-house</CardTitle>
+                    <p className="text-sm text-muted-foreground font-normal">
+                      For law-enforcement reporting. Guests in-house at the end of{' '}
+                      <span className="font-medium text-foreground">{policeDateDisplay}</span>. Guests
+                      who checked out during the day are removed from that day onward.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="relative min-w-[180px]">
+                      <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        type="search"
+                        placeholder="Search guests, room, NID…"
+                        className="pl-8 h-9 text-xs w-[210px]"
+                        value={policeSearchInput}
+                        onChange={(e) => setPoliceSearchInput(e.target.value)}
+                      />
+                    </div>
+                    <Select
+                      value={`${policeSortField}-${policeSortDirection}`}
+                      onValueChange={(val) => {
+                        const [f, d] = val.split('-') as [typeof policeSortField, typeof policeSortDirection]
+                        setPoliceSortField(f)
+                        setPoliceSortDirection(d)
+                      }}
+                    >
+                      <SelectTrigger className="h-9 w-[190px] text-xs">
+                        <SelectValue placeholder="Sort order…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="checkIn-asc">Check-in time (Oldest)</SelectItem>
+                        <SelectItem value="checkIn-desc">Check-in time (Newest)</SelectItem>
+                        <SelectItem value="room-asc">Room number (Asc)</SelectItem>
+                        <SelectItem value="room-desc">Room number (Desc)</SelectItem>
+                        <SelectItem value="guestName-asc">Guest name (A → Z)</SelectItem>
+                        <SelectItem value="guestName-desc">Guest name (Z → A)</SelectItem>
+                        {isPoliceDateRange && (
+                          <>
+                            <SelectItem value="businessDate-asc">Business date (Earliest)</SelectItem>
+                            <SelectItem value="businessDate-desc">Business date (Latest)</SelectItem>
+                          </>
+                        )}
+                        <SelectItem value="company-asc">Company (A → Z)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <div className="flex items-center gap-1 border border-border rounded-md p-0.5 bg-background shadow-xs">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                        title="Side scroll left"
+                        onClick={() => {
+                          getPoliceScrollTarget()?.scrollBy({ left: -320, behavior: 'smooth' })
+                        }}
+                      >
+                        <ChevronLeft className="h-4 w-4" />
+                      </Button>
+                      <span className="text-[11px] text-muted-foreground font-medium px-1 select-none whitespace-nowrap">
+                        Side scroll
+                      </span>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                        title="Side scroll right"
+                        onClick={() => {
+                          getPoliceScrollTarget()?.scrollBy({ left: 320, behavior: 'smooth' })
+                        }}
+                      >
+                        <ChevronRight className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                </div>
               </CardHeader>
-              <CardContent className="p-0">
-                <div className="max-h-[560px] overflow-auto">
-                  <Table className="table-fixed min-w-[1220px]">
+              <CardContent className="p-0 min-w-0 max-w-full overflow-hidden">
+                <div
+                  ref={policeTableWrapperRef}
+                  onMouseDown={handleTableMouseDown}
+                  onClickCapture={handleTableClickCapture}
+                  className={cn(
+                    "overflow-auto w-full max-w-full cursor-grab",
+                    isTableDragging && "cursor-grabbing select-none"
+                  )}
+                >
+                  <Table className={`table-fixed ${isPoliceDateRange ? 'min-w-[1460px]' : 'min-w-[1340px]'}`}>
                     <TableHeader>
                       <TableRow>
-                        <TableHead className="w-[160px]">Guest name</TableHead>
-                        <TableHead className="w-[120px]">Mobile</TableHead>
-                        <TableHead className="w-[180px] whitespace-normal">NID / Passport / License</TableHead>
-                        <TableHead className="w-[200px] whitespace-normal">Address</TableHead>
-                        <TableHead className="w-[120px]">Nationality</TableHead>
-                        <TableHead className="w-[140px] whitespace-normal">Company</TableHead>
-                        <TableHead className="w-[72px]">Room</TableHead>
+                        <TableHead className="w-[50px] min-w-[50px] text-center font-semibold">SL</TableHead>
+                        <TableHead className="w-[200px] min-w-[200px]">
+                          <button
+                            type="button"
+                            className="flex items-center gap-1 hover:text-foreground font-semibold"
+                            onClick={() => togglePoliceSort('guestName')}
+                          >
+                            Guest name
+                            {policeSortField === 'guestName' ? (
+                              policeSortDirection === 'asc' ? <ArrowUp className="h-3 w-3 text-amber-600" /> : <ArrowDown className="h-3 w-3 text-amber-600" />
+                            ) : (
+                              <ArrowUpDown className="h-3 w-3 text-muted-foreground/60" />
+                            )}
+                          </button>
+                        </TableHead>
+                        <TableHead className="w-[125px] min-w-[125px]">Mobile</TableHead>
+                        <TableHead className="w-[210px] min-w-[210px] whitespace-normal">NID / Passport / License</TableHead>
+                        <TableHead className="w-[230px] min-w-[230px] whitespace-normal">Address</TableHead>
+                        <TableHead className="w-[110px] min-w-[110px]">Nationality</TableHead>
+                        <TableHead className="w-[170px] min-w-[170px] whitespace-normal">
+                          <button
+                            type="button"
+                            className="flex items-center gap-1 hover:text-foreground font-semibold"
+                            onClick={() => togglePoliceSort('company')}
+                          >
+                            Company
+                            {policeSortField === 'company' ? (
+                              policeSortDirection === 'asc' ? <ArrowUp className="h-3 w-3 text-amber-600" /> : <ArrowDown className="h-3 w-3 text-amber-600" />
+                            ) : (
+                              <ArrowUpDown className="h-3 w-3 text-muted-foreground/60" />
+                            )}
+                          </button>
+                        </TableHead>
+                        <TableHead className="w-[75px] min-w-[75px]">
+                          <button
+                            type="button"
+                            className="flex items-center justify-center gap-1 hover:text-foreground font-semibold w-full"
+                            onClick={() => togglePoliceSort('room')}
+                          >
+                            Room
+                            {policeSortField === 'room' ? (
+                              policeSortDirection === 'asc' ? <ArrowUp className="h-3 w-3 text-amber-600" /> : <ArrowDown className="h-3 w-3 text-amber-600" />
+                            ) : (
+                              <ArrowUpDown className="h-3 w-3 text-muted-foreground/60" />
+                            )}
+                          </button>
+                        </TableHead>
                         {isPoliceDateRange ? (
-                          <TableHead className="w-[110px] whitespace-normal">Business date</TableHead>
+                          <TableHead className="w-[120px] min-w-[120px] whitespace-normal">
+                            <button
+                              type="button"
+                              className="flex items-center gap-1 hover:text-foreground font-semibold"
+                              onClick={() => togglePoliceSort('businessDate')}
+                            >
+                              Business date
+                              {policeSortField === 'businessDate' ? (
+                                policeSortDirection === 'asc' ? <ArrowUp className="h-3 w-3 text-amber-600" /> : <ArrowDown className="h-3 w-3 text-amber-600" />
+                              ) : (
+                                <ArrowUpDown className="h-3 w-3 text-muted-foreground/60" />
+                              )}
+                            </button>
+                          </TableHead>
                         ) : null}
-                        <TableHead className="w-[160px] whitespace-normal">Checked-in date & time</TableHead>
+                        <TableHead className="w-[165px] min-w-[165px] whitespace-normal">
+                          <button
+                            type="button"
+                            className="flex items-center gap-1 hover:text-foreground font-semibold"
+                            onClick={() => togglePoliceSort('checkIn')}
+                          >
+                            Checked-in date & time
+                            {policeSortField === 'checkIn' ? (
+                              policeSortDirection === 'asc' ? <ArrowUp className="h-3 w-3 text-amber-600" /> : <ArrowDown className="h-3 w-3 text-amber-600" />
+                            ) : (
+                              <ArrowUpDown className="h-3 w-3 text-muted-foreground/60" />
+                            )}
+                          </button>
+                        </TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {loadingPolice ? (
                         <TableRow>
-                          <TableCell colSpan={isPoliceDateRange ? 9 : 8}>
+                          <TableCell colSpan={isPoliceDateRange ? 10 : 9}>
                             <Skeleton className="h-8 w-full" />
                           </TableCell>
                         </TableRow>
-                      ) : policeGuests.length ? (
-                        policeGuests.map((guest) => {
+                      ) : paginatedPoliceGuests.length ? (
+                        paginatedPoliceGuests.map((guest, idx) => {
                           const roleLabel = policeGuestRoleLabel(guest)
+                          const serialNumber = (safePolicePage - 1) * policePageSize + idx + 1
                           return (
-                          <TableRow key={guest.id}>
-                            <TableCell className="font-medium">
-                              {guest.guestName}
+                          <TableRow key={`${guest.businessDate ?? ''}-${guest.id}-${idx}`}>
+                            <TableCell className="text-xs font-mono text-center text-muted-foreground whitespace-nowrap align-top py-2.5 font-medium">
+                              {serialNumber}
+                            </TableCell>
+                            <TableCell className="text-sm font-medium whitespace-normal break-words align-top py-2.5">
+                              <span className="text-foreground leading-snug">{guest.guestName}</span>
                               {roleLabel ? (
-                                <span className="ml-1 text-xs font-normal text-muted-foreground">
+                                <span className="block mt-0.5 text-xs font-normal text-muted-foreground">
                                   ({roleLabel})
                                 </span>
                               ) : null}
                             </TableCell>
-                            <TableCell>{guest.mobile || '—'}</TableCell>
-                            <TableCell className="text-sm">{guest.idDocument || '—'}</TableCell>
-                            <TableCell className="text-sm whitespace-normal">{guest.address || '—'}</TableCell>
-                            <TableCell>{guest.nationality || '—'}</TableCell>
-                            <TableCell className="text-sm whitespace-normal">{guest.company || '—'}</TableCell>
-                            <TableCell className="font-mono">{guest.roomNumber}</TableCell>
+                            <TableCell className="text-sm font-mono whitespace-nowrap align-top py-2.5">
+                              {guest.mobile || '—'}
+                            </TableCell>
+                            <TableCell className="text-sm whitespace-normal break-words [overflow-wrap:anywhere] align-top py-2.5 leading-snug">
+                              {guest.idDocument || '—'}
+                            </TableCell>
+                            <TableCell className="text-sm whitespace-normal break-words align-top py-2.5 leading-snug">
+                              {guest.address || '—'}
+                            </TableCell>
+                            <TableCell className="text-sm whitespace-normal break-words align-top py-2.5">
+                              {guest.nationality || '—'}
+                            </TableCell>
+                            <TableCell className="text-sm whitespace-normal break-words align-top py-2.5 leading-snug">
+                              {guest.company || '—'}
+                            </TableCell>
+                            <TableCell className="font-mono text-sm text-center whitespace-nowrap align-top py-2.5 font-semibold">
+                              {guest.roomNumber}
+                            </TableCell>
                             {isPoliceDateRange ? (
-                              <TableCell className="text-sm whitespace-nowrap">
+                              <TableCell className="text-sm whitespace-nowrap align-top py-2.5">
                                 {guest.businessDate
                                   ? formatBusinessDateDisplay(guest.businessDate)
                                   : '—'}
                               </TableCell>
                             ) : null}
-                            <TableCell className="text-sm whitespace-nowrap">
+                            <TableCell className="text-sm whitespace-nowrap align-top py-2.5">
                               {guest.checkInAtDisplay || '—'}
                             </TableCell>
                           </TableRow>
@@ -1331,10 +1676,12 @@ export default function BusinessDayReportsPage() {
                       ) : (
                         <TableRow>
                           <TableCell
-                            colSpan={isPoliceDateRange ? 9 : 8}
+                            colSpan={isPoliceDateRange ? 10 : 9}
                             className="text-center py-8 text-muted-foreground"
                           >
-                            No in-house guests for the selected period
+                            {policeSearchQuery
+                              ? 'No matching in-house guests found'
+                              : 'No in-house guests for the selected period'}
                           </TableCell>
                         </TableRow>
                       )}
@@ -1342,6 +1689,83 @@ export default function BusinessDayReportsPage() {
                   </Table>
                 </div>
               </CardContent>
+
+              {totalPoliceRows > 0 && (
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-4 py-3 border-t bg-muted/20 text-sm">
+                  <p className="text-xs sm:text-sm text-muted-foreground">
+                    Showing <span className="font-semibold text-foreground">{policeRangeStart}</span>–<span className="font-semibold text-foreground">{policeRangeEnd}</span> of{' '}
+                    <span className="font-semibold text-foreground">{totalPoliceRows}</span> guest{totalPoliceRows !== 1 ? 's' : ''}
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Select
+                      value={String(policePageSize)}
+                      onValueChange={(v) => {
+                        setPolicePageSize(Number(v))
+                        setPolicePage(1)
+                      }}
+                    >
+                      <SelectTrigger className="h-8 w-[105px] text-xs bg-background">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="10">10 / page</SelectItem>
+                        <SelectItem value="20">20 / page</SelectItem>
+                        <SelectItem value="50">50 / page</SelectItem>
+                        <SelectItem value="100">100 / page</SelectItem>
+                      </SelectContent>
+                    </Select>
+
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 px-2.5 text-xs"
+                      disabled={safePolicePage <= 1}
+                      onClick={() => setPolicePage((p) => Math.max(1, p - 1))}
+                    >
+                      Previous
+                    </Button>
+
+                    <div className="flex flex-wrap items-center gap-1">
+                      {policePageNumbers.map((item, index) =>
+                        item === 'ellipsis' ? (
+                          <span
+                            key={`ellipsis-${index}`}
+                            className="flex h-8 min-w-8 items-center justify-center px-1 text-xs text-muted-foreground"
+                          >
+                            …
+                          </span>
+                        ) : (
+                          <Button
+                            key={item}
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className={cn(
+                              'h-8 min-w-8 px-2 text-xs',
+                              item === safePolicePage &&
+                                'border-amber-600 bg-amber-600 text-white hover:bg-amber-700 hover:text-white font-semibold'
+                            )}
+                            onClick={() => setPolicePage(item)}
+                            aria-current={item === safePolicePage ? 'page' : undefined}
+                          >
+                            {item}
+                          </Button>
+                        )
+                      )}
+                    </div>
+
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 px-2.5 text-xs"
+                      disabled={safePolicePage >= totalPolicePages}
+                      onClick={() => setPolicePage((p) => Math.min(totalPolicePages, p + 1))}
+                    >
+                      Next
+                    </Button>
+                  </div>
+                </div>
+              )}
             </Card>
           </TabsContent>
         </Tabs>

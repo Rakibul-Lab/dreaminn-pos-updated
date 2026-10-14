@@ -15,6 +15,8 @@ import {
   LogOut,
   SprayCan,
   TrendingUp,
+  Users,
+  UserCheck,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { openNewReservationTab } from '@/lib/reservation-navigation';
@@ -54,6 +56,14 @@ interface DashboardData {
     occupancyRate: number;
     byStatus?: Record<string, number>;
   };
+  guestStats?: {
+    inHousePax: number;
+    inHouseRooms: number;
+    businessDayPax: number;
+    businessDayRooms: number;
+  };
+  inHousePax?: number;
+  businessDayPax?: number;
   checkIns?: { count: number; items: any[]; expectedArrivals?: number };
   checkOuts?: { count: number; items: any[] };
   arrivals?: { count: number; items: any[]; expectedArrivals?: number };
@@ -149,6 +159,10 @@ function HotelAdminDashboard({
   const rooms = data.rooms;
   const checkIns = data.checkIns || data.arrivals;
   const checkOuts = data.checkOuts || data.departures;
+  const inHousePax = data.guestStats?.inHousePax ?? data.inHousePax ?? 0;
+  const inHouseRooms = data.guestStats?.inHouseRooms ?? 0;
+  const businessDayPax = data.guestStats?.businessDayPax ?? data.businessDayPax ?? 0;
+  const businessDayRooms = data.guestStats?.businessDayRooms ?? 0;
 
   // Until permissions load, show full dashboard for existing roles (avoids flash of empty).
   const allow = (key: string) =>
@@ -251,9 +265,46 @@ function HotelAdminDashboard({
 
       {/* Stats Cards */}
       {(showRoomStats || showArrivalCards) && (
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+        <div className="space-y-4">
+          {/* Guest Flow & Live Movement Stats */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <StatCard
+              title="Total In-House Guests"
+              value={`${inHousePax} Pax`}
+              subtitle={`${inHouseRooms} room${inHouseRooms === 1 ? '' : 's'} • Real-time live count`}
+              icon={<Users className="w-5 h-5" />}
+              color="blue"
+            />
+            <StatCard
+              title="Business Day Guests"
+              value={`${businessDayPax} Pax`}
+              subtitle={`${businessDayRooms} booking${businessDayRooms === 1 ? '' : 's'} • Cumulative today`}
+              icon={<UserCheck className="w-5 h-5" />}
+              color="purple"
+            />
+            {showArrivalCards && (
+              <>
+                <StatCard
+                  title="Today's Arrivals"
+                  value={checkIns?.count || 0}
+                  subtitle="Check-in movements"
+                  icon={<LogIn className="w-5 h-5" />}
+                  color="emerald"
+                />
+                <StatCard
+                  title="Today's Check-outs"
+                  value={checkOuts?.count || 0}
+                  subtitle="Departure movements"
+                  icon={<LogOut className="w-5 h-5" />}
+                  color="slate"
+                />
+              </>
+            )}
+          </div>
+
+          {/* Room Inventory Stats */}
           {showRoomStats && (
-            <>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <StatCard
                 title="Total Rooms"
                 value={rooms.total}
@@ -278,23 +329,7 @@ function HotelAdminDashboard({
                 icon={<SprayCan className="w-5 h-5" />}
                 color="amber"
               />
-            </>
-          )}
-          {showArrivalCards && (
-            <>
-              <StatCard
-                title="Today's Arrivals"
-                value={checkIns?.count || 0}
-                icon={<LogIn className="w-5 h-5" />}
-                color="emerald"
-              />
-              <StatCard
-                title="Today's Check-outs"
-                value={checkOuts?.count || 0}
-                icon={<LogOut className="w-5 h-5" />}
-                color="slate"
-              />
-            </>
+            </div>
           )}
         </div>
       )}
@@ -497,32 +532,39 @@ function HotelAdminDashboard({
 function StatCard({
   title,
   value,
+  subtitle,
   icon,
   color,
 }: {
   title: string;
   value: number | string;
+  subtitle?: string;
   icon: React.ReactNode;
-  color: 'slate' | 'red' | 'emerald' | 'amber' | 'orange';
+  color: 'slate' | 'red' | 'emerald' | 'amber' | 'orange' | 'blue' | 'purple';
 }) {
   const colorMap = {
     slate: 'bg-muted text-muted-foreground',
-    red: 'bg-red-50 text-red-600',
-    emerald: 'bg-emerald-50 text-emerald-600',
-    amber: 'bg-amber-50 text-amber-600',
-    orange: 'bg-orange-50 text-orange-600',
+    red: 'bg-red-50 text-red-600 dark:bg-red-950/50 dark:text-red-400',
+    emerald: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/50 dark:text-emerald-400',
+    amber: 'bg-amber-50 text-amber-600 dark:bg-amber-950/50 dark:text-amber-400',
+    orange: 'bg-orange-50 text-orange-600 dark:bg-orange-950/50 dark:text-orange-400',
+    blue: 'bg-blue-50 text-blue-600 dark:bg-blue-950/50 dark:text-blue-400',
+    purple: 'bg-purple-50 text-purple-600 dark:bg-purple-950/50 dark:text-purple-400',
   };
 
   return (
-    <Card>
+    <Card className="hover:shadow-sm transition-shadow">
       <CardContent className="p-4">
         <div className="flex items-center gap-3">
-          <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${colorMap[color]}`}>
+          <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${colorMap[color]}`}>
             {icon}
           </div>
-          <div>
-            <p className="text-xs text-muted-foreground font-medium">{title}</p>
-            <p className="text-xl font-bold">{value}</p>
+          <div className="min-w-0 flex-1">
+            <p className="text-xs text-muted-foreground font-medium truncate">{title}</p>
+            <p className="text-xl font-bold truncate">{value}</p>
+            {subtitle ? (
+              <p className="text-[11px] text-muted-foreground/80 truncate mt-0.5">{subtitle}</p>
+            ) : null}
           </div>
         </div>
       </CardContent>
@@ -538,20 +580,37 @@ function DashboardSkeleton() {
         <Skeleton className="h-10 w-24" />
         <Skeleton className="h-10 w-28" />
       </div>
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-        {Array.from({ length: 6 }).map((_, i) => (
-          <Card key={i}>
-            <CardContent className="p-4">
-              <div className="flex items-center gap-3">
-                <Skeleton className="w-10 h-10 rounded-lg" />
-                <div className="space-y-2">
-                  <Skeleton className="h-3 w-20" />
-                  <Skeleton className="h-6 w-12" />
+      <div className="space-y-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Card key={i}>
+              <CardContent className="p-4">
+                <div className="flex items-center gap-3">
+                  <Skeleton className="w-10 h-10 rounded-lg shrink-0" />
+                  <div className="space-y-2 flex-1">
+                    <Skeleton className="h-3 w-20" />
+                    <Skeleton className="h-6 w-12" />
+                  </div>
                 </div>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Card key={i}>
+              <CardContent className="p-4">
+                <div className="flex items-center gap-3">
+                  <Skeleton className="w-10 h-10 rounded-lg shrink-0" />
+                  <div className="space-y-2 flex-1">
+                    <Skeleton className="h-3 w-20" />
+                    <Skeleton className="h-6 w-12" />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card>

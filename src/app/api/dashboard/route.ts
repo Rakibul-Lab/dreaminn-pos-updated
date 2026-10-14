@@ -14,6 +14,7 @@ import {
   readCurrentBusinessDateString,
 } from '@/lib/business-date';
 import { sumBookingNetPaid } from '@/lib/booking-totals';
+import { computeDashboardGuestStats } from '@/lib/hotel-guest-stats';
 
 // GET /api/dashboard - Dashboard stats based on user role
 export async function GET(request: NextRequest) {
@@ -201,6 +202,8 @@ async function handleAdminDashboard() {
     where: { status: { in: ['ISSUED', 'PARTIALLY_PAID'] } },
   });
 
+  const guestStats = await computeDashboardGuestStats(businessDate, openedAt, now);
+
   return successResponse({
     role: 'ADMIN',
     today: businessDate,
@@ -209,6 +212,9 @@ async function handleAdminDashboard() {
     checkIns: { count: todaysCheckinCount, items: todaysCheckins, expectedArrivals },
     checkOuts: { count: todaysCheckoutCount, items: todaysCheckouts },
     inHouseGuests: { count: inHouseGuestCount, items: inHouseGuests },
+    guestStats,
+    inHousePax: guestStats.inHousePax,
+    businessDayPax: guestStats.businessDayPax,
     rooms: {
       total: totalRooms,
       occupied: occupiedRooms,
@@ -350,6 +356,8 @@ async function handleHotelDashboard(role: 'HOTEL_STAFF' | 'HOTEL_FD') {
     where: { status: 'IN_PROGRESS' },
   });
 
+  const guestStats = await computeDashboardGuestStats(businessDate, openedAt, now);
+
   return successResponse({
     role,
     today: businessDate,
@@ -365,6 +373,9 @@ async function handleHotelDashboard(role: 'HOTEL_STAFF' | 'HOTEL_FD') {
     arrivals: { count: arrivalCount, items: todaysArrivals, expectedArrivals },
     departures: { count: departureCount, items: todaysDepartures },
     inHouseGuests: { count: inHouseGuestCount, items: inHouseGuests },
+    guestStats,
+    inHousePax: guestStats.inHousePax,
+    businessDayPax: guestStats.businessDayPax,
     activeBookings: { count: activeBookings.length, items: activeBookings },
     roomServiceOrders: recentRoomOrders,
     housekeeping: {

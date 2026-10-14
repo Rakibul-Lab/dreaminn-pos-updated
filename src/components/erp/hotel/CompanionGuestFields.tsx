@@ -26,6 +26,7 @@ export type CompanionGuestDraft = {
   guestNationality: string
   idType: IdDocumentType
   idNumber: string
+  address?: string
 }
 
 export function emptyCompanionDraft(): CompanionGuestDraft {
@@ -35,6 +36,7 @@ export function emptyCompanionDraft(): CompanionGuestDraft {
     guestNationality: DEFAULT_NATIONALITY,
     idType: 'national_id',
     idNumber: '',
+    address: '',
   }
 }
 
@@ -126,6 +128,14 @@ export function CompanionGuestFields({
           <Input
             value={value.idNumber}
             onChange={(e) => onChange({ idNumber: e.target.value })}
+          />
+        </div>
+        <div className="space-y-1 sm:col-span-2">
+          <Label>Address (optional)</Label>
+          <Input
+            value={value.address ?? ''}
+            onChange={(e) => onChange({ address: e.target.value })}
+            placeholder="Optional address for this companion"
           />
         </div>
       </div>

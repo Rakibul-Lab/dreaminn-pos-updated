@@ -1691,7 +1691,7 @@ export async function buildMonthlyBusinessDaySalesReport(
     reportType: 'hotel-monthly-business-day',
     dateFrom,
     dateTo,
-    businessDateDisplay: `${fromLabel} → ${toLabel}`,
+    businessDateDisplay: `${fromLabel} to ${toLabel}`,
     days,
     totals,
   }

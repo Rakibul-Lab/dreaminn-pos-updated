@@ -18,6 +18,20 @@ import {
   paperTotalsToRow,
 } from './daily-sales-paper-format'
 
+export function sanitizePdfDateText(value?: string | null): string {
+  if (!value) return ''
+  return value
+    .replace(/[→\u2192]/g, ' to ')
+    .replace(/->/g, ' to ')
+    .replace(/[–—\u2013\u2014]/g, ' - ')
+    .replace(/[·\u00b7]/g, ' - ')
+    .replace(/!['’]/g, ' to ')
+    .replace(/\s+to\s+/g, ' to ')
+    .replace(/\s+-\s+/g, ' - ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 export type BusinessDayReportTab =
   | 'summary'
   | 'sales'
@@ -190,11 +204,13 @@ export type CollectionsReportData = {
   }
   byMethod?: Array<{ method: string; amount: number }>
   payments?: Array<{
+    id?: string
     amount: number
     method: string
     type: string
     purpose?: string
     roomNumber?: string | null
+    guestName?: string | null
     at: string
     receivedBy: string
     reference?: string | null
@@ -269,7 +285,7 @@ const TAB_TITLES: Record<BusinessDayReportTab, string> = {
 const IN_HOUSE_BOOKING_REPORT_TITLE = 'Booking Report (In-House)'
 
 function formatGeneratedBy(user?: BusinessDayExportMeta['generatedBy']): string {
-  if (!user?.name) return '—'
+  if (!user?.name) return '-'
   if (user.email) return `${user.name} (${user.email})`
   return user.name
 }
@@ -302,7 +318,7 @@ async function loadExportLogo(): Promise<{ dataUrl: string; base64: string } | n
 }
 
 function formatIsoDateTime(value: unknown): string {
-  if (!value || typeof value !== 'string') return '—'
+  if (!value || typeof value !== 'string') return '-'
   try {
     return format(parseISO(value), 'dd MMM yyyy, HH:mm')
   } catch {
@@ -546,7 +562,7 @@ async function writeDailySalesPdf(
   const paperLines = buildPaperSalesLines(data.lines)
   const totals = computePaperTotals(paperLines)
   const summary = buildPaperSummary(data)
-  const dateLabel = formatPaperDate(meta.businessDate, meta.businessDateDisplay).replace(/→|->/g, 'to')
+  const dateLabel = sanitizePdfDateText(formatPaperDate(meta.businessDate, meta.businessDateDisplay))
 
   const mainColWidths = [14, 16, 22, 16, 14, 18, 18, 22, 24]
   const mainTableWidth = mainColWidths.reduce((s, w) => s + w, 0)
@@ -852,7 +868,7 @@ type PdfColumn = {
   header: string
   width: number
   value: (row: Record<string, string | number>) => string
-  align?: 'right'
+  align?: 'right' | 'center'
 }
 
 async function writePdfTable(
@@ -887,7 +903,7 @@ async function writePdfTable(
   pdf.setFont('helvetica', 'normal')
   pdf.setFontSize(8)
   const exportedAt = meta.exportedAt ?? new Date()
-  pdf.text(`Business date: ${meta.businessDateDisplay ?? meta.businessDate}`, marginX, y)
+  pdf.text(`Business date: ${sanitizePdfDateText(meta.businessDateDisplay ?? meta.businessDate)}`, marginX, y)
   y += 4
   pdf.text(`Exported: ${format(exportedAt, 'dd MMM yyyy, HH:mm')}`, marginX, y)
   y += 4
@@ -1111,7 +1127,20 @@ async function writeInHouseBookingExcelWorkbook(
     row += 1
 
     const headers = Object.keys(section.rows[0])
+    const policeColWidths: Record<string, number> = {
+      SL: 7,
+      'Guest name': 24,
+      Mobile: 16,
+      'NID / Passport / License': 26,
+      Address: 32,
+      Nationality: 16,
+      Company: 22,
+      Room: 10,
+      'Business date': 16,
+      'Checked-in date & time': 24,
+    }
     headers.forEach((header, index) => {
+      sheet.getColumn(index + 1).width = policeColWidths[header] ?? 18
       const cell = sheet.getCell(row, index + 1)
       cell.value = header
       cell.font = { bold: true }
@@ -1123,7 +1152,11 @@ async function writeInHouseBookingExcelWorkbook(
       headers.forEach((header, index) => {
         const cell = sheet.getCell(row, index + 1)
         cell.value = dataRow[header] ?? ''
-        cell.alignment = { vertical: 'top', wrapText: true }
+        cell.alignment = {
+          vertical: 'top',
+          horizontal: header === 'SL' || header === 'Room' ? 'center' : 'left',
+          wrapText: true,
+        }
       })
       row += 1
     }
@@ -1156,7 +1189,7 @@ async function writeInHouseBookingPdf(
     pdf,
     pageWidth,
     y,
-    `Business date: ${meta.businessDateDisplay ?? meta.businessDate}`
+    `Business date: ${sanitizePdfDateText(meta.businessDateDisplay ?? meta.businessDate)}`
   )
   y = drawCenteredPdfMetaLine(pdf, pageWidth, y, `Exported: ${format(exportedAt, 'dd MMM yyyy, HH:mm')}`)
   y = drawCenteredPdfMetaLine(
@@ -1175,7 +1208,7 @@ async function writeInHouseBookingPdf(
   const headerRowHeight = 9
   const minRowHeight = 7
   const lineHeight = 3.4
-  const marginBottom = 12
+  const marginBottom = 15
 
   const drawSection = (heading: string, columns: PdfColumn[], rows: Record<string, string | number>[]) => {
     if (!rows.length) return
@@ -1208,7 +1241,13 @@ async function writeInHouseBookingPdf(
       pdf.setFontSize(headerFontSize)
       columns.forEach((col, i) => {
         const lines = pdf.splitTextToSize(col.header, colWidths[i]! - cellPad * 2)
-        pdf.text(lines, x + cellPad, y + 3.6)
+        if (col.align === 'center') {
+          pdf.text(lines, x + colWidths[i]! / 2, y + 3.6, { align: 'center' })
+        } else if (col.align === 'right') {
+          pdf.text(lines, x + colWidths[i]! - cellPad, y + 3.6, { align: 'right' })
+        } else {
+          pdf.text(lines, x + cellPad, y + 3.6)
+        }
         x += colWidths[i]!
       })
       y += headerRowHeight
@@ -1244,6 +1283,8 @@ async function writeInHouseBookingPdf(
           const textY = y + cellPad + 2.8 + lineIndex * lineHeight
           if (col.align === 'right') {
             pdf.text(line, x + colWidths[i]! - cellPad, textY, { align: 'right' })
+          } else if (col.align === 'center') {
+            pdf.text(line, x + colWidths[i]! / 2, textY, { align: 'center' })
           } else {
             pdf.text(line, x + cellPad, textY)
           }
@@ -1258,6 +1299,41 @@ async function writeInHouseBookingPdf(
   for (const section of sections) {
     drawSection(section.heading, section.columns, section.rows)
   }
+
+  // Draw 3-part footer on every page
+  const pageCount = pdf.getNumberOfPages()
+  const footerLineY = pageHeight - 9.5
+  const footerY = pageHeight - 5
+  const businessDateStr = sanitizePdfDateText(meta.businessDateDisplay ?? meta.businessDate)
+  const exportedAtStr = format(exportedAt, 'dd MMM yyyy, HH:mm')
+
+  for (let p = 1; p <= pageCount; p++) {
+    pdf.setPage(p)
+
+    // Subtle divider line above footer
+    pdf.setDrawColor(200, 200, 200)
+    pdf.setLineWidth(0.2)
+    pdf.line(marginX, footerLineY, pageWidth - marginX, footerLineY)
+
+    // Footer typography & color
+    pdf.setFont('helvetica', 'normal')
+    pdf.setFontSize(7.5)
+    pdf.setTextColor(100, 100, 100)
+
+    // Left side: Hotel & report name
+    pdf.text('RRP Dream Inn - In-House Guest Report', marginX, footerY, { align: 'left' })
+
+    // Middle: Business date
+    pdf.text(`Business date: ${businessDateStr}`, pageWidth / 2, footerY, { align: 'center' })
+
+    // Right side: Exported date/time and page number
+    const pageIndicator = `  |  Page ${p} of ${pageCount}`
+    pdf.text(`Exported: ${exportedAtStr}${pageIndicator}`, pageWidth - marginX, footerY, { align: 'right' })
+  }
+
+  // Restore default drawing state
+  pdf.setTextColor(0, 0, 0)
+  pdf.setDrawColor(0, 0, 0)
 
   pdf.save(fileName('police', meta.businessDate, 'pdf'))
 }
@@ -1704,31 +1780,39 @@ export async function downloadBusinessDayDiscountsPdf(
   )
 }
 
+function formatPoliceExportCell(value?: string | null): string {
+  const trimmed = value?.trim()
+  return trimmed && trimmed !== '—' && trimmed !== '-' ? trimmed : '—'
+}
+
 function mapPoliceGuestRow(
   g: NonNullable<PoliceReportData['guests']>[number],
-  includeBusinessDate: boolean
-): Record<string, string> {
-  const row: Record<string, string> = {
-    'Guest name': String(g.guestName ?? ''),
-    Mobile: String(g.mobile ?? '—'),
-    'NID / Passport / License': String(g.idDocument ?? '—'),
-    Address: String(g.address ?? '—'),
-    Nationality: String(g.nationality ?? '—'),
-    Company: String(g.company ?? '—'),
-    Room: String(g.roomNumber ?? ''),
-    'Checked-in date & time': String(g.checkInAtDisplay ?? '—'),
+  includeBusinessDate: boolean,
+  serialNumber?: number
+): Record<string, string | number> {
+  const row: Record<string, string | number> = {
+    SL: typeof serialNumber === 'number' ? serialNumber : 1,
+    'Guest name': String(g.guestName ?? '').trim() || '—',
+    Mobile: formatPoliceExportCell(g.mobile),
+    'NID / Passport / License': formatPoliceExportCell(g.idDocument),
+    Address: formatPoliceExportCell(g.address),
+    Nationality: formatPoliceExportCell(g.nationality),
+    Company: formatPoliceExportCell(g.company),
+    Room: String(g.roomNumber ?? '').trim() || '—',
   }
   if (includeBusinessDate) {
     row['Business date'] = g.businessDate
       ? formatBusinessDateDisplay(g.businessDate)
       : '—'
   }
+  row['Checked-in date & time'] = formatPoliceExportCell(g.checkInAtDisplay)
   return row
 }
 
 function policePdfColumns(includeBusinessDate: boolean): PdfColumn[] {
   const columns: PdfColumn[] = [
-    { header: 'Guest name', width: 26, value: (r) => String(r['Guest name']) },
+    { header: 'SL', width: 8, value: (r) => String(r.SL ?? ''), align: 'center' },
+    { header: 'Guest name', width: 24, value: (r) => String(r['Guest name']) },
     { header: 'Mobile', width: 16, value: (r) => String(r.Mobile) },
     { header: 'NID / Passport / License', width: 24, value: (r) => String(r['NID / Passport / License']) },
     { header: 'Address', width: 24, value: (r) => String(r.Address) },
@@ -1738,7 +1822,7 @@ function policePdfColumns(includeBusinessDate: boolean): PdfColumn[] {
     { header: 'Checked-in date & time', width: 20, value: (r) => String(r['Checked-in date & time']) },
   ]
   if (includeBusinessDate) {
-    columns.splice(7, 0, {
+    columns.splice(8, 0, {
       header: 'Business date',
       width: 14,
       value: (r) => String(r['Business date']),
@@ -1757,7 +1841,7 @@ export async function downloadBusinessDayPoliceExcel(
     [
       {
         heading: `Guests in-house (${data.totalCheckIns ?? 0} booking(s), ${data.guestCount ?? guests.length} guest(s))`,
-        rows: guests.map((guest) => mapPoliceGuestRow(guest, includeBusinessDate)),
+        rows: guests.map((guest, idx) => mapPoliceGuestRow(guest, includeBusinessDate, idx + 1)),
       },
     ],
     meta
@@ -1770,7 +1854,7 @@ export async function downloadBusinessDayPolicePdf(
 ): Promise<void> {
   const guests = data.guests ?? []
   const includeBusinessDate = isPoliceReportDateRange(data)
-  const rows = guests.map((guest) => mapPoliceGuestRow(guest, includeBusinessDate))
+  const rows = guests.map((guest, idx) => mapPoliceGuestRow(guest, includeBusinessDate, idx + 1))
   await writeInHouseBookingPdf(
     [
       {
@@ -1933,7 +2017,7 @@ async function writeMonthlyBusinessDayPdf(
 
   const { days = [], totals } = monthlyData
   const rawDateLabel = meta.businessDateDisplay ?? monthlyData.businessDateDisplay ?? `${monthlyData.dateFrom} to ${monthlyData.dateTo}`
-  const dateLabel = rawDateLabel.replace(/→|->/g, 'to')
+  const dateLabel = sanitizePdfDateText(rawDateLabel)
 
   const headers = ['Date', 'Cash', 'Card', 'Bank Payment', 'M.Finance', 'Due', 'Food Bill', 'Total']
   const colWidths = [22, 24, 24, 26, 26, 22, 22, 24]

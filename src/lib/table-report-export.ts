@@ -21,7 +21,7 @@ const PDF_LINE_HEIGHT = 3.6
 const PDF_CELL_PAD = 1.5
 
 function formatGeneratedBy(user?: TableExportMeta['generatedBy']): string {
-  if (!user?.name) return '—'
+  if (!user?.name) return '-'
   if (user.email) return `${user.name} (${user.email})`
   return user.name
 }

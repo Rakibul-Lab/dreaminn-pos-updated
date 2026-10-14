@@ -56,12 +56,12 @@ function buildInfoRows(
   return [
     ['Item', meta.itemName],
     ['Category', meta.category?.trim() || 'Uncategorized'],
-    ['Unit', meta.unit || '—'],
-    ['Current quantity', meta.currentQuantity ?? '—'],
+    ['Unit', meta.unit || '-'],
+    ['Current quantity', meta.currentQuantity ?? '-'],
     [
       'Date range',
       meta.dateFrom || meta.dateTo
-        ? `${meta.dateFrom || '…'} → ${meta.dateTo || '…'}`
+        ? `${meta.dateFrom || '...'} to ${meta.dateTo || '...'}`
         : 'All dates',
     ],
     ['Type filter', meta.typeFilter && meta.typeFilter !== 'all' ? typeLabel(meta.typeFilter) : 'All types'],
@@ -106,7 +106,7 @@ export async function downloadInventoryHistoryPdf(
   const stockOut = rows.filter((r) => r.type === 'out').reduce((s, r) => s + r.quantity, 0)
 
   await downloadTablePdf({
-    title: `Inventory History — ${meta.itemName}`,
+    title: `Inventory History - ${meta.itemName}`,
     columns: pdfColumns(),
     rows: mapped,
     meta: { ...meta, infoRows: buildInfoRows(meta, rows) },

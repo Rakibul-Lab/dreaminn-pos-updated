@@ -54,9 +54,17 @@ type GuestMovement = {
   actualCheckOuts?: number
 }
 
+export type BusinessDaySummaryBalances = {
+  openingBalance?: number
+  salesTotal?: number
+  grandTotal?: number
+  companyBillTotal?: number
+  closingBalance?: number
+}
+
 export type BusinessDaySummarySectionProps = {
   isLoading?: boolean
-  salesBalances?: DailySalesBalances | null
+  salesBalances?: DailySalesBalances | BusinessDaySummaryBalances | null
   grandTotal?: number
   hotel?: HotelSalesSlice | null
   restaurant?: RestaurantSalesSlice | null
@@ -86,12 +94,12 @@ export function BusinessDaySummarySection({
   const closingBalance =
     openingBalanceOverride !== undefined && openingBalanceOverride !== null && salesBalances
       ? openingBalanceOverride +
-        salesBalances.salesTotal -
-        salesBalances.companyBillTotal
+        (salesBalances.salesTotal ?? 0) -
+        (salesBalances.companyBillTotal ?? 0)
       : (salesBalances?.closingBalance ?? 0)
   const resolvedGrandTotal =
     openingBalanceOverride !== undefined && openingBalanceOverride !== null && salesBalances
-      ? openingBalanceOverride + salesBalances.salesTotal
+      ? openingBalanceOverride + (salesBalances.salesTotal ?? 0)
       : (salesBalances?.grandTotal ?? grandTotal)
 
   const hotelSalesTotal =

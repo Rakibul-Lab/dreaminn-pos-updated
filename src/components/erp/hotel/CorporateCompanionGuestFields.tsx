@@ -1,10 +1,25 @@
 'use client'
 
+import { useMemo } from 'react'
 import { Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { CompanyLedgerSearchField } from '@/components/erp/hotel/CompanyLedgerSearchField'
+import { NationalityField } from '@/components/erp/shared/NationalityField'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import type { IdDocumentType } from '@/lib/id-ocr'
+import {
+  DEFAULT_NATIONALITY,
+  getIdTypeOptionsForNationality,
+  resolveIdTypeForNationality,
+} from '@/lib/id-type-label'
 
 export type CorporateCompanionDraft = {
   name: string
@@ -12,6 +27,9 @@ export type CorporateCompanionDraft = {
   phone: string
   designation: string
   address: string
+  guestNationality?: string
+  idType?: IdDocumentType
+  idNumber?: string
 }
 
 export function emptyCorporateCompanionDraft(): CorporateCompanionDraft {
@@ -21,6 +39,9 @@ export function emptyCorporateCompanionDraft(): CorporateCompanionDraft {
     phone: '',
     designation: '',
     address: '',
+    guestNationality: DEFAULT_NATIONALITY,
+    idType: 'national_id',
+    idNumber: '',
   }
 }
 
@@ -43,6 +64,12 @@ export function CorporateCompanionGuestFields({
   onCompanyManualChange,
   onRemove,
 }: CorporateCompanionGuestFieldsProps) {
+  const currentNationality = value.guestNationality || DEFAULT_NATIONALITY
+  const idTypeOptions = useMemo(
+    () => getIdTypeOptionsForNationality(currentNationality),
+    [currentNationality]
+  )
+
   const handleCompanyManual = (name: string) => {
     onChange({ company: name })
     onCompanyManualChange?.(name)
@@ -104,7 +131,47 @@ export function CorporateCompanionGuestFields({
           <Label>Address *</Label>
           <Input value={value.address} onChange={(e) => onChange({ address: e.target.value })} />
         </div>
+        <div className="space-y-1 sm:col-span-2">
+          <NationalityField
+            value={currentNationality}
+            onChange={(nationality) =>
+              onChange({
+                guestNationality: nationality,
+                idType: resolveIdTypeForNationality(nationality, value.idType ?? 'national_id'),
+              })
+            }
+            label="Nationality"
+            placeholder="Select nationality…"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label>ID type (optional)</Label>
+          <Select
+            value={value.idType ?? 'national_id'}
+            onValueChange={(idType) => onChange({ idType: idType as IdDocumentType })}
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {idTypeOptions.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value}>
+                  {opt.value === 'national_id' ? 'National ID (NID)' : opt.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1">
+          <Label>NID / Passport number (optional)</Label>
+          <Input
+            value={value.idNumber ?? ''}
+            onChange={(e) => onChange({ idNumber: e.target.value })}
+            placeholder="Optional"
+          />
+        </div>
       </div>
     </div>
   )
 }
+

@@ -105,7 +105,8 @@ interface Room {
   roomNumber: string
   status: string
   totalPrice: number
-  type: { name: string }
+  typeId?: string
+  type: { id?: string; name: string }
 }
 
 const STEP_LABELS = ['Guest', 'Stay', 'Payment', 'Confirm', 'Document']
@@ -608,6 +609,7 @@ export function NewReservationWizard({
         nationality: companion.guestNationality.trim() || DEFAULT_NATIONALITY,
         idType: companion.idType,
         idNumber: companion.idNumber.trim() || null,
+        address: companion.address?.trim() || null,
         visaExpiryDate: null,
       }
     })
@@ -617,6 +619,7 @@ export function NewReservationWizard({
     const slots = buildAdultCompanionSlots(parseInt(adults, 10) || 1)
     return slots.map((slot, index) => {
       const companion = corporateCompanions[index] ?? emptyCorporateCompanionDraft()
+      const nat = companion.guestNationality?.trim() || guestNationality.trim() || DEFAULT_NATIONALITY
       return {
         companionType: slot.companionType,
         sortOrder: index,
@@ -624,7 +627,10 @@ export function NewReservationWizard({
         company: companion.company.trim(),
         phone: companion.phone.trim(),
         designation: companion.designation.trim(),
-        address: companion.address.trim(),
+        address: companion.address?.trim() || null,
+        nationality: nat,
+        idType: companion.idType || (companion.idNumber?.trim() ? resolveIdTypeForNationality(nat, 'national_id') : null),
+        idNumber: companion.idNumber?.trim() || null,
       }
     })
   }
@@ -729,17 +735,29 @@ export function NewReservationWizard({
         guestNationality: nationality,
         idType: resolveIdTypeForNationality(nationality, resolvedType),
         idNumber: String(companion.idNumber ?? ''),
+        address: String(companion.address ?? ''),
       }
     })
     const loadedCorporateCompanions = companionSlots.map((_, index) => {
       const companion = adultOnlyCompanions[index]
       if (!companion) return emptyCorporateCompanionDraft()
+      const nationality = String(companion.nationality ?? customer?.nationality ?? DEFAULT_NATIONALITY)
+      const idTypeRaw = companion.idType
+      const resolvedType =
+        idTypeRaw === 'passport' ||
+        idTypeRaw === 'driving_license' ||
+        idTypeRaw === 'national_id'
+          ? (idTypeRaw as IdDocumentType)
+          : 'national_id'
       return {
         name: String(companion.name ?? ''),
         company: String(companion.company ?? ''),
         phone: String(companion.phone ?? ''),
         designation: String(companion.designation ?? ''),
         address: String(companion.address ?? ''),
+        guestNationality: nationality,
+        idType: resolveIdTypeForNationality(nationality, resolvedType),
+        idNumber: String(companion.idNumber ?? ''),
       }
     })
 
@@ -1639,7 +1657,8 @@ export function NewReservationWizard({
     }
     const selectedRoom = availableRooms.find((room) => room.id === selectedRoomId)
     if (selectedRoom) {
-      const cap = categoryCapacityByType.get(selectedRoom.typeId)
+      const roomTypeId = selectedRoom.typeId || selectedRoom.type?.id || ''
+      const cap = roomTypeId ? categoryCapacityByType.get(roomTypeId) : undefined
       if (cap && cap.available <= 0) {
         return `No ${cap.typeName} inventory left for these dates (${cap.entryHeld} held by reservation entries)`
       }
@@ -2219,7 +2238,9 @@ export function NewReservationWizard({
                       <GuestIdTypeField
                         nationality={guestNationality}
                         idType={idType}
-                        onIdTypeChange={(type) => patchGuest({ idType: type })}
+                        onIdTypeChange={(type) =>
+                          patchGuest({ idType: (type || 'national_id') as IdDocumentType })
+                        }
                         required
                       />
                     </div>
@@ -2291,10 +2312,29 @@ export function NewReservationWizard({
                       />
                     </div>
                     <div className="space-y-1">
-                      <Label>Company</Label>
+                      <div className="flex items-center justify-between">
+                        <Label>Company</Label>
+                        {companyLedgerId ? (
+                          <span className="inline-flex items-center text-[10px] font-semibold text-emerald-700 bg-emerald-50 dark:bg-emerald-950/50 dark:text-emerald-300 border border-emerald-200/80 px-1.5 py-0.5 rounded">
+                            Ledger Account
+                          </span>
+                        ) : guestCompany && guestCompany !== DEFAULT_GUEST_COMPANY ? (
+                          <span className="inline-flex items-center text-[10px] font-semibold text-sky-700 bg-sky-50 dark:bg-sky-950/50 dark:text-sky-300 border border-sky-200/80 px-1.5 py-0.5 rounded">
+                            Custom Company
+                          </span>
+                        ) : null}
+                      </div>
                       <CompanyLedgerSearchField
+                        mode="manual-or-ledger"
                         selectedLedgerId={companyLedgerId}
                         selectedLabel={guestCompany}
+                        manualValue={guestCompany === DEFAULT_GUEST_COMPANY ? '' : guestCompany}
+                        onManualChange={(typed) =>
+                          patchGuest({
+                            companyLedgerId: '',
+                            guestCompany: typed.trim() ? typed : DEFAULT_GUEST_COMPANY,
+                          })
+                        }
                         onSelect={(company) =>
                           patchGuest({
                             companyLedgerId: company.id,
@@ -2307,11 +2347,16 @@ export function NewReservationWizard({
                             guestCompany: DEFAULT_GUEST_COMPANY,
                           })
                         }
+                        placeholder="Direct/Walk in (type company or search ledger…)"
                       />
                       {companyLedgerId ? (
                         <p className="text-xs text-muted-foreground">
                           Guest will be added to this company ledger on reservation. Checkout can be
                           billed to the company without payment.
+                        </p>
+                      ) : guestCompany && guestCompany !== DEFAULT_GUEST_COMPANY ? (
+                        <p className="text-xs text-muted-foreground">
+                          Plain company name recorded for this reservation. No ledger account will be linked.
                         </p>
                       ) : null}
                     </div>
@@ -2493,7 +2538,8 @@ export function NewReservationWizard({
                     </SelectTrigger>
                     <SelectContent>
                       {availableRooms.map((r) => {
-                        const cap = categoryCapacityByType.get(r.typeId)
+                        const roomTypeId = r.typeId || r.type?.id || ''
+                        const cap = roomTypeId ? categoryCapacityByType.get(roomTypeId) : undefined
                         const availHint =
                           cap && cap.entryHeld > 0
                             ? ` · ${cap.available}/${cap.total} available`

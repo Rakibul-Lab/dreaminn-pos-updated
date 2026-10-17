@@ -1246,7 +1246,8 @@ export async function buildDailySalesDetailReport(
     if (!isGuestFolioManualRestaurantBill(order)) continue
     // Posting the bill raises the room due instead of taking money, so it is not a
     // sale yet — it reaches the report through the invoice on the check-out day.
-    if (order.bookingId && !checkoutBookingIds.has(order.bookingId)) continue
+    // Checkouts today already have their restaurant charges reported on the invoice or payment rows.
+    if (order.bookingId && checkoutBookingIds.has(order.bookingId)) continue
 
     const parsed = parseBookingRestaurantBillNotes(order.notes ?? null)
     const booking = order.booking
@@ -1254,6 +1255,17 @@ export async function buildDailySalesDetailReport(
       parsed.paymentMethod,
       order.totalAmount
     )
+
+    // In-house bills with no money taken yet belong on the room folio at checkout,
+    // not on today's sales report.
+    if (
+      order.bookingId &&
+      billPayment.cash <= 0 &&
+      billPayment.card <= 0 &&
+      billPayment.mbanking <= 0
+    ) {
+      continue
+    }
 
     lines.push({
       id: order.id,
@@ -1466,9 +1478,20 @@ export async function buildDailySalesDetailReport(
   const companyBillTotal = companyBills
     .filter((bill) => !bill.booking?.billTransferredToBookingId)
     .reduce((s, bill) => s + bill.dueAmount, 0)
-  const balances =
-    storedBalances ??
-    computeDailySalesBalances(openingBalance, chargeTotal, companyBillTotal)
+  const balances = storedBalances
+    ? {
+        ...storedBalances,
+        salesTotal: chargeTotal,
+        grandTotal: Number((storedBalances.openingBalance + chargeTotal).toFixed(2)),
+        closingBalance: Number(
+          (
+            storedBalances.openingBalance +
+            chargeTotal -
+            (storedBalances.companyBillTotal ?? companyBillTotal)
+          ).toFixed(2)
+        ),
+      }
+    : computeDailySalesBalances(openingBalance, chargeTotal, companyBillTotal)
 
   const collections = allPayments.reduce((sum, payment) => {
     if (payment.paymentType === 'REFUND') return sum - Math.abs(payment.amount)

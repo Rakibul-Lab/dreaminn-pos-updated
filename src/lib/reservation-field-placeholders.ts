@@ -7,7 +7,7 @@ export function reservationDocValue(
 ): string {
   const trimmed = value?.trim()
   if (trimmed) return trimmed
-  return required ? RESERVATION_REQUIRED_PLACEHOLDER : '—'
+  return required ? RESERVATION_REQUIRED_PLACEHOLDER : 'N/A'
 }
 
 export function reservationIdLabel(
@@ -33,7 +33,8 @@ export function reservationIdLabel(
   else if (typeLabel && options?.requiredWhenMissing) {
     base = `${typeLabel} — ${RESERVATION_REQUIRED_PLACEHOLDER}`
   } else if (options?.requiredWhenMissing) base = RESERVATION_REQUIRED_PLACEHOLDER
-  else base = '—'
+  else if (typeLabel) base = `${typeLabel} — N/A`
+  else base = 'N/A'
 
   return base
 }

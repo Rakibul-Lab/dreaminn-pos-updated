@@ -187,8 +187,8 @@ export function ReservationDocumentView({
   const nights = countHotelStayNights(checkInDt, checkOutDt)
   const policies = reservationPoliciesWithTimes(times)
   const confirmationNo = formatConfirmationNumber(reservation)
-  const reqPersonName = reservation.reqPersonName || '—'
-  const reqPersonPhone = reservation.reqPersonPhone || reservation.customer.phone || '—'
+  const reqPersonName = reservation.reqPersonName?.trim() || 'N/A'
+  const reqPersonPhone = reservation.reqPersonPhone?.trim() || reservation.customer.phone?.trim() || 'N/A'
   const stayRegistrationNumber = resolveBookingRegistrationNumber(reservation)
   const adultCompanions =
     reservation.companions?.filter((c) => c.companionType !== 'CHILD') ?? []
@@ -345,7 +345,7 @@ export function ReservationDocumentView({
               <div className="rd-row-2">
                 <p>
                   <span className="rd-label">Name of the guest:</span>{' '}
-                  <span className="rd-muted">{reservation.customer.name}</span>
+                  <span className="rd-muted">{reservation.customer.name?.trim() || 'N/A'}</span>
                 </p>
                 <p>
                   <span className="rd-label">Req. Person:</span>{' '}
@@ -355,7 +355,7 @@ export function ReservationDocumentView({
               <div className="rd-row-2">
                 <p>
                   <span className="rd-label">Nationality:</span>{' '}
-                  <span className="rd-muted">{reservation.customer.nationality || '—'}</span>
+                  <span className="rd-muted">{reservation.customer.nationality?.trim() || 'N/A'}</span>
                 </p>
                 <p>
                   <span className="rd-label">Mobile Number:</span>{' '}
@@ -380,7 +380,7 @@ export function ReservationDocumentView({
                 {isCorporateGuest && (
                   <p>
                     <span className="rd-label">Designation:</span>{' '}
-                    <span className="rd-muted">{reservation.customer.designation || '—'}</span>
+                    <span className="rd-muted">{reservation.customer.designation?.trim() || 'N/A'}</span>
                   </p>
                 )}
               </div>
@@ -393,7 +393,7 @@ export function ReservationDocumentView({
                 </p>
                 <p>
                   <span className="rd-label">Email:</span>{' '}
-                  <span className="rd-muted">{reservation.customer.email || '—'}</span>
+                  <span className="rd-muted">{reservation.customer.email?.trim() || 'N/A'}</span>
                 </p>
               </div>
             </>
@@ -402,7 +402,7 @@ export function ReservationDocumentView({
               <div className="rd-row-2">
                 <p>
                   <span className="rd-label">Name of the guest:</span>{' '}
-                  <span className="rd-muted">{reservation.customer.name}</span>
+                  <span className="rd-muted">{reservation.customer.name?.trim() || 'N/A'}</span>
                 </p>
                 <p>
                   <span className="rd-label">Req. Person:</span>{' '}
@@ -416,7 +416,7 @@ export function ReservationDocumentView({
                     className={`rd-muted ${!isCorporateGuest && showMissingFields && !reservation.customer.nationality?.trim() ? placeholderClass : ''}`}
                   >
                     {isCorporateGuest
-                      ? reservation.customer.nationality || '—'
+                      ? reservation.customer.nationality?.trim() || 'N/A'
                       : reservationDocValue(reservation.customer.nationality, showMissingFields)}
                   </span>
                 </p>
@@ -447,7 +447,7 @@ export function ReservationDocumentView({
                 {isCorporateGuest && (
                   <p>
                     <span className="rd-label">Designation:</span>{' '}
-                    <span className="rd-muted">{reservation.customer.designation || '—'}</span>
+                    <span className="rd-muted">{reservation.customer.designation?.trim() || 'N/A'}</span>
                   </p>
                 )}
               </div>
@@ -464,7 +464,7 @@ export function ReservationDocumentView({
                     className={`rd-muted ${!isCorporateGuest && showMissingFields && !reservation.customer.email?.trim() ? placeholderClass : ''}`}
                   >
                     {isCorporateGuest
-                      ? reservation.customer.email || '—'
+                      ? reservation.customer.email?.trim() || 'N/A'
                       : reservationDocValue(reservation.customer.email, showMissingFields)}
                   </span>
                 </p>
@@ -515,13 +515,13 @@ export function ReservationDocumentView({
                   className={`rd-muted ${!isCorporateGuest && showMissingFields && !reservation.customer.address?.trim() ? placeholderClass : ''}`}
                 >
                   {isCorporateGuest
-                    ? reservation.customer.address || '—'
+                    ? reservation.customer.address?.trim() || 'N/A'
                     : reservationDocValue(reservation.customer.address, showMissingFields)}
                 </span>
               </p>
               <p>
                 <span className="rd-label">Remarks:</span>{' '}
-                <span className="rd-muted">{stripSystemBookingNotes(reservation.notes) || '—'}</span>
+                <span className="rd-muted">{stripSystemBookingNotes(reservation.notes)?.trim() || 'N/A'}</span>
               </p>
             </div>
             <div className="rd-details-col">
@@ -606,10 +606,10 @@ export function ReservationDocumentView({
                         <span className="rd-guest-role">{guest.label}</span>
                         <span className="rd-guest-name">{guest.name}</span>
                       </td>
-                      <td>{formatGuestCompany(guest.company) || '—'}</td>
-                      <td>{guest.phone || '—'}</td>
-                      <td>{guest.designation || '—'}</td>
-                      <td>{guest.address || '—'}</td>
+                      <td>{formatGuestCompany(guest.company) || 'N/A'}</td>
+                      <td>{guest.phone || 'N/A'}</td>
+                      <td>{guest.designation || 'N/A'}</td>
+                      <td>{guest.address || 'N/A'}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -640,8 +640,8 @@ export function ReservationDocumentView({
                         <span className="rd-guest-role">{guest.label}</span>
                         <span className="rd-guest-name">{guest.name}</span>
                       </td>
-                      <td>{guest.phone || '—'}</td>
-                      <td>{guest.nationality || '—'}</td>
+                      <td>{guest.phone || 'N/A'}</td>
+                      <td>{guest.nationality || 'N/A'}</td>
                       <td>
                         {reservationIdLabel(guest.idType, guest.idNumber, {
                           requiredWhenMissing: showMissingFields,
@@ -775,7 +775,7 @@ export function ReservationDocumentView({
                 </p>
                 <p className="rd-line">
                   <span className="rd-label">Nationality:</span>{' '}
-                  <span className="rd-muted">{guest.nationality || '—'}</span>
+                  <span className="rd-muted">{guest.nationality || 'N/A'}</span>
                 </p>
                 <p className="rd-line">
                   <span className="rd-label">ID:</span>{' '}

@@ -117,8 +117,8 @@ export function ReservationEntryDocumentView({
   const nights = countHotelStayNights(checkInDt, checkOutDt)
   const policies = reservationPoliciesWithTimes(times)
   const confirmationNo = formatReservationEntryConfirmationNumber(entry)
-  const reqPersonName = entry.reqPersonName || '—'
-  const reqPersonPhone = entry.reqPersonPhone || entry.guestPhone || '—'
+  const reqPersonName = entry.reqPersonName?.trim() || 'N/A'
+  const reqPersonPhone = entry.reqPersonPhone?.trim() || entry.guestPhone?.trim() || 'N/A'
   const entryIdLabel = reservationIdLabel(entry.guestIdType, entry.guestIdNumber)
   const servicePercent = INVOICE_SERVICE_CHARGE_PERCENT
   const chargeTotals = computeRoomBookingTotals(
@@ -136,12 +136,12 @@ export function ReservationEntryDocumentView({
   const showRoomLineTable = lineCount >= 2 || entry.totalRooms > 1
   const roomSummaryText = showRoomLineTable
     ? `${entry.totalRooms} room(s) across ${lineCount} line(s)`
-    : entry.lineSummary || '—'
+    : entry.lineSummary?.trim() || 'N/A'
 
   const roomTypeLabel =
     entry.lines.length > 0
       ? Array.from(new Set(entry.lines.map((l) => l.roomTypeName))).join(', ')
-      : '—'
+      : 'N/A'
   const assignedRoomNumbers = entry.lines
     .map((l) => l.roomNumber)
     .filter(Boolean)
@@ -235,7 +235,7 @@ export function ReservationEntryDocumentView({
             <div className="rd-row-2">
               <p>
                 <span className="rd-label">Name of the guest:</span>{' '}
-                <span className="rd-muted">{entry.guestName ?? '—'}</span>
+                <span className="rd-muted">{entry.guestName?.trim() || 'N/A'}</span>
               </p>
               <p>
                 <span className="rd-label">Req. Person:</span>{' '}
@@ -245,7 +245,7 @@ export function ReservationEntryDocumentView({
             <div className="rd-row-2">
               <p>
                 <span className="rd-label">Nationality:</span>{' '}
-                <span className="rd-muted">{entry.guestNationality || '—'}</span>
+                <span className="rd-muted">{entry.guestNationality?.trim() || 'N/A'}</span>
               </p>
               <p>
                 <span className="rd-label">Mobile Number:</span>{' '}
@@ -259,7 +259,7 @@ export function ReservationEntryDocumentView({
               </p>
               <p>
                 <span className="rd-label">Registration No.:</span>{' '}
-                <span className="rd-muted">{entry.registrationNumber ?? '—'}</span>
+                <span className="rd-muted">{entry.registrationNumber?.trim() || 'N/A'}</span>
               </p>
             </div>
             <div className="rd-row-2">
@@ -269,7 +269,7 @@ export function ReservationEntryDocumentView({
               </p>
               <p>
                 <span className="rd-label">Email:</span>{' '}
-                <span className="rd-muted">{entry.guestEmail || '—'}</span>
+                <span className="rd-muted">{entry.guestEmail?.trim() || 'N/A'}</span>
               </p>
             </div>
             <p className="rd-intro">{RESERVATION_INTRO}</p>
@@ -316,11 +316,11 @@ export function ReservationEntryDocumentView({
                 </p>
                 <p>
                   <span className="rd-label">Address:</span>{' '}
-                  <span className="rd-muted">{entry.guestAddress || '—'}</span>
+                  <span className="rd-muted">{entry.guestAddress?.trim() || 'N/A'}</span>
                 </p>
                 <p>
                   <span className="rd-label">Remarks:</span>{' '}
-                  <span className="rd-muted">{stripSystemBookingNotes(entry.notes) || '—'}</span>
+                  <span className="rd-muted">{stripSystemBookingNotes(entry.notes)?.trim() || 'N/A'}</span>
                 </p>
               </div>
               <div className="rd-details-col">

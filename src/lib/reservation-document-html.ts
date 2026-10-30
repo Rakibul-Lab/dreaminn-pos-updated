@@ -20,7 +20,7 @@ function idTypeLabel(type?: string | null) {
   if (type === 'passport') return 'Passport'
   if (type === 'driving_license') return 'Driving License'
   if (type === 'national_id') return 'National ID (NID)'
-  return type || '—'
+  return type || 'N/A'
 }
 
 function esc(s: string) {
@@ -123,17 +123,17 @@ export async function buildReservationDocumentHtml(data: ReservationPdfData): Pr
     <section style="display:grid;grid-template-columns:1fr 1fr;gap:16px;font-size:13px;margin-bottom:20px">
       <div>
         <h3 style="font-size:14px;font-weight:600;color:#334155;margin:0 0 8px">Guest information</h3>
-        <p style="margin:0 0 4px"><span style="color:#64748b">Name of the guest:</span> ${esc(data.guestName)}</p>
-        <p style="margin:0 0 4px"><span style="color:#64748b">Nationality:</span> ${esc(data.guestNationality || '—')}</p>
+        <p style="margin:0 0 4px"><span style="color:#64748b">Name of the guest:</span> ${esc(data.guestName || 'N/A')}</p>
+        <p style="margin:0 0 4px"><span style="color:#64748b">Nationality:</span> ${esc(data.guestNationality || 'N/A')}</p>
         <p style="margin:0 0 4px"><span style="color:#64748b">ID:</span> ${esc(idTypeLabel(data.idType))}${data.idNumber ? ` (${esc(data.idNumber)})` : ''}</p>
         <p style="margin:0 0 4px"><span style="color:#64748b">Company:</span> ${esc(formatGuestCompany(data.company || data.guestCompany))}</p>
       </div>
       <div>
         <h3 style="font-size:14px;font-weight:600;color:#334155;margin:0 0 8px">Requisition &amp; Contact</h3>
-        <p style="margin:0 0 4px"><span style="color:#64748b">Req. Person:</span> ${esc(data.reqPersonName || '—')}</p>
-        <p style="margin:0 0 4px"><span style="color:#64748b">Mobile Number:</span> ${esc(data.reqPersonPhone || data.guestPhone)}</p>
+        <p style="margin:0 0 4px"><span style="color:#64748b">Req. Person:</span> ${esc(data.reqPersonName || 'N/A')}</p>
+        <p style="margin:0 0 4px"><span style="color:#64748b">Mobile Number:</span> ${esc(data.reqPersonPhone || data.guestPhone || 'N/A')}</p>
         ${data.guestRegistrationNumber ? `<p style="margin:0 0 4px"><span style="color:#64748b">Registration no.:</span> ${esc(data.guestRegistrationNumber)}</p>` : ''}
-        <p style="margin:0 0 4px"><span style="color:#64748b">Email:</span> ${esc(data.guestEmail || '—')}</p>
+        <p style="margin:0 0 4px"><span style="color:#64748b">Email:</span> ${esc(data.guestEmail || 'N/A')}</p>
       </div>
     </section>
 
@@ -144,7 +144,7 @@ export async function buildReservationDocumentHtml(data: ReservationPdfData): Pr
         <p style="margin:0 0 4px"><span style="color:#64748b">Room No.:</span> ${esc(data.roomNumber)}</p>
         <p style="margin:0 0 4px"><span style="color:#64748b">Check-in:</span> ${esc(format(new Date(data.checkIn), 'dd-MMM-yyyy'))}</p>
         <p style="margin:0 0 4px"><span style="color:#64748b">Check-out:</span> ${esc(format(new Date(data.checkOut), 'dd-MMM-yyyy'))}</p>
-        <p style="margin:0 0 4px"><span style="color:#64748b">Address:</span> ${esc(data.guestAddress || '—')}</p>
+        <p style="margin:0 0 4px"><span style="color:#64748b">Address:</span> ${esc(data.guestAddress || 'N/A')}</p>
       </div>
       <div>
         <h3 style="font-size:14px;font-weight:600;color:#334155;margin:0 0 8px">Occupancy &amp; Plan</h3>

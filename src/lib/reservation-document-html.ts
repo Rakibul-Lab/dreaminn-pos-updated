@@ -1,9 +1,17 @@
 import { format } from 'date-fns'
 import { formatConfirmationNumber } from './confirmation-number'
+import { stripSystemBookingNotes } from './invoice-notes'
 import {
+  HOTEL_LOCATION,
+  HOTEL_PHONE,
+  HOTEL_EMAIL,
+  HOTEL_BIN,
+  HOTEL_REG_NO,
   RESERVATION_TERMS_AND_CONDITIONS,
   HOTEL_RESERVATION_FOOTER,
   formatReservationMealPlan,
+  formatGuestCompany,
+  DEFAULT_SMOKING_STATUS,
 } from './reservation-terms'
 import type { ReservationPdfData } from './reservation-pdf-data'
 import { bookingVatOptions, computeBookingDisplayVat, computeRoomBookingTotals } from './booking-totals'
@@ -53,21 +61,24 @@ export async function buildReservationDocumentHtml(data: ReservationPdfData): Pr
     bookingVatOptions(data)
   )
   const vatDisplay = computeBookingDisplayVat(data)
-  const vatPercent = data.vatPercent ?? vatDisplay.percent
+  const vatPercent = (data.vatPercent && data.vatPercent > 0) ? data.vatPercent : vatDisplay.percent
   const vatAmount = vatDisplay.amount
   const totalWithVat = data.totalWithVat ?? vatTotals.totalWithVat
-  const vatInclNote = vatDisplay.mode === 'included' ? ' (incl. in rate)' : ''
-  const vatRow = `<div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>VAT (${vatPercent}%${vatInclNote})</span><span>৳${vatAmount.toLocaleString()}</span></div>
+  const vatRow = vatDisplay.mode === 'included'
+    ? `<div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>VAT</span><span>${vatPercent}% — (incl. in rate)</span></div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>Total (incl. VAT)</span><span>৳${totalWithVat.toLocaleString()}</span></div>`
+    : `<div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>VAT (${vatPercent}%)</span><span>৳${vatAmount.toLocaleString()}</span></div>
       <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>Total (incl. VAT)</span><span>৳${totalWithVat.toLocaleString()}</span></div>`
 
   const termsHtml = RESERVATION_TERMS_AND_CONDITIONS.map(
     (term) => `<li style="margin-bottom:4px">${esc(term.replace(/^\d+\.\s*/, ''))}</li>`
   ).join('')
 
-  const notesHtml = data.notes
+  const displayNotes = stripSystemBookingNotes(data.notes)
+  const notesHtml = displayNotes
     ? `<section style="margin-top:20px;font-size:13px;color:#475569">
         <h3 style="font-size:14px;font-weight:600;color:#334155;margin:0 0 6px">Notes</h3>
-        <p style="margin:0">${esc(data.notes)}</p>
+        <p style="margin:0">${esc(displayNotes)}</p>
       </section>`
     : ''
 
@@ -95,7 +106,10 @@ export async function buildReservationDocumentHtml(data: ReservationPdfData): Pr
         </div>
         <div>
           <p style="font-size:20px;font-weight:700;color:#1e293b;margin:0">RRP Dream Inn</p>
-          <p style="font-size:13px;color:#64748b;margin:4px 0 0">Guest reservation confirmation</p>
+          <p style="font-size:12px;font-weight:700;color:#1e293b;margin:2px 0 0">Registration No: ${HOTEL_REG_NO} | BIN: ${HOTEL_BIN}</p>
+          <p style="font-size:13px;font-weight:700;color:#1e293b;margin:2px 0 0">${HOTEL_LOCATION}</p>
+          <p style="font-size:12px;font-weight:700;color:#1e293b;margin:2px 0 0">Phone: ${HOTEL_PHONE} | Email: ${HOTEL_EMAIL}</p>
+          <p style="font-size:12px;color:#64748b;margin:2px 0 0">Guest reservation confirmation</p>
         </div>
       </div>
       <div style="text-align:right;font-size:13px">
@@ -106,25 +120,37 @@ export async function buildReservationDocumentHtml(data: ReservationPdfData): Pr
       </div>
     </header>
 
-    <section style="display:grid;grid-template-columns:1fr 1fr;gap:16px;font-size:13px;margin-bottom:24px">
+    <section style="display:grid;grid-template-columns:1fr 1fr;gap:16px;font-size:13px;margin-bottom:20px">
       <div>
         <h3 style="font-size:14px;font-weight:600;color:#334155;margin:0 0 8px">Guest information</h3>
-        <p style="margin:0 0 4px"><span style="color:#64748b">Name:</span> ${esc(data.guestName)}</p>
-        <p style="margin:0 0 4px"><span style="color:#64748b">Phone:</span> ${esc(data.guestPhone)}</p>
-        ${data.guestEmail ? `<p style="margin:0 0 4px"><span style="color:#64748b">Email:</span> ${esc(data.guestEmail)}</p>` : ''}
-        ${data.guestAddress ? `<p style="margin:0 0 4px"><span style="color:#64748b">Address:</span> ${esc(data.guestAddress)}</p>` : ''}
-        ${data.guestNationality ? `<p style="margin:0 0 4px"><span style="color:#64748b">Nationality:</span> ${esc(data.guestNationality)}</p>` : ''}
-        ${data.guestRegistrationNumber ? `<p style="margin:0 0 4px"><span style="color:#64748b">Registration no.:</span> ${esc(data.guestRegistrationNumber)}</p>` : ''}
-        <p style="margin:0 0 4px"><span style="color:#64748b">ID:</span> ${esc(idTypeLabel(data.idType))}</p>
-        ${data.idNumber ? `<p style="margin:0 0 4px"><span style="color:#64748b">ID no.:</span> ${esc(data.idNumber)}</p>` : ''}
+        <p style="margin:0 0 4px"><span style="color:#64748b">Name of the guest:</span> ${esc(data.guestName)}</p>
+        <p style="margin:0 0 4px"><span style="color:#64748b">Nationality:</span> ${esc(data.guestNationality || '—')}</p>
+        <p style="margin:0 0 4px"><span style="color:#64748b">ID:</span> ${esc(idTypeLabel(data.idType))}${data.idNumber ? ` (${esc(data.idNumber)})` : ''}</p>
+        <p style="margin:0 0 4px"><span style="color:#64748b">Company:</span> ${esc(formatGuestCompany(data.company || data.guestCompany))}</p>
       </div>
       <div>
+        <h3 style="font-size:14px;font-weight:600;color:#334155;margin:0 0 8px">Requisition &amp; Contact</h3>
+        <p style="margin:0 0 4px"><span style="color:#64748b">Req. Person:</span> ${esc(data.reqPersonName || '—')}</p>
+        <p style="margin:0 0 4px"><span style="color:#64748b">Mobile Number:</span> ${esc(data.reqPersonPhone || data.guestPhone)}</p>
+        ${data.guestRegistrationNumber ? `<p style="margin:0 0 4px"><span style="color:#64748b">Registration no.:</span> ${esc(data.guestRegistrationNumber)}</p>` : ''}
+        <p style="margin:0 0 4px"><span style="color:#64748b">Email:</span> ${esc(data.guestEmail || '—')}</p>
+      </div>
+    </section>
+
+    <section style="display:grid;grid-template-columns:1fr 1fr;gap:16px;font-size:13px;margin-bottom:24px">
+      <div>
         <h3 style="font-size:14px;font-weight:600;color:#334155;margin:0 0 8px">Stay details</h3>
-        <p style="margin:0 0 4px"><span style="color:#64748b">Room:</span> ${esc(data.roomNumber)} (${esc(data.roomType)})</p>
-        <p style="margin:0 0 4px"><span style="color:#64748b">Check-in:</span> ${esc(format(new Date(data.checkIn), 'dd MMM yyyy'))}</p>
-        <p style="margin:0 0 4px"><span style="color:#64748b">Check-out:</span> ${esc(format(new Date(data.checkOut), 'dd MMM yyyy'))}</p>
-        <p style="margin:0 0 4px"><span style="color:#64748b">Guests:</span> ${data.adults} adult(s), ${data.children} child(ren)</p>
-        <p style="margin:0"><span style="color:#64748b">Meal plan:</span> ${esc(data.mealPlan ?? formatReservationMealPlan(data.withMeal))}</p>
+        <p style="margin:0 0 4px"><span style="color:#64748b">Room Type:</span> ${esc(data.roomType)}</p>
+        <p style="margin:0 0 4px"><span style="color:#64748b">Room No.:</span> ${esc(data.roomNumber)}</p>
+        <p style="margin:0 0 4px"><span style="color:#64748b">Check-in:</span> ${esc(format(new Date(data.checkIn), 'dd-MMM-yyyy'))}</p>
+        <p style="margin:0 0 4px"><span style="color:#64748b">Check-out:</span> ${esc(format(new Date(data.checkOut), 'dd-MMM-yyyy'))}</p>
+        <p style="margin:0 0 4px"><span style="color:#64748b">Address:</span> ${esc(data.guestAddress || '—')}</p>
+      </div>
+      <div>
+        <h3 style="font-size:14px;font-weight:600;color:#334155;margin:0 0 8px">Occupancy &amp; Plan</h3>
+        <p style="margin:0 0 4px"><span style="color:#64748b">Adults:</span> ${data.adults}</p>
+        <p style="margin:0 0 4px"><span style="color:#64748b">Children:</span> ${data.children}</p>
+        <p style="margin:0 0 4px"><span style="color:#64748b">Meal plan:</span> ${esc(data.mealPlan ?? formatReservationMealPlan(data.withMeal))}</p>
       </div>
     </section>
 
@@ -134,6 +160,7 @@ export async function buildReservationDocumentHtml(data: ReservationPdfData): Pr
       ${vatRow}
       <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>Advance paid</span><span>৳${data.advancePayment.toLocaleString()}</span></div>
       <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>Form of payment</span><span>${esc(data.formOfPayment || 'Not paid at booking')}</span></div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>Smoking status</span><span>${DEFAULT_SMOKING_STATUS}</span></div>
       <div style="display:flex;justify-content:space-between;font-weight:700;border-top:1px solid #fde68a;padding-top:8px;margin-top:8px">
         <span>Balance due</span>
         <span style="color:${dueColor}">৳${data.dueAmount.toLocaleString()}</span>
@@ -143,7 +170,7 @@ export async function buildReservationDocumentHtml(data: ReservationPdfData): Pr
     ${notesHtml}
 
     <section style="font-size:11px;color:#475569;margin-top:20px">
-      <h3 style="font-size:14px;font-weight:600;color:#1e293b;margin:0 0 8px">Terms &amp; conditions</h3>
+      <h3 style="font-size:14px;font-weight:600;color:#1e293b;margin:0 0 8px;text-align:center;text-decoration:underline">General Terms and Conditions</h3>
       <ol style="padding-left:18px;margin:0">${termsHtml}</ol>
     </section>
 
@@ -159,6 +186,7 @@ export async function buildReservationDocumentHtml(data: ReservationPdfData): Pr
         <div>
           <p style="font-size:11px;color:#64748b;margin:0 0 32px">Authorized by (hotel)</p>
           <div style="border-bottom:1px solid #94a3b8;height:1px"></div>
+          <p style="font-size:11px;color:#64748b;margin:8px 0 0">Generated: ${esc(format(new Date(), 'dd-MMM-yyyy · h:mm a'))}</p>
         </div>
       </div>
     </section>

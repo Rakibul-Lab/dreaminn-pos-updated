@@ -491,6 +491,8 @@ export async function convertReservationEntry(input: {
       data: {
         confirmationNumber,
         registrationNumber: stayRegistrationNumber,
+        reqPersonName: (entry as { reqPersonName?: string | null }).reqPersonName ?? null,
+        reqPersonPhone: (entry as { reqPersonPhone?: string | null }).reqPersonPhone ?? null,
         customerId: customer.id,
         roomId: slot.roomId,
         company: resolvedCompany,

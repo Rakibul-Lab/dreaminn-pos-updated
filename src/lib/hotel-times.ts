@@ -337,7 +337,7 @@ export function formatBookingCheckInShort(
   times: HotelTimes = DEFAULT_HOTEL_TIMES
 ): string {
   const d = displayDatetime(value, times.checkInTime)
-  return format(d, 'dd-MMM-yyyy · h:mm a')
+  return format(d, 'dd-MMM-yyyy')
 }
 
 export function formatBookingCheckOutShort(
@@ -345,7 +345,7 @@ export function formatBookingCheckOutShort(
   times: HotelTimes = DEFAULT_HOTEL_TIMES
 ): string {
   const d = displayDatetime(value, times.checkOutTime)
-  return format(d, 'dd-MMM-yyyy · h:mm a')
+  return format(d, 'dd-MMM-yyyy')
 }
 
 export function combineDateAndTime(dateYYYYMMDD: string, timeHHmm: string): Date {

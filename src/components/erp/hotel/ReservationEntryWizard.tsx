@@ -24,8 +24,7 @@ import { ReservationEntryDocumentView } from './ReservationEntryDocumentView'
 import { useHotelTimes } from '@/hooks/use-hotel-times'
 import {
   countHotelStayNights,
-  describeStayPeriod,
-  isStayDatePickerRangeValid,
+    isStayDatePickerRangeValid,
   minCheckoutDatePickerValue,
 } from '@/lib/hotel-times'
 import { CompanyLedgerSearchField } from './CompanyLedgerSearchField'
@@ -53,6 +52,7 @@ type RoomOption = {
   id: string
   roomNumber: string
   typeId: string
+  status: string
   totalPrice: number
   type: { name: string }
 }
@@ -136,6 +136,8 @@ export function ReservationEntryWizard() {
   const [lines, setLines] = useState<EntryLineDraft[]>([newLine()])
   const [completedEntryId, setCompletedEntryId] = useState<string | null>(null)
 
+  const [reqPersonName, setReqPersonName] = useState('')
+  const [reqPersonPhone, setReqPersonPhone] = useState('')
   const [guestName, setGuestName] = useState('')
   const [guestPhone, setGuestPhone] = useState('')
   const [guestEmail, setGuestEmail] = useState('')
@@ -330,6 +332,10 @@ export function ReservationEntryWizard() {
 
   const validateEntryStep = (): string | null => {
     if (!datesValid) return 'Select valid check-in and check-out dates'
+    if (reqPersonPhone.trim()) {
+      const reqPhoneError = getPhoneValidationMessage(reqPersonPhone, 'Req. person mobile')
+      if (reqPhoneError) return reqPhoneError
+    }
     if (!guestName.trim()) return 'Guest name is required'
     const phoneError = getPhoneValidationMessage(guestPhone)
     if (phoneError) return phoneError
@@ -393,6 +399,8 @@ export function ReservationEntryWizard() {
       checkIn: checkInDate,
       checkOut: checkOutDate,
       notes: notes.trim() || undefined,
+      reqPersonName: reqPersonName.trim() || undefined,
+      reqPersonPhone: reqPersonPhone.trim() || undefined,
       guestName: guestName.trim(),
       guestPhone: guestPhone.trim(),
       guestEmail: guestEmail.trim() || undefined,
@@ -426,6 +434,8 @@ export function ReservationEntryWizard() {
     setCheckOutDate(d.checkOut)
     setNotes('')
     setLines([newLine()])
+    setReqPersonName('')
+    setReqPersonPhone('')
     setGuestName('')
     setGuestPhone('')
     setGuestEmail('')
@@ -536,9 +546,38 @@ export function ReservationEntryWizard() {
             company ledger billing can be recorded on the next step.
           </p>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>Full name *</Label>
+                    <div className="rounded-lg border border-border/80 bg-muted/20 p-4 space-y-3">
+            <div className="space-y-0.5">
+              <Label className="text-sm font-semibold text-foreground">Requisition Person (Req. Person)</Label>
+              <p className="text-xs text-muted-foreground">
+                Person or company representative requesting this reservation entry.
+              </p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Req. person name</Label>
+                <Input
+                  value={reqPersonName}
+                  onChange={(e) => setReqPersonName(e.target.value)}
+                  placeholder="Name of requisition person"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Req. person mobile</Label>
+                <Input
+                  value={reqPersonPhone}
+                  onChange={(e) => setReqPersonPhone(e.target.value)}
+                  placeholder="Mobile number of requisition person"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <Label className="text-sm font-semibold text-foreground">Guest Information</Label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Guest name *</Label>
               <Input value={guestName} onChange={(e) => setGuestName(e.target.value)} />
             </div>
             <div className="space-y-2">
@@ -551,7 +590,8 @@ export function ReservationEntryWizard() {
             </div>
             <div className="space-y-2">
               <Label>Address</Label>
-              <Input value={guestAddress} onChange={(e) => setGuestAddress(e.target.value)} />
+                <Input value={guestAddress} onChange={(e) => setGuestAddress(e.target.value)} />
+              </div>
             </div>
           </div>
 
@@ -965,6 +1005,15 @@ export function ReservationEntryWizard() {
         <div className="space-y-4 rounded-lg border p-4">
           <h3 className="font-medium">Confirm reservation entry</h3>
           <dl className="grid gap-2 text-sm">
+            {reqPersonName || reqPersonPhone ? (
+              <div>
+                <dt className="text-muted-foreground">Req. person</dt>
+                <dd>
+                  {reqPersonName || '—'}
+                  {reqPersonPhone ? ` · ${reqPersonPhone}` : ''}
+                </dd>
+              </div>
+            ) : null}
             <div>
               <dt className="text-muted-foreground">Guest</dt>
               <dd>
@@ -1015,7 +1064,7 @@ export function ReservationEntryWizard() {
             ) : null}
             <div>
               <dt className="text-muted-foreground">Stay period</dt>
-              <dd>{describeStayPeriod(checkInDate, checkOutDate, times)}</dd>
+              <dd>{datesValid ? `${checkInDate} to ${checkOutDate} (${estimatedNights} ${estimatedNights === 1 ? 'night' : 'nights'})` : '—'}</dd>
             </div>
             <div>
               <dt className="text-muted-foreground">Room lines</dt>

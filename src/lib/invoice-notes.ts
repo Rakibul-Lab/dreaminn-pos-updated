@@ -27,12 +27,17 @@ const SYSTEM_NOTE_PATTERNS = [
 /** Drop auto-generated system lines, keep only human-written booking notes. */
 export function stripSystemBookingNotes(notes?: string | null): string | null {
   if (!notes) return null
-  const kept = notes
-    .split('\n')
+  const cleaned = notes
+    .replace(/Auto-extended\s+\d+\s+night\(s\)\s+after\s+[^.\n]+(?:\s+checkout grace\.?|\.)?/gi, '')
+    .replace(/Converted from reservation entry\.?/gi, '')
+    .replace(/Booked by:\s*[^\n.]+/gi, '')
+
+  const kept = cleaned
+    .split(/\r?\n/)
+    .map((line) => line.trim().replace(/^[\s,.-]+|[\s,.-]+$/g, '').trim())
     .filter((line) => {
-      const trimmed = line.trim()
-      if (!trimmed) return false
-      return !SYSTEM_NOTE_PATTERNS.some((pattern) => pattern.test(trimmed))
+      if (!line) return false
+      return !SYSTEM_NOTE_PATTERNS.some((pattern) => pattern.test(line))
     })
     .join('\n')
     .trim()

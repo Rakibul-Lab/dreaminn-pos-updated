@@ -106,7 +106,7 @@ const ProfilePage = dynamicPage(() =>
   import('@/components/erp/auth/ProfilePage').then((m) => m.ProfilePage)
 )
 
-type PageKey = 
+type PageKey =
   | 'hotel-dashboard' | 'rooms' | 'room-types' | 'bookings' | 'customers' | 'company-ledger' | 'housekeeping' | 'hotel-beverage-sales' | 'transport-sales'
   | 'invoices' | 'payments' | 'deposits' | 'reports' | 'day-close' | 'business-day-reports'
   | 'admin-dashboard' | 'users' | 'roles-permissions' | 'settings' | 'logs' | 'inventory'
@@ -222,59 +222,59 @@ function LoginForm() {
   return (
     <div className="min-h-screen flex flex-col bg-gradient-to-br from-amber-50 via-white to-emerald-50">
       <div className="flex-1 flex items-center justify-center p-4">
-      <div className="w-full max-w-lg">
-        <Card className="shadow-xl border-0">
-          <CardContent className="p-6">
-            <div className="text-center mb-6 pb-6 border-b border-border">
-              <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-white shadow-lg mb-4 border border-slate-200 overflow-hidden">
-                <Image src="/brand-logo.png" alt="RRP Dream Inn logo" width={64} height={64} className="h-full w-full object-cover" />
+        <div className="w-full max-w-lg">
+          <Card className="shadow-xl border-0">
+            <CardContent className="p-6">
+              <div className="text-center mb-6 pb-6 border-b border-border">
+                <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-white shadow-lg mb-4 border border-slate-200 overflow-hidden">
+                  <Image src="/brand-logo.png" alt="RRP Dream Inn logo" width={64} height={64} className="h-full w-full object-cover" />
+                </div>
+                <h1 className="text-3xl font-bold text-slate-800">ERP System</h1>
+                <div className="flex flex-wrap items-center justify-center gap-2 mt-2">
+                  <Badge className="bg-amber-100 text-amber-700 border-amber-200 hover:bg-amber-100">
+                    <Hotel className="h-3 w-3 mr-1" /> RRP Dream Inn
+                  </Badge>
+                </div>
               </div>
-              <h1 className="text-3xl font-bold text-slate-800">ERP System</h1>
-              <div className="flex flex-wrap items-center justify-center gap-2 mt-2">
-                <Badge className="bg-amber-100 text-amber-700 border-amber-200 hover:bg-amber-100">
-                  <Hotel className="h-3 w-3 mr-1" /> RRP Dream Inn
-                </Badge>
-              </div>
-            </div>
 
-            <form onSubmit={handleLogin} className="space-y-4">
-              <div>
-                <Label htmlFor="email">Email</Label>
-                <EmailInput
-                  id="email"
-                  placeholder="Enter your email"
-                  value={email}
-                  onChange={setEmail}
-                  mode="format-only"
-                  onValidationChange={(result) => setEmailBlocking(result.isBlocking)}
-                  required
-                  className="mt-1"
-                />
-              </div>
-              <div>
-                <Label htmlFor="password">Password</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  placeholder="Enter your password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                  className="mt-1"
-                />
-              </div>
-              <Button
-                type="submit"
-                className="w-full bg-gradient-to-r from-amber-600 to-emerald-600 hover:from-amber-700 hover:to-emerald-700 text-white shadow-md"
-                disabled={loading}
-                size="lg"
-              >
-                {loading ? 'Signing in...' : 'Sign In'}
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
-      </div>
+              <form onSubmit={handleLogin} className="space-y-4">
+                <div>
+                  <Label htmlFor="email">Email</Label>
+                  <EmailInput
+                    id="email"
+                    placeholder="Enter your email"
+                    value={email}
+                    onChange={setEmail}
+                    mode="format-only"
+                    onValidationChange={(result) => setEmailBlocking(result.isBlocking)}
+                    required
+                    className="mt-1"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="password">Password</Label>
+                  <Input
+                    id="password"
+                    type="password"
+                    placeholder="Enter your password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                    className="mt-1"
+                  />
+                </div>
+                <Button
+                  type="submit"
+                  className="w-full bg-gradient-to-r from-amber-600 to-emerald-600 hover:from-amber-700 hover:to-emerald-700 text-white shadow-md"
+                  disabled={loading}
+                  size="lg"
+                >
+                  {loading ? 'Signing in...' : 'Sign In'}
+                </Button>
+              </form>
+            </CardContent>
+          </Card>
+        </div>
       </div>
       <AppDevelopedByFooter showProductLine />
     </div>
@@ -477,7 +477,8 @@ function ERPApp() {
       case 'logs': return <ActivityLogsPage />
       case 'inventory': return <InventoryPage />
       case 'profile': return <ProfilePage />
-      default: return <HotelDashboard onNavigate={handlePageNavigation} />
+      default: return <HotelDashboard asssssss
+        ={handlePageNavigation} />
     }
   }, [currentPage, handlePageNavigation])
 
@@ -565,9 +566,8 @@ function ERPApp() {
     <div className="min-h-screen flex bg-background">
       <div className="pointer-events-none fixed inset-x-0 top-0 z-[70] h-1 overflow-hidden">
         <div
-          className={`h-full bg-gradient-to-r from-amber-500 via-emerald-500 to-amber-500 shadow-[0_0_10px_rgba(16,185,129,0.55)] transition-all duration-500 ease-out ${
-            headerLoading ? 'w-full opacity-100' : 'w-0 opacity-0'
-          }`}
+          className={`h-full bg-gradient-to-r from-amber-500 via-emerald-500 to-amber-500 shadow-[0_0_10px_rgba(16,185,129,0.55)] transition-all duration-500 ease-out ${headerLoading ? 'w-full opacity-100' : 'w-0 opacity-0'
+            }`}
         />
       </div>
 

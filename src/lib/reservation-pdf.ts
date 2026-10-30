@@ -31,7 +31,7 @@ function loadImage(src: string): Promise<HTMLImageElement> {
 async function toCompressedJpegDataUrl(
   dataUrl: string,
   quality: number,
-  maxWidth = MAX_PAGE_IMAGE_WIDTH
+  maxWidth = MAX_PAGE_IMAGE_WIDTH_TEXT
 ): Promise<string> {
   const img = await loadImage(dataUrl)
   let w = img.naturalWidth || img.width
@@ -212,11 +212,7 @@ async function captureElementJpeg(
 
   const contentHeight = element.scrollHeight
   const entryFill = isEntryFillSheet(element)
-  const captureHeight = isAttachment
-    ? contentHeight
-    : entryFill
-      ? A4_HEIGHT_PX
-      : Math.max(A4_HEIGHT_PX, contentHeight)
+  const captureHeight = isAttachment ? contentHeight : Math.max(A4_HEIGHT_PX, contentHeight)
 
   if (!isAttachment) {
     element.style.minHeight = `${captureHeight}px`

@@ -150,6 +150,8 @@ type GuestMode = 'new' | 'existing'
 type GuestDraft = {
   selectedCustomerId: string
   guestName: string
+  reqPersonName?: string
+  reqPersonPhone?: string
   guestCompany: string
   companyLedgerId: string
   guestPhone: string
@@ -206,6 +208,8 @@ function emptyGuestDraft(options?: { forExistingGuest?: boolean }): GuestDraft {
   return {
     selectedCustomerId: '',
     guestName: '',
+    reqPersonName: '',
+    reqPersonPhone: '',
     guestCompany: DEFAULT_GUEST_COMPANY,
     companyLedgerId: '',
     guestPhone: '',
@@ -319,6 +323,8 @@ export function NewReservationWizard({
   const {
     selectedCustomerId,
     guestName,
+    reqPersonName = '',
+    reqPersonPhone = '',
     guestCompany,
     companyLedgerId,
     guestPhone,
@@ -1453,6 +1459,8 @@ export function NewReservationWizard({
 
       const res = (await createReservationMutation.mutateAsync({
         customerId,
+        reqPersonName: reqPersonName.trim() || undefined,
+        reqPersonPhone: reqPersonPhone.trim() || undefined,
         company: companyLedgerId ? undefined : resolvedBookingCompany(),
         companyLedgerId: companyLedgerId || undefined,
         roomId: selectedRoomId,
@@ -1591,6 +1599,11 @@ export function NewReservationWizard({
     })
     if (initialMissing.length > 0) {
       return `Please fill required fields: ${initialMissing.join(', ')}`
+    }
+
+    if (reqPersonPhone.trim()) {
+      const reqPhoneError = getPhoneValidationMessage(reqPersonPhone, 'Req. person mobile')
+      if (reqPhoneError) return reqPhoneError
     }
 
     const phoneError = getPhoneValidationMessage(guestPhone)
@@ -2379,6 +2392,22 @@ export function NewReservationWizard({
                       />
                     </div>
                     <div className="space-y-1">
+                      <Label>Req. person name</Label>
+                      <Input
+                        value={reqPersonName}
+                        onChange={(e) => patchGuest({ reqPersonName: e.target.value })}
+                        placeholder="Requisition person name"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label>Req. person mobile</Label>
+                      <Input
+                        value={reqPersonPhone}
+                        onChange={(e) => patchGuest({ reqPersonPhone: e.target.value })}
+                        placeholder="Requisition person mobile"
+                      />
+                    </div>
+                    <div className="space-y-1">
                       <Label>Phone *</Label>
                       <Input
                         id={guestMode === 'new' ? 'guest-phone' : undefined}
@@ -2870,6 +2899,15 @@ export function NewReservationWizard({
                   <span className="font-medium">
                     {guestName || '—'}
                   </span>
+                  {(reqPersonName || reqPersonPhone) && (
+                    <>
+                      <span className="text-muted-foreground">Req. person</span>
+                      <span>
+                        {reqPersonName || '—'}
+                        {reqPersonPhone ? ` · ${reqPersonPhone}` : ''}
+                      </span>
+                    </>
+                  )}
                   <span className="text-muted-foreground">Company</span>
                   <span>
                     {isCorporateGuest ? guestCompany || '—' : formatGuestCompany(guestCompany)}

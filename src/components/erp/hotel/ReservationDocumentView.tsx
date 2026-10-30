@@ -9,6 +9,10 @@ import { Skeleton } from '@/components/ui/skeleton'
 import {
   HOTEL_LOCATION,
   HOTEL_NAME,
+  HOTEL_PHONE,
+  HOTEL_EMAIL,
+  HOTEL_BIN,
+  HOTEL_REG_NO,
   HOTEL_RESERVATION_FOOTER,
   HOTEL_TAGLINE,
   DEFAULT_SMOKING_STATUS,
@@ -36,11 +40,14 @@ import {
   reservationIdLabel,
 } from '@/lib/reservation-field-placeholders'
 import { resolveBookingRegistrationNumber } from '@/lib/booking-registration'
+import { stripSystemBookingNotes } from '@/lib/invoice-notes'
 
 export interface ReservationDocumentData {
   id: string
   confirmationNumber?: string | null
   registrationNumber?: string | null
+  reqPersonName?: string | null
+  reqPersonPhone?: string | null
   checkIn: string
   checkOut: string
   adults: number
@@ -115,13 +122,14 @@ export function ReservationDocumentView({
 }: ReservationDocumentViewProps) {
   const documentRef = useRef<HTMLDivElement>(null)
   const [downloadingPdf, setDownloadingPdf] = useState(false)
+  const [generatedAt] = useState<string>(() => format(new Date(), 'dd-MMM-yyyy · h:mm a'))
   const [logoSrc, setLogoSrc] = useState('/brand-logo.png')
   const { times, formatCheckInShort, formatCheckOutShort } = useHotelTimes()
 
   useEffect(() => {
     const link = document.createElement('link')
     link.rel = 'stylesheet'
-    link.href = '/reservation-a4.css?v=20250623'
+    link.href = '/reservation-a4.css?v=20261029-footer-border-gap'
     document.head.appendChild(link)
     return () => link.remove()
   }, [])
@@ -177,6 +185,8 @@ export function ReservationDocumentView({
   const nights = countHotelStayNights(checkInDt, checkOutDt)
   const policies = reservationPoliciesWithTimes(times)
   const confirmationNo = formatConfirmationNumber(reservation)
+  const reqPersonName = reservation.reqPersonName || '—'
+  const reqPersonPhone = reservation.reqPersonPhone || reservation.customer.phone || '—'
   const stayRegistrationNumber = resolveBookingRegistrationNumber(reservation)
   const adultCompanions =
     reservation.companions?.filter((c) => c.companionType !== 'CHILD') ?? []
@@ -240,7 +250,7 @@ export function ReservationDocumentView({
     ...reservation,
     discountAmount: vatTotals.discountAmount,
   })
-  const vatPercent = reservation.vatPercent ?? vatDisplay.percent
+  const vatPercent = (reservation.vatPercent && reservation.vatPercent > 0) ? reservation.vatPercent : vatDisplay.percent
   const vatAmount = vatDisplay.amount
   const totalWithVat = reservation.totalWithVat ?? vatTotals.totalWithVat
   const servicePercent = reservation.serviceChargePercent ?? INVOICE_SERVICE_CHARGE_PERCENT
@@ -283,7 +293,7 @@ export function ReservationDocumentView({
       >
       <article
         id="reservation-document-article"
-        className={`reservation-a4-sheet box-border px-[14mm] pt-[12mm] pb-[16mm] shadow-md print:shadow-none print:p-0${isMultiGuest ? ' reservation-a4-sheet--multi-guest' : ''}`}
+        className={`reservation-a4-sheet box-border px-[12mm] pt-[6mm] pb-[6mm] shadow-md print:shadow-none print:p-0${isMultiGuest ? ' reservation-a4-sheet--multi-guest' : ''}`}
       >
         <header className="rd-header">
           <div className="rd-header-main">
@@ -291,7 +301,17 @@ export function ReservationDocumentView({
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={logoSrc} alt={HOTEL_NAME} className="rd-logo" width={52} height={52} />
               <p className="rd-hotel-name">{HOTEL_NAME}</p>
+              <p className="rd-hotel-reg">
+                <span>Registration No: {HOTEL_REG_NO}</span>
+                <span className="rd-contact-sep"> | </span>
+                <span>BIN: {HOTEL_BIN}</span>
+              </p>
               <p className="rd-hotel-sub">{HOTEL_LOCATION}</p>
+              <p className="rd-hotel-contact">
+                <span>Phone: {HOTEL_PHONE}</span>
+                <span className="rd-contact-sep"> | </span>
+                <span>Email: {HOTEL_EMAIL}</span>
+              </p>
               <p className="rd-hotel-tag">{HOTEL_TAGLINE}</p>
             </div>
           </div>
@@ -319,69 +339,33 @@ export function ReservationDocumentView({
             <span className="rd-muted">{format(new Date(reservation.createdAt), 'dd/MM/yyyy')}</span>
           </p>
           {isMultiGuest ? (
-            <div className="rd-row-2">
-              <p>
-                <span className="rd-label">Company:</span>{' '}
-                <span className="rd-muted">
-                  {formatGuestCompany(reservation.company ?? reservation.customer.company)}
-                </span>
-              </p>
-              {!isCorporateGuest && (
-                <p>
-                  <span className="rd-label">Registration No.:</span>{' '}
-                  <span
-                    className={`rd-muted ${showMissingFields && !stayRegistrationNumber ? placeholderClass : ''}`}
-                  >
-                    {reservationDocValue(stayRegistrationNumber, showMissingFields)}
-                  </span>
-                </p>
-              )}
-            </div>
-          ) : (
             <>
               <div className="rd-row-2">
                 <p>
-                  <span className="rd-label">Attention:</span>{' '}
+                  <span className="rd-label">Name of the guest:</span>{' '}
                   <span className="rd-muted">{reservation.customer.name}</span>
                 </p>
                 <p>
-                  <span className="rd-label">Mobile Number:</span>{' '}
-                  <span className="rd-muted">{reservation.customer.phone}</span>
+                  <span className="rd-label">Req. Person:</span>{' '}
+                  <span className="rd-muted">{reqPersonName}</span>
                 </p>
               </div>
               <div className="rd-row-2">
                 <p>
-                  <span className="rd-label">Company:</span>{' '}
-                  <span className="rd-muted">
-                    {formatGuestCompany(reservation.company ?? reservation.customer.company)}
-                  </span>
+                  <span className="rd-label">Nationality:</span>{' '}
+                  <span className="rd-muted">{reservation.customer.nationality || '—'}</span>
                 </p>
-                {isCorporateGuest ? (
-                  <p>
-                    <span className="rd-label">Designation:</span>{' '}
-                    <span className="rd-muted">{reservation.customer.designation || '—'}</span>
-                  </p>
-                ) : (
-                  <p>
-                    <span className="rd-label">Email:</span>{' '}
-                    <span
-                      className={`rd-muted ${showMissingFields && !reservation.customer.email?.trim() ? placeholderClass : ''}`}
-                    >
-                      {reservationDocValue(reservation.customer.email, showMissingFields)}
-                    </span>
-                  </p>
-                )}
+                <p>
+                  <span className="rd-label">Mobile Number:</span>{' '}
+                  <span className="rd-muted">{reqPersonPhone}</span>
+                </p>
               </div>
-              {!isCorporateGuest && (
-                <div className="rd-row-2">
-                  <p>
-                    <span className="rd-label">Nationality:</span>{' '}
-                    <span
-                      className={`rd-muted ${showMissingFields && !reservation.customer.nationality?.trim() ? placeholderClass : ''}`}
-                    >
-                      {reservationDocValue(reservation.customer.nationality, showMissingFields)}
-                    </span>
-                  </p>
+              <div className="rd-row-2">
+                <p>
+                  <span className="rd-label">ID (Check-in):</span>{' '}
+                  <span className="rd-muted">{idLabel}</span>
+                </p>
+                {!isCorporateGuest && (
                   <p>
                     <span className="rd-label">Registration No.:</span>{' '}
                     <span
@@ -390,8 +374,99 @@ export function ReservationDocumentView({
                       {reservationDocValue(stayRegistrationNumber, showMissingFields)}
                     </span>
                   </p>
-                </div>
-              )}
+                )}
+                {isCorporateGuest && (
+                  <p>
+                    <span className="rd-label">Designation:</span>{' '}
+                    <span className="rd-muted">{reservation.customer.designation || '—'}</span>
+                  </p>
+                )}
+              </div>
+              <div className="rd-row-2">
+                <p>
+                  <span className="rd-label">Company:</span>{' '}
+                  <span className="rd-muted">
+                    {formatGuestCompany(reservation.company ?? reservation.customer.company)}
+                  </span>
+                </p>
+                <p>
+                  <span className="rd-label">Email:</span>{' '}
+                  <span className="rd-muted">{reservation.customer.email || '—'}</span>
+                </p>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="rd-row-2">
+                <p>
+                  <span className="rd-label">Name of the guest:</span>{' '}
+                  <span className="rd-muted">{reservation.customer.name}</span>
+                </p>
+                <p>
+                  <span className="rd-label">Req. Person:</span>{' '}
+                  <span className="rd-muted">{reqPersonName}</span>
+                </p>
+              </div>
+              <div className="rd-row-2">
+                <p>
+                  <span className="rd-label">Nationality:</span>{' '}
+                  <span
+                    className={`rd-muted ${!isCorporateGuest && showMissingFields && !reservation.customer.nationality?.trim() ? placeholderClass : ''}`}
+                  >
+                    {isCorporateGuest
+                      ? reservation.customer.nationality || '—'
+                      : reservationDocValue(reservation.customer.nationality, showMissingFields)}
+                  </span>
+                </p>
+                <p>
+                  <span className="rd-label">Mobile Number:</span>{' '}
+                  <span className="rd-muted">{reqPersonPhone}</span>
+                </p>
+              </div>
+              <div className="rd-row-2">
+                <p>
+                  <span className="rd-label">ID (Check-in):</span>{' '}
+                  <span
+                    className={`rd-muted ${showMissingFields && idLabel.includes(RESERVATION_REQUIRED_PLACEHOLDER) ? placeholderClass : ''}`}
+                  >
+                    {idLabel}
+                  </span>
+                </p>
+                {!isCorporateGuest && (
+                  <p>
+                    <span className="rd-label">Registration No.:</span>{' '}
+                    <span
+                      className={`rd-muted ${showMissingFields && !stayRegistrationNumber ? placeholderClass : ''}`}
+                    >
+                      {reservationDocValue(stayRegistrationNumber, showMissingFields)}
+                    </span>
+                  </p>
+                )}
+                {isCorporateGuest && (
+                  <p>
+                    <span className="rd-label">Designation:</span>{' '}
+                    <span className="rd-muted">{reservation.customer.designation || '—'}</span>
+                  </p>
+                )}
+              </div>
+              <div className="rd-row-2">
+                <p>
+                  <span className="rd-label">Company:</span>{' '}
+                  <span className="rd-muted">
+                    {formatGuestCompany(reservation.company ?? reservation.customer.company)}
+                  </span>
+                </p>
+                <p>
+                  <span className="rd-label">Email:</span>{' '}
+                  <span
+                    className={`rd-muted ${!isCorporateGuest && showMissingFields && !reservation.customer.email?.trim() ? placeholderClass : ''}`}
+                  >
+                    {isCorporateGuest
+                      ? reservation.customer.email || '—'
+                      : reservationDocValue(reservation.customer.email, showMissingFields)}
+                  </span>
+                </p>
+              </div>
             </>
           )}
           <p className="rd-intro">{RESERVATION_INTRO}</p>
@@ -400,12 +475,6 @@ export function ReservationDocumentView({
         <section className="rd-block">
           <div className="rd-details-cols">
             <div className="rd-details-col">
-              <p>
-                <span className="rd-label">
-                  {isMultiGuest ? 'Attention:' : 'Name of the Guest:'}
-                </span>{' '}
-                <span className="rd-muted">{reservation.customer.name}</span>
-              </p>
               <p>
                 <span className="rd-label">Confirmation No.:</span>{' '}
                 <span className="rd-muted">{confirmationNo}</span>
@@ -448,19 +517,9 @@ export function ReservationDocumentView({
                     : reservationDocValue(reservation.customer.address, showMissingFields)}
                 </span>
               </p>
-              {!isCorporateGuest && !isMultiGuest && (
-                <p>
-                  <span className="rd-label">ID (Check-in):</span>{' '}
-                  <span
-                    className={`rd-muted ${showMissingFields && idLabel.includes(RESERVATION_REQUIRED_PLACEHOLDER) ? placeholderClass : ''}`}
-                  >
-                    {idLabel}
-                  </span>
-                </p>
-              )}
               <p>
                 <span className="rd-label">Remarks:</span>{' '}
-                <span className="rd-muted">{reservation.notes || '—'}</span>
+                <span className="rd-muted">{stripSystemBookingNotes(reservation.notes) || '—'}</span>
               </p>
             </div>
             <div className="rd-details-col">
@@ -474,10 +533,6 @@ export function ReservationDocumentView({
               </p>
               <p>
                 <span className="rd-label">No. of Rooms:</span> <span className="rd-muted">1</span>
-              </p>
-              <p>
-                <span className="rd-label">Smoking Status:</span>{' '}
-                <span className="rd-muted">{DEFAULT_SMOKING_STATUS}</span>
               </p>
               <p>
                 <span className="rd-label">Room rent:</span>{' '}
@@ -496,8 +551,9 @@ export function ReservationDocumentView({
               <p>
                 <span className="rd-label">VAT:</span>{' '}
                 <span className="rd-muted">
-                  {vatPercent}% — {formatBdt(vatAmount)}
-                  {vatDisplay.mode === 'included' ? ' (incl. in rate)' : ''}
+                  {vatDisplay.mode === 'included'
+                    ? `${vatPercent}% — (incl. in rate)`
+                    : `${vatPercent}% — ${formatBdt(vatAmount)}`}
                 </span>
               </p>
               <p>
@@ -518,7 +574,13 @@ export function ReservationDocumentView({
               </p>
               <p>
                 <span className="rd-label">Form of Payment:</span>{' '}
-                <span className="rd-muted">{reservation.formOfPayment || 'Not paid at booking'}</span>
+                <span className="rd-muted">
+                  {reservation.formOfPayment || 'Not paid at booking'}
+                </span>
+              </p>
+              <p>
+                <span className="rd-label">Smoking Status:</span>{' '}
+                <span className="rd-muted">{DEFAULT_SMOKING_STATUS}</span>
               </p>
             </div>
           </div>
@@ -597,7 +659,7 @@ export function ReservationDocumentView({
         </section>
 
         <section className="rd-block rd-terms-block">
-          <h3 className="rd-terms-title">General Terms and Conditions</h3>
+          <h3 className="rd-terms-title text-center">General Terms and Conditions</h3>
           <ul className="rd-terms-list">
             {policies.map((policy) => (
               <li key={policy.title}>
@@ -627,9 +689,18 @@ export function ReservationDocumentView({
                     <span className="rd-label">Email:</span>{' '}
                     <span className="rd-muted">{reservation.creator.email}</span>
                   </p>
+                  <p>
+                    <span className="rd-label">Generated:</span>{' '}
+                    <span className="rd-muted" suppressHydrationWarning>{generatedAt}</span>
+                  </p>
                 </div>
               ) : (
-                <p className="rd-muted">—</p>
+                <div className="rd-prepared-by-details">
+                  <p>
+                    <span className="rd-label">Generated:</span>{' '}
+                    <span className="rd-muted" suppressHydrationWarning>{generatedAt}</span>
+                  </p>
+                </div>
               )}
             </div>
             <div className="rd-signature-col rd-signature-col--guest">
@@ -652,7 +723,17 @@ export function ReservationDocumentView({
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={logoSrc} alt={HOTEL_NAME} className="rd-logo" width={52} height={52} />
                 <p className="rd-hotel-name">{HOTEL_NAME}</p>
+                <p className="rd-hotel-reg">
+                  <span>Registration No: {HOTEL_REG_NO}</span>
+                  <span className="rd-contact-sep"> | </span>
+                  <span>BIN: {HOTEL_BIN}</span>
+                </p>
                 <p className="rd-hotel-sub">{HOTEL_LOCATION}</p>
+                <p className="rd-hotel-contact">
+                  <span>Phone: {HOTEL_PHONE}</span>
+                  <span className="rd-contact-sep"> | </span>
+                  <span>Email: {HOTEL_EMAIL}</span>
+                </p>
               </div>
             </div>
             <div className="rd-doc-title-block">

@@ -9,18 +9,25 @@ import { Skeleton } from '@/components/ui/skeleton'
 import {
   HOTEL_LOCATION,
   HOTEL_NAME,
+  HOTEL_PHONE,
+  HOTEL_EMAIL,
+  HOTEL_BIN,
+  HOTEL_REG_NO,
   HOTEL_RESERVATION_FOOTER,
   HOTEL_TAGLINE,
   DEFAULT_SMOKING_STATUS,
   formatGuestCompany,
+  formatReservationMealPlan,
   reservationEntryDocumentTitle,
   reservationPoliciesWithTimes,
   RESERVATION_INTRO,
 } from '@/lib/reservation-terms'
+import { reservationIdLabel } from '@/lib/reservation-field-placeholders'
 import { useHotelTimes } from '@/hooks/use-hotel-times'
 import { countHotelStayNights, applyHotelTimeToBookingInput } from '@/lib/hotel-times'
 import { formatReservationEntryConfirmationNumber, reservationEntryPdfFileName } from '@/lib/confirmation-number'
 import { formatBdt } from '@/lib/currency'
+import { stripSystemBookingNotes } from '@/lib/invoice-notes'
 import { INVOICE_SERVICE_CHARGE_PERCENT } from '@/lib/invoice-display'
 import { bookingDiscountInput, computeRoomBookingTotals } from '@/lib/booking-totals'
 import { formatBookingListDiscount } from '@/lib/booking-discount'
@@ -42,13 +49,14 @@ export function ReservationEntryDocumentView({
 }: ReservationEntryDocumentViewProps) {
   const documentRef = useRef<HTMLDivElement>(null)
   const [downloadingPdf, setDownloadingPdf] = useState(false)
+  const [generatedAt] = useState<string>(() => format(new Date(), 'dd-MMM-yyyy · h:mm a'))
   const [logoSrc, setLogoSrc] = useState('/brand-logo.png')
   const { times, formatCheckInShort, formatCheckOutShort } = useHotelTimes()
 
   useEffect(() => {
     const link = document.createElement('link')
     link.rel = 'stylesheet'
-    link.href = '/reservation-a4.css?v=20250623'
+    link.href = '/reservation-a4.css?v=20261029-footer-border-gap'
     document.head.appendChild(link)
     return () => link.remove()
   }, [])
@@ -107,6 +115,9 @@ export function ReservationEntryDocumentView({
   const nights = countHotelStayNights(checkInDt, checkOutDt)
   const policies = reservationPoliciesWithTimes(times)
   const confirmationNo = formatReservationEntryConfirmationNumber(entry)
+  const reqPersonName = entry.reqPersonName || '—'
+  const reqPersonPhone = entry.reqPersonPhone || entry.guestPhone || '—'
+  const entryIdLabel = reservationIdLabel(entry.guestIdType, entry.guestIdNumber)
   const servicePercent = INVOICE_SERVICE_CHARGE_PERCENT
   const chargeTotals = computeRoomBookingTotals(
     entry.totalRoomCharge,
@@ -124,6 +135,18 @@ export function ReservationEntryDocumentView({
   const roomSummaryText = showRoomLineTable
     ? `${entry.totalRooms} room(s) across ${lineCount} line(s)`
     : entry.lineSummary || '—'
+
+  const roomTypeLabel =
+    entry.lines.length > 0
+      ? Array.from(new Set(entry.lines.map((l) => l.roomTypeName))).join(', ')
+      : '—'
+  const assignedRoomNumbers = entry.lines
+    .map((l) => l.roomNumber)
+    .filter(Boolean)
+  const roomNumberLabel =
+    assignedRoomNumbers.length > 0
+      ? assignedRoomNumbers.join(', ')
+      : 'To assign'
 
   const densityClass =
     lineCount >= 4 || isManyRooms
@@ -175,16 +198,25 @@ export function ReservationEntryDocumentView({
       >
         <article
           id="reservation-document-article"
-          className={`${sheetClassName} px-[14mm] pt-[12mm] pb-[16mm] print:p-0`}
+          className={`${sheetClassName} px-[12mm] pt-[6mm] pb-[6mm] print:p-0`}
         >
-          <div className="rd-entry-main">
           <header className="rd-header">
             <div className="rd-header-main">
               <div className="rd-brand">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={logoSrc} alt={HOTEL_NAME} className="rd-logo" width={52} height={52} />
                 <p className="rd-hotel-name">{HOTEL_NAME}</p>
+                <p className="rd-hotel-reg">
+                  <span>Registration No: {HOTEL_REG_NO}</span>
+                  <span className="rd-contact-sep"> | </span>
+                  <span>BIN: {HOTEL_BIN}</span>
+                </p>
                 <p className="rd-hotel-sub">{HOTEL_LOCATION}</p>
+                <p className="rd-hotel-contact">
+                  <span>Phone: {HOTEL_PHONE}</span>
+                  <span className="rd-contact-sep"> | </span>
+                  <span>Email: {HOTEL_EMAIL}</span>
+                </p>
                 <p className="rd-hotel-tag">{HOTEL_TAGLINE}</p>
               </div>
             </div>
@@ -200,12 +232,32 @@ export function ReservationEntryDocumentView({
             </p>
             <div className="rd-row-2">
               <p>
-                <span className="rd-label">Attention:</span>{' '}
+                <span className="rd-label">Name of the guest:</span>{' '}
                 <span className="rd-muted">{entry.guestName ?? '—'}</span>
               </p>
               <p>
+                <span className="rd-label">Req. Person:</span>{' '}
+                <span className="rd-muted">{reqPersonName}</span>
+              </p>
+            </div>
+            <div className="rd-row-2">
+              <p>
+                <span className="rd-label">Nationality:</span>{' '}
+                <span className="rd-muted">{entry.guestNationality || '—'}</span>
+              </p>
+              <p>
                 <span className="rd-label">Mobile Number:</span>{' '}
-                <span className="rd-muted">{entry.guestPhone ?? '—'}</span>
+                <span className="rd-muted">{reqPersonPhone}</span>
+              </p>
+            </div>
+            <div className="rd-row-2">
+              <p>
+                <span className="rd-label">ID (Check-in):</span>{' '}
+                <span className="rd-muted">{entryIdLabel}</span>
+              </p>
+              <p>
+                <span className="rd-label">Registration No.:</span>{' '}
+                <span className="rd-muted">{entry.registrationNumber ?? '—'}</span>
               </p>
             </div>
             <div className="rd-row-2">
@@ -214,18 +266,10 @@ export function ReservationEntryDocumentView({
                 <span className="rd-muted">{formatGuestCompany(entry.company)}</span>
               </p>
               <p>
-                <span className="rd-label">Registration No.:</span>{' '}
-                <span className="rd-muted">{entry.registrationNumber ?? '—'}</span>
+                <span className="rd-label">Email:</span>{' '}
+                <span className="rd-muted">{entry.guestEmail || '—'}</span>
               </p>
             </div>
-            {entry.guestEmail ? (
-              <div className="rd-row-2">
-                <p>
-                  <span className="rd-label">Email:</span>{' '}
-                  <span className="rd-muted">{entry.guestEmail}</span>
-                </p>
-              </div>
-            ) : null}
             <p className="rd-intro">{RESERVATION_INTRO}</p>
           </section>
 
@@ -233,16 +277,12 @@ export function ReservationEntryDocumentView({
             <div className="rd-details-cols">
               <div className="rd-details-col">
                 <p>
-                  <span className="rd-label">Name of the Guest:</span>{' '}
-                  <span className="rd-muted">{entry.guestName ?? '—'}</span>
-                </p>
-                <p>
                   <span className="rd-label">Confirmation No.:</span>{' '}
                   <span className="rd-muted">{confirmationNo}</span>
                 </p>
                 <p>
                   <span className="rd-label">Status:</span>{' '}
-                  <span className="rd-muted">{entry.status}</span>
+                  <span className="rd-muted">{entry.status.replace(/\bENTRY\b/g, '').trim()}</span>
                 </p>
                 <p>
                   <span className="rd-label">Expected Arrival:</span>{' '}
@@ -256,13 +296,21 @@ export function ReservationEntryDocumentView({
                   <span className="rd-label">No. of Night(s):</span>{' '}
                   <span className="rd-muted">{nights}</span>
                 </p>
-                <p className="rd-room-summary">
-                  <span className="rd-label">Room(s):</span>{' '}
-                  <span className="rd-muted">{roomSummaryText}</span>
+                <p>
+                  <span className="rd-label">Room Type:</span>{' '}
+                  <span className="rd-muted">{roomTypeLabel}</span>
+                </p>
+                <p>
+                  <span className="rd-label">Room No.:</span>{' '}
+                  <span className="rd-muted">{roomNumberLabel}</span>
                 </p>
                 <p>
                   <span className="rd-label">No. of Rooms:</span>{' '}
                   <span className="rd-muted">{entry.totalRooms}</span>
+                </p>
+                <p>
+                  <span className="rd-label">Meal Plan:</span>{' '}
+                  <span className="rd-muted">{formatReservationMealPlan(false)}</span>
                 </p>
                 <p>
                   <span className="rd-label">Address:</span>{' '}
@@ -270,13 +318,17 @@ export function ReservationEntryDocumentView({
                 </p>
                 <p>
                   <span className="rd-label">Remarks:</span>{' '}
-                  <span className="rd-muted">{entry.notes || '—'}</span>
+                  <span className="rd-muted">{stripSystemBookingNotes(entry.notes) || '—'}</span>
                 </p>
               </div>
               <div className="rd-details-col">
                 <p>
-                  <span className="rd-label">Smoking Status:</span>{' '}
-                  <span className="rd-muted">{DEFAULT_SMOKING_STATUS}</span>
+                  <span className="rd-label">Adults:</span>{' '}
+                  <span className="rd-muted">1</span>
+                </p>
+                <p>
+                  <span className="rd-label">Children:</span>{' '}
+                  <span className="rd-muted">0</span>
                 </p>
                 <p>
                   <span className="rd-label">Room rent:</span>{' '}
@@ -295,7 +347,7 @@ export function ReservationEntryDocumentView({
                 </p>
                 <p>
                   <span className="rd-label">VAT:</span>{' '}
-                  <span className="rd-muted">{entry.vatPercent}% included in rate</span>
+                  <span className="rd-muted">{entry.vatPercent || 15}% — (incl. in rate)</span>
                 </p>
                 <p>
                   <span className="rd-label">Service charge:</span>{' '}
@@ -316,6 +368,10 @@ export function ReservationEntryDocumentView({
                 <p>
                   <span className="rd-label">Form of Payment:</span>{' '}
                   <span className="rd-muted">{entry.formOfPayment || 'Not paid at booking'}</span>
+                </p>
+                <p>
+                  <span className="rd-label">Smoking Status:</span>{' '}
+                  <span className="rd-muted">{DEFAULT_SMOKING_STATUS}</span>
                 </p>
               </div>
             </div>
@@ -346,7 +402,7 @@ export function ReservationEntryDocumentView({
           </section>
 
           <section className="rd-block rd-terms-block">
-            <h3 className="rd-terms-title">General Terms and Conditions</h3>
+            <h3 className="rd-terms-title text-center">General Terms and Conditions</h3>
             <ul className="rd-terms-list">
               {policies.map((policy) => (
                 <li key={policy.title}>
@@ -355,8 +411,6 @@ export function ReservationEntryDocumentView({
               ))}
             </ul>
           </section>
-          <div className="rd-entry-fill" aria-hidden="true" />
-          </div>
 
           <footer className="rd-document-footer">
             <div className="rd-signatures">
@@ -378,9 +432,18 @@ export function ReservationEntryDocumentView({
                       <span className="rd-label">Email:</span>{' '}
                       <span className="rd-muted">{entry.creator.email}</span>
                     </p>
+                    <p>
+                      <span className="rd-label">Generated:</span>{' '}
+                      <span className="rd-muted" suppressHydrationWarning>{generatedAt}</span>
+                    </p>
                   </div>
                 ) : (
-                  <p className="rd-muted">—</p>
+                  <div className="rd-prepared-by-details">
+                    <p>
+                      <span className="rd-label">Generated:</span>{' '}
+                      <span className="rd-muted" suppressHydrationWarning>{generatedAt}</span>
+                    </p>
+                  </div>
                 )}
               </div>
               <div className="rd-signature-col rd-signature-col--guest">

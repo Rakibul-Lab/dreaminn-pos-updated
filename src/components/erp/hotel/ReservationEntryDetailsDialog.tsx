@@ -24,6 +24,8 @@ type EntryDetail = {
   entryStatus: string
   checkIn: string
   checkOut: string
+  reqPersonName?: string | null
+  reqPersonPhone?: string | null
   guestName: string | null
   guestPhone: string | null
   guestEmail: string | null
@@ -112,6 +114,14 @@ export function ReservationEntryDetailsDialog({ entryId, open, onOpenChange }: P
                 <span className="text-xs font-mono text-muted-foreground">{entry.confirmationNumber}</span>
               ) : null}
             </div>
+
+            {(entry.reqPersonName || entry.reqPersonPhone) ? (
+              <section className="space-y-2 rounded-lg border p-3">
+                <h3 className="text-sm font-semibold">Requisition Person</h3>
+                <DetailRow label="Name" value={entry.reqPersonName} />
+                <DetailRow label="Mobile" value={entry.reqPersonPhone} />
+              </section>
+            ) : null}
 
             <section className="space-y-2 rounded-lg border p-3">
               <h3 className="text-sm font-semibold">Guest</h3>

@@ -2,7 +2,11 @@ import { buildCheckInOutPolicyText, DEFAULT_HOTEL_TIMES, type HotelTimes } from 
 
 export const HOTEL_NAME = 'RRP Dream Inn'
 export const HOTEL_TAGLINE = 'Comfort & hospitality, every stay'
-export const HOTEL_LOCATION = 'RRP Center, Post office More, Ishwardi, Pabna, Bangladesh'
+export const HOTEL_LOCATION = '6th floor, RRP Center, Post office More, Ishwardi, Pabna, Bangladesh'
+export const HOTEL_PHONE = '+88 01335-107200'
+export const HOTEL_EMAIL = 'rrpdreaminn@gmail.com'
+export const HOTEL_REG_NO = '0077'
+export const HOTEL_BIN = '006985415-1105'
 
 export const RESERVATION_INTRO =
   `Thank you for your interest in '${HOTEL_NAME}'. We are pleased to confirm the following reservation details for your kind reference.`
@@ -68,9 +72,27 @@ export function reservationPoliciesWithTimes(times: HotelTimes = DEFAULT_HOTEL_T
   )
 }
 
+export function isDirectWalkInCompany(company?: string | null): boolean {
+  if (!company) return true
+  const lower = company.trim().toLowerCase()
+  return (
+    lower === '' ||
+    lower === 'direct/walk in' ||
+    lower === 'direct/walk-in' ||
+    lower === 'direct / walk in' ||
+    lower === 'direct / walk-in' ||
+    lower === 'walk in' ||
+    lower === 'walk-in' ||
+    lower === 'direct'
+  )
+}
+
 export function formatGuestCompany(company?: string | null): string {
   const trimmed = company?.trim()
-  return trimmed || DEFAULT_GUEST_COMPANY
+  if (!trimmed || isDirectWalkInCompany(trimmed)) {
+    return 'N/A'
+  }
+  return trimmed
 }
 
 /** Document heading based on booking status at print time. */
@@ -82,8 +104,8 @@ export function reservationDocumentTitle(status: string): string {
 
 /** Document heading for reservation entry (inventory hold). */
 export function reservationEntryDocumentTitle(entryStatus: string): string {
-  if (entryStatus === 'CANCELLED') return 'Reservation Entry — Cancelled'
-  if (entryStatus === 'FULFILLED') return 'Reservation Entry — Fulfilled'
-  if (entryStatus === 'PARTIALLY_FULFILLED') return 'Reservation Entry — Partially Fulfilled'
-  return 'Reservation Entry Confirmation'
+  if (entryStatus === 'CANCELLED') return 'Reservation Confirmation — Cancelled'
+  if (entryStatus === 'FULFILLED') return 'Reservation Confirmation — Fulfilled'
+  if (entryStatus === 'PARTIALLY_FULFILLED') return 'Reservation Confirmation — Partially Fulfilled'
+  return 'Reservation Confirmation'
 }

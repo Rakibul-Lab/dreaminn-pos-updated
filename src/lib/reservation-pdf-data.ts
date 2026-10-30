@@ -1,12 +1,16 @@
 export interface ReservationPdfData {
   reservationId: string
   confirmationNumber?: string | null
+  reqPersonName?: string | null
+  reqPersonPhone?: string | null
   guestName: string
   guestPhone: string
   guestEmail?: string | null
   guestAddress?: string | null
   guestNationality?: string | null
   guestRegistrationNumber?: string | null
+  company?: string | null
+  guestCompany?: string | null
   idType?: string | null
   idNumber?: string | null
   visaExpiryDate?: string | null

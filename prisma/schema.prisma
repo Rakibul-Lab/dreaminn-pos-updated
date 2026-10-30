@@ -245,6 +245,8 @@ model Booking {
   id                 String            @id @default(cuid())
   confirmationNumber String?           @map("confirmation_number")
   registrationNumber String?           @map("registration_number")
+  reqPersonName      String?           @map("req_person_name")
+  reqPersonPhone     String?           @map("req_person_phone")
   customerId       String
   roomId           String
   status               BookingStatus     @default(RESERVED)
@@ -306,6 +308,8 @@ model ReservationEntry {
   id                String                 @id @default(cuid())
   checkIn           DateTime               @map("check_in")
   checkOut          DateTime               @map("check_out")
+  reqPersonName     String?                @map("req_person_name")
+  reqPersonPhone    String?                @map("req_person_phone")
   guestName         String?                @map("guest_name")
   guestPhone        String?                @map("guest_phone")
   guestEmail        String?                @map("guest_email")

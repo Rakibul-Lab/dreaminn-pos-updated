@@ -152,8 +152,8 @@ export function canBookingCheckIn(
       options.customer,
       options.idDocumentCount ?? 0,
       {
-        nidPhysicallyReceived: booking.nidPhysicallyReceived,
-        isCorporateGuest: booking.isCorporateGuest,
+        nidPhysicallyReceived: booking.nidPhysicallyReceived ?? undefined,
+        isCorporateGuest: booking.isCorporateGuest ?? undefined,
         company: booking.company,
         companyLedgerId: booking.companyLedgerId,
       }

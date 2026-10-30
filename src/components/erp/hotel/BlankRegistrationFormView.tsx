@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { HOTEL_LOCATION, HOTEL_NAME } from '@/lib/reservation-terms'
+import { HOTEL_LOCATION, HOTEL_NAME, HOTEL_PHONE, HOTEL_EMAIL, HOTEL_BIN, HOTEL_REG_NO } from '@/lib/reservation-terms'
 import {
   REGISTRATION_FORM_CHECKOUT_REMINDER,
   REGISTRATION_FORM_CONSENT,
@@ -176,7 +176,15 @@ export function BlankRegistrationFormView({ showToolbar = true }: BlankRegistrat
               <img src={logoSrc} alt={HOTEL_NAME} className="rf-logo" width={42} height={42} />
             </div>
             <h1>{HOTEL_NAME}</h1>
-            <p>{HOTEL_LOCATION}</p>
+            <p style={{ fontSize: '9pt', fontWeight: 'bold', color: '#111111', margin: '2px 0 0' }}>
+              Registration No: {HOTEL_REG_NO} | BIN: {HOTEL_BIN}
+            </p>
+            <p style={{ fontSize: '9.5pt', fontWeight: 'bold', color: '#111111', margin: '2px 0 0' }}>
+              {HOTEL_LOCATION}
+            </p>
+            <p style={{ fontSize: '9pt', fontWeight: 'bold', color: '#111111', margin: '2px 0 0' }}>
+              Phone: {HOTEL_PHONE} | Email: {HOTEL_EMAIL}
+            </p>
             <div className="rf-form-title">{REGISTRATION_FORM_TITLE}</div>
           </header>
 
@@ -238,15 +246,15 @@ export function BlankRegistrationFormView({ showToolbar = true }: BlankRegistrat
                   <RegFieldRow label="Name :" />
                   <RegFieldRow label="Name :" />
                 </div>
-                <RegFieldRow label="Passport No. / NID :" />
                 <div className="rf-addr-row">
                   <RegFieldRow label="Address :" />
                   <RegFieldRow label="Email :" />
                   <RegFieldRow label="City / State :" />
                   <RegFieldRow label="Date of Birth :" />
                   <RegFieldRow label="Zip Code :" />
-                  <RegFieldRow label="Nationality :" />
                   <RegFieldRow label="Country :" />
+                  <RegFieldRow label="Nationality :" />
+                  <RegFieldRow label="Passport No. / NID :" />
                   <RegFieldRow label="Occupation :" />
                 </div>
               </div>

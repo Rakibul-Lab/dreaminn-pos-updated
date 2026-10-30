@@ -235,88 +235,6 @@ function allocateFromRestaurantBillPaymentLabel(
   return { cash: 0, card: 0, mbanking: 0 }
 }
 
-function sumGuestRestaurantBillPaymentAllocation(
-  bookingId: string,
-  restaurantOrders: Array<{
-    bookingId?: string | null
-    notes?: string | null
-    totalAmount: number
-  }>
-) {
-  let cash = 0
-  let card = 0
-  let mbanking = 0
-  let billTotal = 0
-
-  for (const order of restaurantOrders) {
-    if (order.bookingId !== bookingId) continue
-    if (!isGuestFolioManualRestaurantBill(order)) continue
-
-    billTotal += order.totalAmount
-    const parsed = parseBookingRestaurantBillNotes(order.notes ?? null)
-    const allocation = allocateFromRestaurantBillPaymentLabel(
-      parsed.paymentMethod,
-      order.totalAmount
-    )
-    cash += allocation.cash
-    card += allocation.card
-    mbanking += allocation.mbanking
-  }
-
-  return { cash, card, mbanking, billTotal }
-}
-
-/** Scale guest bill payment columns to match checkout invoice food total. */
-function resolveCheckoutFoodPaymentAllocation(
-  bookingId: string,
-  restaurantOrders: Array<{
-    bookingId?: string | null
-    notes?: string | null
-    totalAmount: number
-  }>,
-  foodExtra: number
-) {
-  const { cash, card, mbanking, billTotal } = sumGuestRestaurantBillPaymentAllocation(
-    bookingId,
-    restaurantOrders
-  )
-
-  if (foodExtra <= 0 || billTotal <= 0) {
-    return { cash: 0, card: 0, mbanking: 0 }
-  }
-
-  const paymentTotal = cash + card + mbanking
-  if (paymentTotal <= 0) {
-    return { cash: 0, card: 0, mbanking: 0 }
-  }
-
-  if (Math.abs(billTotal - foodExtra) <= 0.01) {
-    return {
-      cash: Number(cash.toFixed(2)),
-      card: Number(card.toFixed(2)),
-      mbanking: Number(mbanking.toFixed(2)),
-    }
-  }
-
-  const scale = foodExtra / billTotal
-  let scaledCash = cash * scale
-  let scaledCard = card * scale
-  let scaledMbanking = mbanking * scale
-  const drift = foodExtra - (scaledCash + scaledCard + scaledMbanking)
-
-  if (Math.abs(drift) > 0.001) {
-    if (scaledCash > 0) scaledCash += drift
-    else if (scaledCard > 0) scaledCard += drift
-    else scaledMbanking += drift
-  }
-
-  return {
-    cash: Number(scaledCash.toFixed(2)),
-    card: Number(scaledCard.toFixed(2)),
-    mbanking: Number(scaledMbanking.toFixed(2)),
-  }
-}
-
 function allocateSinglePaymentAmounts(payment: { amount: number; method: string; paymentType: string }) {
   if (payment.paymentType === 'REFUND') {
     const amount = Math.abs(payment.amount)
@@ -1153,16 +1071,13 @@ export async function buildDailySalesDetailReport(
     // Restaurant food and hotel extras are different sales. Bundling them under
     // "Food & service sale" made a half-day charge read as restaurant revenue.
     if (restaurantBilled > 0) {
-      const billPayment = restaurantBillRemark
-        ? resolveCheckoutFoodPaymentAllocation(booking.id, restaurantOrders, restaurantBilled)
-        : { cash: 0, card: 0, mbanking: 0 }
       const foodCompanyBill =
         roomBilled > 0 || extraCharges > 0 ? 0 : companyBill
       const foodLineTotal = resolveChargeLineTotal(restaurantBilled, {
         companyBill: foodCompanyBill,
-        cash: billPayment.cash,
-        card: billPayment.card,
-        mbanking: billPayment.mbanking,
+        cash: 0,
+        card: 0,
+        mbanking: 0,
       })
 
       lines.push({
@@ -1174,9 +1089,9 @@ export async function buildDailySalesDetailReport(
         regNo,
         roomAmount: 0,
         otherService: restaurantBilled,
-        cash: billPayment.cash,
-        card: billPayment.card,
-        mbanking: billPayment.mbanking,
+        cash: 0,
+        card: 0,
+        mbanking: 0,
         companyBill: foodCompanyBill,
         remark: buildCheckoutInvoiceFoodRemark(invoice.invoiceNumber, restaurantBillRemark),
         total: foodLineTotal,
@@ -1244,10 +1159,11 @@ export async function buildDailySalesDetailReport(
 
   for (const order of restaurantOrders) {
     if (!isGuestFolioManualRestaurantBill(order)) continue
-    // Posting the bill raises the room due instead of taking money, so it is not a
-    // sale yet — it reaches the report through the invoice on the check-out day.
-    // Checkouts today already have their restaurant charges reported on the invoice or payment rows.
-    if (order.bookingId && checkoutBookingIds.has(order.bookingId)) continue
+    // Posting the bill to a guest folio raises the room due instead of taking money.
+    // It reaches the sales report through the checkout invoice and payment on check-out day.
+    // Same-day checkouts already have their restaurant charges reported on invoice/payment rows.
+    // In-house bills belonging to a booking must never generate standalone payment/charge rows.
+    if (order.bookingId) continue
 
     const parsed = parseBookingRestaurantBillNotes(order.notes ?? null)
     const booking = order.booking
@@ -1255,17 +1171,6 @@ export async function buildDailySalesDetailReport(
       parsed.paymentMethod,
       order.totalAmount
     )
-
-    // In-house bills with no money taken yet belong on the room folio at checkout,
-    // not on today's sales report.
-    if (
-      order.bookingId &&
-      billPayment.cash <= 0 &&
-      billPayment.card <= 0 &&
-      billPayment.mbanking <= 0
-    ) {
-      continue
-    }
 
     lines.push({
       id: order.id,

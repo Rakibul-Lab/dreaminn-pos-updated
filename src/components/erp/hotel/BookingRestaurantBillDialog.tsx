@@ -215,6 +215,9 @@ export function BookingRestaurantBillDialog({
                     ))}
                   </SelectContent>
                 </Select>
+                <p className="text-[11px] text-muted-foreground">
+                  Reference note only · Bill is charged to room folio and settled at checkout
+                </p>
               </div>
             </div>
 

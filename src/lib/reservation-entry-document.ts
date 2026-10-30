@@ -14,6 +14,8 @@ export type ReservationEntryDocumentData = {
   registrationNumber: string | null
   checkIn: string
   checkOut: string
+  reqPersonName?: string | null
+  reqPersonPhone?: string | null
   guestName: string | null
   guestPhone: string | null
   guestEmail: string | null
@@ -150,12 +152,12 @@ export async function buildReservationEntryDocumentData(
   const entryStatus = entry.status
   const status =
     entryStatus === 'PARTIALLY_FULFILLED'
-      ? 'RESERVED ENTRY PARTIAL'
+      ? 'RESERVED PARTIAL'
       : entryStatus === 'FULFILLED'
-        ? 'RESERVED ENTRY FULFILLED'
+        ? 'FULFILLED'
         : entryStatus === 'CANCELLED'
           ? 'CANCELLED'
-          : 'RESERVED ENTRY'
+          : 'RESERVED'
 
   return {
     id: entry.id,
@@ -163,6 +165,8 @@ export async function buildReservationEntryDocumentData(
     registrationNumber: entry.registrationNumber,
     checkIn: entry.checkIn.toISOString(),
     checkOut: entry.checkOut.toISOString(),
+    reqPersonName: (entry as { reqPersonName?: string | null }).reqPersonName ?? null,
+    reqPersonPhone: (entry as { reqPersonPhone?: string | null }).reqPersonPhone ?? null,
     guestName: entry.guestName,
     guestPhone: entry.guestPhone,
     guestEmail: entry.guestEmail,

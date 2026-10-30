@@ -57,6 +57,8 @@ export type ReservationEntryListRow = {
   entryStatus: 'ACTIVE' | 'PARTIALLY_FULFILLED' | 'FULFILLED' | 'CANCELLED'
   checkIn: string
   checkOut: string
+  reqPersonName?: string | null
+  reqPersonPhone?: string | null
   guestName: string | null
   guestPhone: string | null
   guestEmail: string | null
@@ -568,7 +570,7 @@ export async function assertRoomAvailableForBooking(
 }
 
 export function formatReservationEntryLineSummary(
-  lines: ReservationEntryListRow['lines']
+  lines: Array<{ roomTypeName: string; roomNumber?: string | null; quantity: number }>
 ): string {
   return lines
     .map((line) => {
@@ -669,6 +671,8 @@ export function mapReservationEntryToListRow(entry: {
     confirmationNumber: entry.confirmationNumber ?? null,
     checkIn: entry.checkIn.toISOString(),
     checkOut: entry.checkOut.toISOString(),
+    reqPersonName: (entry as { reqPersonName?: string | null }).reqPersonName ?? null,
+    reqPersonPhone: (entry as { reqPersonPhone?: string | null }).reqPersonPhone ?? null,
     guestName: entry.guestName,
     guestPhone: entry.guestPhone,
     guestEmail: entry.guestEmail,
@@ -755,7 +759,7 @@ async function buildReservationEntrySearchOr(
     },
     select: { phone: true },
   })
-  const phones = [...new Set(customers.map((row) => row.phone).filter(Boolean))]
+  const phones = [...new Set(customers.map((row) => row.phone).filter((p): p is string => Boolean(p)))]
   if (phones.length) {
     conditions.push({ guestPhone: { in: phones } })
   }
@@ -919,6 +923,8 @@ export async function createReservationEntry(input: {
   checkIn: string
   checkOut: string
   notes?: string
+  reqPersonName?: string
+  reqPersonPhone?: string
   guestName?: string
   guestPhone?: string
   guestEmail?: string
@@ -966,7 +972,7 @@ export async function createReservationEntry(input: {
   }
 
   let resolvedCompanyLedgerId: string | null = input.companyLedgerId?.trim() || null
-  let resolvedCompany = formatGuestCompany(input.company)
+  let resolvedCompany: string | null = formatGuestCompany(input.company)
 
   if (resolvedCompanyLedgerId) {
     const ledgerResult = await resolveCompanyLedgerBooking(db, resolvedCompanyLedgerId, null)
@@ -1020,6 +1026,8 @@ export async function createReservationEntry(input: {
     data: {
       checkIn: checkInDate,
       checkOut: checkOutDate,
+      reqPersonName: input.reqPersonName?.trim() || null,
+      reqPersonPhone: input.reqPersonPhone?.trim() || null,
       guestName,
       guestPhone,
       guestEmail: input.guestEmail?.trim() || null,

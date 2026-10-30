@@ -102,6 +102,8 @@ export async function POST(request: NextRequest) {
       checkOut,
       notes,
       lines,
+      reqPersonName,
+      reqPersonPhone,
       guestName,
       guestPhone,
       guestEmail,
@@ -121,6 +123,8 @@ export async function POST(request: NextRequest) {
       checkOut?: string
       notes?: string
       lines?: ReservationEntryLineInput[]
+      reqPersonName?: string
+      reqPersonPhone?: string
       guestName?: string
       guestPhone?: string
       guestEmail?: string
@@ -149,6 +153,8 @@ export async function POST(request: NextRequest) {
       checkOut,
       notes,
       lines,
+      reqPersonName,
+      reqPersonPhone,
       guestName,
       guestPhone,
       guestEmail,
@@ -174,7 +180,7 @@ export async function POST(request: NextRequest) {
       `Created reservation entry (${entry.lines.length} line(s))`
     )
 
-    return successResponse(mapReservationEntryToListRow(entry), 201)
+    return successResponse(mapReservationEntryToListRow(entry), undefined, 201)
   } catch (error) {
     console.error('Reservation entry create error:', error)
     const message = error instanceof Error ? error.message : 'Failed to create reservation entry'

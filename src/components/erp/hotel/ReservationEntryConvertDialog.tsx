@@ -68,6 +68,7 @@ type RoomOption = {
   id: string
   roomNumber: string
   typeId: string
+  status: string
   totalPrice: number
   type: { name: string }
 }
@@ -309,7 +310,12 @@ export function ReservationEntryConvertDialog({
         })
         return { lineId: line.id, roomIds, advanceShares }
       })
-      return api.post(`/reservation-entries/${entryId}`, {
+      return api.post<{
+        success?: boolean
+        error?: string
+        message?: string
+        data?: { bookings?: Array<{ confirmationNumber?: string | null; roomNumber: string }> }
+      }>(`/reservation-entries/${entryId}`, {
         action: 'convert',
         checkInNow,
         assignments,

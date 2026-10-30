@@ -296,6 +296,8 @@ export async function POST(request: NextRequest) {
       serviceChargePercent: serviceChargePercentBody,
       bookingPayments,
       isCorporateGuest,
+      reqPersonName,
+      reqPersonPhone,
     } = body;
 
     const corporateGuest = isCorporateGuest === true;
@@ -462,8 +464,8 @@ export async function POST(request: NextRequest) {
           ? parseFloat(String(advancePayment))
           : 0;
     const applyVat = vatApplied === true;
-    let bookingVatPercent = 0;
-    if (applyVat) {
+    let bookingVatPercent = 15;
+    if (true) {
       bookingVatPercent = 15;
       if (vatPercentBody !== undefined && vatPercentBody !== null && vatPercentBody !== '') {
         const parsed = parseFloat(String(vatPercentBody));
@@ -530,6 +532,8 @@ export async function POST(request: NextRequest) {
       data: {
         confirmationNumber,
         registrationNumber: bookingRegistrationNumber,
+        reqPersonName: typeof reqPersonName === 'string' ? reqPersonName.trim() || null : null,
+        reqPersonPhone: typeof reqPersonPhone === 'string' ? reqPersonPhone.trim() || null : null,
         customerId,
         roomId,
         company: resolvedCompany,

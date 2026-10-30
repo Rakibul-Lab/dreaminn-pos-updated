@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { format } from 'date-fns'
 import { api } from '@/lib/api-client'
+import { useAuthStore } from '@/lib/auth-store'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
@@ -122,6 +123,7 @@ export function ReservationDocumentView({
 }: ReservationDocumentViewProps) {
   const documentRef = useRef<HTMLDivElement>(null)
   const [downloadingPdf, setDownloadingPdf] = useState(false)
+  const currentUser = useAuthStore((s) => s.user)
   const [generatedAt] = useState<string>(() => format(new Date(), 'dd-MMM-yyyy · h:mm a'))
   const [logoSrc, setLogoSrc] = useState('/brand-logo.png')
   const { times, formatCheckInShort, formatCheckOutShort } = useHotelTimes()
@@ -673,35 +675,48 @@ export function ReservationDocumentView({
           <div className="rd-signatures">
             <div className="rd-prepared-by">
               <p className="rd-prepared-by-title">Prepared by:</p>
-              {reservation.creator ? (
-                <div className="rd-prepared-by-details">
-                  <p>
-                    <span className="rd-label">Name:</span>{' '}
-                    <span className="rd-muted">{reservation.creator.name}</span>
-                  </p>
-                  {reservation.creator.phone ? (
+              {(() => {
+                const preparedUser = currentUser || reservation.creator
+                const name = preparedUser?.name
+                const email = preparedUser?.email
+                const phone = preparedUser?.phone
+                if (!name && !email) {
+                  return (
+                    <div className="rd-prepared-by-details">
+                      <p>
+                        <span className="rd-label">Generated:</span>{' '}
+                        <span className="rd-muted" suppressHydrationWarning>{generatedAt}</span>
+                      </p>
+                    </div>
+                  )
+                }
+                return (
+                  <div className="rd-prepared-by-details">
+                    {name ? (
+                      <p>
+                        <span className="rd-label">Name:</span>{' '}
+                        <span className="rd-muted">{name}</span>
+                      </p>
+                    ) : null}
+                    {phone ? (
+                      <p>
+                        <span className="rd-label">Phone:</span>{' '}
+                        <span className="rd-muted">{phone}</span>
+                      </p>
+                    ) : null}
+                    {email ? (
+                      <p>
+                        <span className="rd-label">Email:</span>{' '}
+                        <span className="rd-muted">{email}</span>
+                      </p>
+                    ) : null}
                     <p>
-                      <span className="rd-label">Phone:</span>{' '}
-                      <span className="rd-muted">{reservation.creator.phone}</span>
+                      <span className="rd-label">Generated:</span>{' '}
+                      <span className="rd-muted" suppressHydrationWarning>{generatedAt}</span>
                     </p>
-                  ) : null}
-                  <p>
-                    <span className="rd-label">Email:</span>{' '}
-                    <span className="rd-muted">{reservation.creator.email}</span>
-                  </p>
-                  <p>
-                    <span className="rd-label">Generated:</span>{' '}
-                    <span className="rd-muted" suppressHydrationWarning>{generatedAt}</span>
-                  </p>
-                </div>
-              ) : (
-                <div className="rd-prepared-by-details">
-                  <p>
-                    <span className="rd-label">Generated:</span>{' '}
-                    <span className="rd-muted" suppressHydrationWarning>{generatedAt}</span>
-                  </p>
-                </div>
-              )}
+                  </div>
+                )
+              })()}
             </div>
             <div className="rd-signature-col rd-signature-col--guest">
               <div className="rd-signature-line" />

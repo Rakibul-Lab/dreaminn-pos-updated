@@ -51,6 +51,8 @@ export interface ReservationDocumentData {
   reqPersonPhone?: string | null
   checkIn: string
   checkOut: string
+  actualCheckIn?: string | null
+  actualCheckOut?: string | null
   adults: number
   children: number
   totalRoomCharge: number
@@ -182,8 +184,18 @@ export function ReservationDocumentView({
     return <p className="text-red-600 text-sm">Reservation not found.</p>
   }
 
-  const checkInDt = applyHotelTimeToBookingInput(reservation.checkIn, times.checkInTime)
-  const checkOutDt = applyHotelTimeToBookingInput(reservation.checkOut, times.checkOutTime)
+  const effectiveCheckIn =
+    (reservation.status === 'CHECKED_IN' || reservation.status === 'CHECKED_OUT') &&
+    reservation.actualCheckIn
+      ? reservation.actualCheckIn
+      : reservation.checkIn
+  const effectiveCheckOut =
+    reservation.status === 'CHECKED_OUT' && reservation.actualCheckOut
+      ? reservation.actualCheckOut
+      : reservation.checkOut
+
+  const checkInDt = applyHotelTimeToBookingInput(effectiveCheckIn, times.checkInTime)
+  const checkOutDt = applyHotelTimeToBookingInput(effectiveCheckOut, times.checkOutTime)
   const nights = countHotelStayNights(checkInDt, checkOutDt)
   const policies = reservationPoliciesWithTimes(times)
   const confirmationNo = formatConfirmationNumber(reservation)
@@ -486,12 +498,18 @@ export function ReservationDocumentView({
                 <span className="rd-muted">{reservation.status.replace(/_/g, ' ')}</span>
               </p>
               <p>
-                <span className="rd-label">Expected Arrival:</span>{' '}
-                <span className="rd-muted">{formatCheckInShort(reservation.checkIn)}</span>
+                <span className="rd-label">
+                  {reservation.status === 'CHECKED_IN' || reservation.status === 'CHECKED_OUT'
+                    ? 'Arrival:'
+                    : 'Expected Arrival:'}
+                </span>{' '}
+                <span className="rd-muted">{formatCheckInShort(effectiveCheckIn)}</span>
               </p>
               <p>
-                <span className="rd-label">Expected Departure:</span>{' '}
-                <span className="rd-muted">{formatCheckOutShort(reservation.checkOut)}</span>
+                <span className="rd-label">
+                  {reservation.status === 'CHECKED_OUT' ? 'Departure:' : 'Expected Departure:'}
+                </span>{' '}
+                <span className="rd-muted">{formatCheckOutShort(effectiveCheckOut)}</span>
               </p>
               <p>
                 <span className="rd-label">No. of Night(s):</span>{' '}

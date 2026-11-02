@@ -330,9 +330,18 @@ export function InvoicePrintView({
         })),
       ]
   const guestCount = (invoice.booking.adults ?? 1) + (invoice.booking.children ?? 0)
+  const effectiveCheckIn =
+    (invoice.booking.status === 'CHECKED_IN' || invoice.booking.status === 'CHECKED_OUT') &&
+    invoice.booking.actualCheckIn
+      ? invoice.booking.actualCheckIn
+      : invoice.booking.checkIn
+  const effectiveCheckOut =
+    invoice.booking.status === 'CHECKED_OUT' && invoice.booking.actualCheckOut
+      ? invoice.booking.actualCheckOut
+      : invoice.booking.checkOut
   const bookedNights = countBookedNights(
-    new Date(invoice.booking.checkIn),
-    new Date(invoice.booking.checkOut)
+    new Date(effectiveCheckIn),
+    new Date(effectiveCheckOut)
   )
   const roomRate =
     invoice.booking.room.totalPrice ??

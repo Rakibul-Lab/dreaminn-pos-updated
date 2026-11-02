@@ -732,6 +732,7 @@ export async function POST(
       data: {
         status: 'CHECKED_OUT',
         actualCheckOut: now,
+        checkOut: now,
         totalRoomCharge: roomCharges,
         dueAmount: guestDueAmount,
       },

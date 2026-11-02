@@ -220,11 +220,13 @@ export function computeCheckoutSettlement(
   const roomCharges =
     params.roomChargeOverride != null && params.roomChargeOverride >= 0
       ? params.roomChargeOverride
-      : booking.totalRoomCharge > 0
-        ? booking.totalRoomCharge
-        : individualRoomCharges > 0
-          ? individualRoomCharges
-          : computeAdjustedRoomCharge(nightlyRate, bookedNights)
+      : actualStayNights < bookedNights
+        ? computeAdjustedRoomCharge(nightlyRate, actualStayNights)
+        : booking.totalRoomCharge > 0
+          ? booking.totalRoomCharge
+          : individualRoomCharges > 0
+            ? individualRoomCharges
+            : computeAdjustedRoomCharge(nightlyRate, bookedNights)
 
   const chargeableNights =
     nightlyRate > 0 && roomCharges > 0

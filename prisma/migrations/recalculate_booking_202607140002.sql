@@ -34,3 +34,4 @@ SET
   `unitPrice` = -287000,
   `total` = -287000
 WHERE `invoiceId` = 'cmsu865si000js0vgtgukhplm' AND `itemType` = 'discount';
+

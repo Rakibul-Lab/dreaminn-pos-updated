@@ -1621,9 +1621,6 @@ export async function buildMonthlyBusinessDaySalesReport(
       due = 23100
     } else if (bd === '2026-09-09') {
       due = 22500
-    } else if (bd === '2026-10-31' && due < 3000) {
-      due = 3000
-      card = Math.max(0, Number((card - 3000).toFixed(2)))
     }
 
     const total = Number((cash + card + bankPayment + mFinance + due).toFixed(2))

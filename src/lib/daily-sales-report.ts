@@ -867,11 +867,42 @@ export async function buildDailySalesDetailReport(
     transportSales.map((sale) => [sale.saleNumber, sale] as const)
   )
 
+  // Load any invoices referenced by payments on this business day that are not already in invoices
+  // (e.g. advance settlement of folios or invoices checked out on an adjacent morning)
+  const missingPaymentInvoiceIds = Array.from(
+    new Set(
+      allPayments
+        .map((p) => p.invoiceId)
+        .filter((id): id is string => Boolean(id) && !invoices.some((inv) => inv.id === id))
+    )
+  )
+
+  const paymentInvoices =
+    missingPaymentInvoiceIds.length > 0
+      ? await db.invoice.findMany({
+          where: { id: { in: missingPaymentInvoiceIds } },
+          include: {
+            items: { select: { itemType: true, description: true, total: true } },
+            booking: {
+              include: {
+                customer: { select: { name: true, registrationNumber: true, company: true } },
+                room: { select: { roomNumber: true } },
+                companyLedger: { select: { name: true } },
+                sourceReservationEntry: { select: { registrationNumber: true } },
+                companyLedgerGuest: { select: { registrationNumber: true } },
+              },
+            },
+          },
+        })
+      : []
+
+  const allBreakdownInvoices = [...invoices, ...paymentInvoices]
+
   // Restaurant money on a checkout invoice that no payment row names by itself.
   // It has to be carved out of the collection row, or the sheet shows a food bill
   // inside a room payment while the breakdown counts it under Restaurant bills.
   const unnamedRestaurantByInvoice = new Map<string, number>()
-  for (const invoice of invoices) {
+  for (const invoice of allBreakdownInvoices) {
     const gross = invoiceRestaurantGross(invoice)
     if (gross > 0) unnamedRestaurantByInvoice.set(invoice.id, gross)
   }
@@ -1402,7 +1433,7 @@ export async function buildDailySalesDetailReport(
     invoiceIdsWithCheckoutPayments,
     allPayments,
     transportSalesTotal,
-    invoices
+    allBreakdownInvoices
   )
   const companyBillTotal = companyBills
     .filter((bill) => !bill.booking?.billTransferredToBookingId)

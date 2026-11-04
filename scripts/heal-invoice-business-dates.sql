@@ -10,3 +10,4 @@ SET i.business_date = DATE_FORMAT(b.actualCheckOut, '%Y-%m-%d')
 WHERE b.status = 'CHECKED_OUT'
   AND b.actualCheckOut IS NOT NULL
   AND (i.business_date IS NULL OR i.business_date <> DATE_FORMAT(b.actualCheckOut, '%Y-%m-%d'));
+

@@ -97,13 +97,15 @@ function invoiceWindowWhere(businessDate: string, openedAt: Date, closedAt: Date
     OR: [
       { businessDate },
       {
-        businessDate: null,
-        OR: [
-          { issuedAt: { gte: openedAt, lte: closedAt } },
-          {
-            AND: [{ issuedAt: null }, { createdAt: { gte: openedAt, lte: closedAt } }],
-          },
-        ],
+        booking: {
+          actualCheckOut: { gte: openedAt, lte: closedAt },
+        },
+      },
+      {
+        issuedAt: { gte: openedAt, lte: closedAt },
+      },
+      {
+        AND: [{ issuedAt: null }, { createdAt: { gte: openedAt, lte: closedAt } }],
       },
     ],
   }

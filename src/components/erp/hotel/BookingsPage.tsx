@@ -800,8 +800,9 @@ export function BookingsPage() {
           </CardContent>
         </Card>
       ) : (
-        <div className="rounded-xl border border-border bg-card text-card-foreground shadow-sm">
-            <table className="bookings-sticky-table bookings-list-table w-full">
+        <div className="rounded-xl border border-border bg-card text-card-foreground shadow-sm overflow-hidden">
+          <div className="max-h-[min(72vh,750px)] overflow-auto custom-scrollbar">
+            <table className="bookings-sticky-table bookings-sticky-table--in-scroll bookings-list-table w-full">
               <thead>
                 <tr className="border-b border-border">
                   <th className="col-guest text-left font-medium">Guest</th>
@@ -888,8 +889,8 @@ export function BookingsPage() {
                         )}
                       </td>
                       <td className="col-discount text-right text-muted-foreground">—</td>
-                      <td className="col-vat text-muted-foreground">—</td>
-                      <td className="col-total font-medium">
+                      <td className="col-vat text-right text-muted-foreground">—</td>
+                      <td className="col-total text-right font-medium">
                         {item.totalAmount > 0 ? formatBdt(item.totalAmount) : '—'}
                       </td>
                       <td className="col-due text-right">
@@ -1024,7 +1025,7 @@ export function BookingsPage() {
                       );
                     })()}
                   </td>
-                  <td className="col-vat">
+                  <td className="col-vat text-right">
                     {(() => {
                       const vat = resolveBookingVatListDisplay(booking);
                       return (
@@ -1038,7 +1039,7 @@ export function BookingsPage() {
                       );
                     })()}
                   </td>
-                  <td className="col-total font-medium">
+                  <td className="col-total text-right font-medium">
                     {formatBdt(booking.totalWithVat ?? booking.totalRoomCharge)}
                   </td>
                   <td className="col-due text-right">
@@ -1232,6 +1233,7 @@ export function BookingsPage() {
               )}
               </tbody>
             </table>
+          </div>
           <div className="flex flex-col gap-3 border-t bg-muted/30 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm text-muted-foreground">
               {totalBookings === 0

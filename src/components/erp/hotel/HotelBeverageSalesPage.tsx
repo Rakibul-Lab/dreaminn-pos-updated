@@ -454,17 +454,17 @@ export function HotelBeverageSalesPage() {
   }
 
   return (
-    <div className="flex h-[calc(100dvh-8.5rem)] max-h-[calc(100dvh-8.5rem)] bg-muted overflow-hidden -m-4 md:-m-6">
+    <div className="flex flex-col lg:flex-row h-auto lg:h-[calc(100dvh-8.5rem)] lg:max-h-[calc(100dvh-8.5rem)] bg-muted overflow-y-auto lg:overflow-hidden -m-2.5 sm:-m-4 md:-m-6">
       {/* Left — beverage menu (POS-style) */}
       <div className="flex-1 flex flex-col min-w-0">
-        <div className="bg-slate-900 text-white px-4 py-3 flex items-center justify-between gap-3 shrink-0">
-          <div className="flex items-center gap-3 shrink-0">
-            <div className="w-9 h-9 rounded-lg bg-emerald-500 flex items-center justify-center">
-              <Coffee className="w-5 h-5 text-white" />
+        <div className="bg-slate-900 text-white px-3 sm:px-4 py-3 flex flex-wrap items-center justify-between gap-3 shrink-0">
+          <div className="flex items-center gap-2.5 sm:gap-3 shrink-0">
+            <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg bg-emerald-500 flex items-center justify-center shrink-0">
+              <Coffee className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
             </div>
             <div>
-              <h1 className="text-lg font-bold tracking-wide">RRP Dream Inn</h1>
-              <p className="text-xs text-slate-300">Hotel Beverage POS</p>
+              <h1 className="text-base sm:text-lg font-bold tracking-wide">RRP Dream Inn</h1>
+              <p className="text-[11px] sm:text-xs text-slate-300">Hotel Beverage POS</p>
             </div>
           </div>
 
@@ -624,7 +624,7 @@ export function HotelBeverageSalesPage() {
 
         <div className="flex-1 overflow-y-auto p-4 [scrollbar-width:none] hover:[scrollbar-width:thin]">
           {menuLoading ? (
-            <div className="grid grid-cols-4 sm:grid-cols-6 lg:grid-cols-8 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-2">
               {Array.from({ length: 16 }).map((_, i) => (
                 <Skeleton key={i} className="h-28 rounded-lg" />
               ))}
@@ -636,7 +636,7 @@ export function HotelBeverageSalesPage() {
               <p className="text-xs mt-1">Use Add category on this screen to create beverage categories</p>
             </div>
           ) : (
-            <div className="grid grid-cols-4 sm:grid-cols-6 lg:grid-cols-8 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-2">
               {filteredItems.map((item) => {
                 const inCart = cart.find((c) => c.menuItem.id === item.id)
                 return (
@@ -694,7 +694,7 @@ export function HotelBeverageSalesPage() {
       </div>
 
       {/* Right — order panel */}
-      <div className="w-[380px] bg-card border-l flex flex-col shrink-0 shadow-xl h-full max-h-full overflow-hidden">
+      <div className="w-full lg:w-[380px] bg-card border-t lg:border-t-0 lg:border-l flex flex-col shrink-0 shadow-xl h-auto lg:h-full lg:max-h-full overflow-hidden">
         <div className="px-4 py-3 bg-slate-900 text-white shrink-0">
           <div className="flex items-center justify-between mb-3">
             <h2 className="font-bold text-base">Current Sale</h2>

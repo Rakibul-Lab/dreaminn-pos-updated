@@ -20,6 +20,12 @@ import { resolveInvoiceBooking } from '@/lib/invoice-booking-resolve';
 import { getRoomNightlyTotal } from '@/lib/room-pricing';
 import { isStayDatetimeRangeValid } from '@/lib/hotel-times';
 import { stampCurrentBusinessDate } from '@/lib/business-date';
+import {
+  formatBusinessDate,
+  isValidBusinessDateString,
+  parseBusinessDateString,
+} from '@/lib/business-date-format';
+import { differenceInCalendarDays } from 'date-fns';
 import { filterGuestFolioRestaurantOrders } from '@/lib/restaurant-order-billing';
 import { computeCheckoutSettlement } from '@/lib/checkout-settlement';
 import {
@@ -445,7 +451,31 @@ export async function POST(request: NextRequest) {
     const dueAmount = totalAmount - paidAmount;
     const status: InvoiceStatus = dueAmount <= 0 ? 'PAID' : 'ISSUED';
     const invoiceNumber = generateInvoiceNumber();
-    const businessDate = await stampCurrentBusinessDate();
+
+    // Preserve existing businessDate whenever possible. When regenerating or updating an invoice
+    // for a past checkout, NEVER overwrite historical business dates with today's open business day.
+    let invoiceBusinessDate: string;
+    if (existingInvoice?.businessDate && isValidBusinessDateString(existingInvoice.businessDate)) {
+      if (booking.status === 'CHECKED_OUT' && (booking.actualCheckOut || booking.checkOut)) {
+        const checkoutDay = formatBusinessDate(new Date(booking.actualCheckOut ?? booking.checkOut!));
+        const diffDays = Math.abs(
+          differenceInCalendarDays(
+            parseBusinessDateString(existingInvoice.businessDate),
+            parseBusinessDateString(checkoutDay)
+          )
+        );
+        // If businessDate is close to checkout (e.g. night audit shift), keep it.
+        // If it drifted by more than 1 day (e.g. erroneously stamped to a later date on invoice view),
+        // restore it to checkoutDay.
+        invoiceBusinessDate = diffDays <= 1 ? existingInvoice.businessDate : checkoutDay;
+      } else {
+        invoiceBusinessDate = existingInvoice.businessDate;
+      }
+    } else if (booking.status === 'CHECKED_OUT' && (booking.actualCheckOut || booking.checkOut)) {
+      invoiceBusinessDate = formatBusinessDate(new Date(booking.actualCheckOut ?? booking.checkOut!));
+    } else {
+      invoiceBusinessDate = await stampCurrentBusinessDate();
+    }
 
     const invoice = await db.$transaction(async (tx) => {
       const inv = existingInvoice
@@ -462,7 +492,7 @@ export async function POST(request: NextRequest) {
               paidAmount,
               dueAmount: Math.max(0, dueAmount),
               status,
-              businessDate,
+              businessDate: invoiceBusinessDate,
               issuedAt: existingInvoice.issuedAt || new Date(),
               paidAt: status === 'PAID' ? new Date() : null,
             },
@@ -471,7 +501,7 @@ export async function POST(request: NextRequest) {
             data: {
               invoiceNumber,
               bookingId,
-              businessDate,
+              businessDate: invoiceBusinessDate,
               roomCharges,
               foodCharges,
               extraCharges,

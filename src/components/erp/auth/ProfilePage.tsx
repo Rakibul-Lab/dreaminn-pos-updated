@@ -332,7 +332,7 @@ export function ProfilePage() {
 
       <div className="flex justify-end gap-2 pb-4">
         <Button
-          className="bg-amber-600 hover:bg-amber-700 text-white min-w-[120px]"
+          className="w-full sm:w-auto bg-amber-600 hover:bg-amber-700 text-white min-w-[120px]"
           disabled={saveMutation.isPending || !name.trim()}
           onClick={() => saveMutation.mutate()}
         >

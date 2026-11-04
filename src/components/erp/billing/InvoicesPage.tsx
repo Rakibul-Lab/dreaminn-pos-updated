@@ -451,8 +451,8 @@ export default function InvoicesPage() {
       {/* Invoices Table */}
       <Card>
         <CardContent className="p-0">
-          <div className="max-h-96 overflow-y-auto">
-            <Table>
+          <div className="max-h-[600px] overflow-auto custom-scrollbar">
+            <Table className="min-w-[850px]">
               <TableHeader>
                 <TableRow>
                   <TableHead>Invoice #</TableHead>

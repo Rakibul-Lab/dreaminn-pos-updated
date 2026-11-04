@@ -171,7 +171,7 @@ export function RoomTypesPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h2 className="text-xl font-semibold">Room Types</h2>
           <p className="text-sm text-muted-foreground">
@@ -188,7 +188,7 @@ export function RoomTypesPage() {
         {roomTypes.map((rt) => (
           <Card key={rt.id} className="hover:shadow-md transition-shadow">
             <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <CardTitle className="text-lg">{rt.name}</CardTitle>
                 <div className="flex items-center gap-1">
                   <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEditDialog(rt)}>

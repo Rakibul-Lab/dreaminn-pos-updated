@@ -169,7 +169,7 @@ export default function SettingsPage() {
           </h2>
           <p className="text-muted-foreground text-sm mt-1">Configure hotel and restaurant operations</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button
             variant="outline"
             size="sm"

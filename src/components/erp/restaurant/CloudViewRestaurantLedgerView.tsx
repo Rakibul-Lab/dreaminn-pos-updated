@@ -376,7 +376,7 @@ export function CloudViewRestaurantLedgerView() {
             />
           </div>
           <Select value={stageFilter} onValueChange={(v) => setStageFilter(v as StageFilter)}>
-            <SelectTrigger className="w-44">
+            <SelectTrigger className="w-full sm:w-44">
               <SelectValue placeholder="Stage" />
             </SelectTrigger>
             <SelectContent>
@@ -387,7 +387,7 @@ export function CloudViewRestaurantLedgerView() {
             </SelectContent>
           </Select>
           <Select value={sortFilter} onValueChange={(v) => setSortFilter(v as SortFilter)}>
-            <SelectTrigger className="w-40">
+            <SelectTrigger className="w-full sm:w-40">
               <SelectValue placeholder="Sort" />
             </SelectTrigger>
             <SelectContent>
@@ -398,7 +398,7 @@ export function CloudViewRestaurantLedgerView() {
             </SelectContent>
           </Select>
           <Select value={datePreset} onValueChange={(v) => setDatePreset(v as BookingDatePreset)}>
-            <SelectTrigger className="w-40">
+            <SelectTrigger className="w-full sm:w-40">
               <CalendarRange className="h-4 w-4 mr-2 text-muted-foreground" />
               <SelectValue />
             </SelectTrigger>
@@ -423,72 +423,74 @@ export function CloudViewRestaurantLedgerView() {
           ) : bills.length === 0 ? (
             <p className="p-8 text-center text-muted-foreground text-sm">No restaurant ledger bills match filters.</p>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Order</TableHead>
-                  <TableHead>Guest / Room</TableHead>
-                  <TableHead>Stage</TableHead>
-                  <TableHead className="text-right">Due</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {bills.map((bill) => (
-                  <TableRow key={bill.id}>
-                    <TableCell className="text-xs whitespace-nowrap">
-                      {format(new Date(bill.billedAt), 'dd MMM yyyy')}
-                    </TableCell>
-                    <TableCell className="font-mono text-xs">
-                      {bill.orderNumber ?? bill.restaurantOrder?.orderNumber ?? '—'}
-                    </TableCell>
-                    <TableCell>
-                      <div className="text-sm">{bill.guestName}</div>
-                      {bill.roomNumber && (
-                        <div className="text-xs text-muted-foreground">Room {bill.roomNumber}</div>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className={stageBadgeClass(bill.settlementStage)}>
-                        {formatSettlementStage(bill.settlementStage)}
-                      </Badge>
-                      {bill.hotelClearedAt && bill.hotelClearer && (
-                        <p className="text-[10px] text-muted-foreground mt-1">
-                          by {bill.hotelClearer.name}
-                        </p>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right font-medium">
-                      {formatBdt(bill.dueAmount)}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {bill.settlementStage === 'OPEN' && bill.dueAmount > 0 && canHotelClear && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="h-8"
-                          disabled={hotelClearMutation.isPending}
-                          onClick={() => hotelClearMutation.mutate(bill.id)}
-                        >
-                          Clear hotel due
-                        </Button>
-                      )}
-                      {bill.settlementStage === 'HOTEL_CLEARED' && bill.dueAmount > 0 && canRecordPayment && (
-                        <Button
-                          size="sm"
-                          className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white"
-                          onClick={() => openPayDialog(bill)}
-                        >
-                          <Wallet className="h-3.5 w-3.5 mr-1" />
-                          Record payment
-                        </Button>
-                      )}
-                    </TableCell>
+            <div className="overflow-x-auto custom-scrollbar">
+              <Table className="min-w-[650px]">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Order</TableHead>
+                    <TableHead>Guest / Room</TableHead>
+                    <TableHead>Stage</TableHead>
+                    <TableHead className="text-right">Due</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {bills.map((bill) => (
+                    <TableRow key={bill.id}>
+                      <TableCell className="text-xs whitespace-nowrap">
+                        {format(new Date(bill.billedAt), 'dd MMM yyyy')}
+                      </TableCell>
+                      <TableCell className="font-mono text-xs">
+                        {bill.orderNumber ?? bill.restaurantOrder?.orderNumber ?? '—'}
+                      </TableCell>
+                      <TableCell>
+                        <div className="text-sm">{bill.guestName}</div>
+                        {bill.roomNumber && (
+                          <div className="text-xs text-muted-foreground">Room {bill.roomNumber}</div>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className={stageBadgeClass(bill.settlementStage)}>
+                          {formatSettlementStage(bill.settlementStage)}
+                        </Badge>
+                        {bill.hotelClearedAt && bill.hotelClearer && (
+                          <p className="text-[10px] text-muted-foreground mt-1">
+                            by {bill.hotelClearer.name}
+                          </p>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right font-medium">
+                        {formatBdt(bill.dueAmount)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {bill.settlementStage === 'OPEN' && bill.dueAmount > 0 && canHotelClear && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-8"
+                            disabled={hotelClearMutation.isPending}
+                            onClick={() => hotelClearMutation.mutate(bill.id)}
+                          >
+                            Clear hotel due
+                          </Button>
+                        )}
+                        {bill.settlementStage === 'HOTEL_CLEARED' && bill.dueAmount > 0 && canRecordPayment && (
+                          <Button
+                            size="sm"
+                            className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white"
+                            onClick={() => openPayDialog(bill)}
+                          >
+                            <Wallet className="h-3.5 w-3.5 mr-1" />
+                            Record payment
+                          </Button>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
           )}
         </CardContent>
       </Card>
@@ -542,10 +544,10 @@ export function CloudViewRestaurantLedgerView() {
               <Textarea value={payNotes} onChange={(e) => setPayNotes(e.target.value)} rows={2} />
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setPayBill(null)}>Cancel</Button>
+          <DialogFooter className="flex-col-reverse sm:flex-row gap-2">
+            <Button variant="outline" className="w-full sm:w-auto" onClick={() => setPayBill(null)}>Cancel</Button>
             <Button
-              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+              className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white"
               disabled={payMutation.isPending}
               onClick={() => {
                 if (!payBill) return

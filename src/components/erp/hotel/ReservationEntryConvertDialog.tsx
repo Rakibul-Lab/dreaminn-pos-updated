@@ -230,11 +230,11 @@ export function ReservationEntryConvertDialog({
     () =>
       entry
         ? {
-            discountEnabled: entry.discountEnabled,
-            discountType: entry.discountType === 'FIXED' ? ('FIXED' as const) : ('PERCENTAGE' as const),
-            discountValue: entry.discountValue,
-            nights,
-          }
+          discountEnabled: entry.discountEnabled,
+          discountType: entry.discountType === 'FIXED' ? ('FIXED' as const) : ('PERCENTAGE' as const),
+          discountValue: entry.discountValue,
+          nights,
+        }
         : undefined,
     [entry, nights]
   )
@@ -406,241 +406,241 @@ export function ReservationEntryConvertDialog({
         </DialogHeader>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
-        {entryLoading ? (
-          <div className="flex items-center justify-center py-16 text-muted-foreground">
-            <Loader2 className="h-5 w-5 animate-spin mr-2" />
-            Loading entry…
-          </div>
-        ) : !entry ? (
-          <p className="text-sm text-muted-foreground py-4">Reservation entry not found.</p>
-        ) : entry.unfulfilledRooms <= 0 ? (
-          <p className="text-sm text-muted-foreground py-4">
-            All rooms on this entry are already converted.
-          </p>
-        ) : (
-          <div className="space-y-6">
-            <div className="rounded-xl border bg-gradient-to-br from-muted/40 to-muted/10 px-5 py-4">
-              <div className="flex flex-wrap items-start justify-between gap-4">
-                <div className="min-w-0 space-y-1">
-                  <p className="text-lg font-semibold leading-tight">{entry.guestName || 'Guest'}</p>
-                  <p className="text-sm text-muted-foreground">
-                    {checkInDate} → {checkOutDate}
-                    <span className="mx-2 text-border">|</span>
-                    {nights} night{nights === 1 ? '' : 's'}
-                    <span className="mx-2 text-border">|</span>
-                    {entry.unfulfilledRooms} room{entry.unfulfilledRooms === 1 ? '' : 's'} to convert
-                  </p>
-                </div>
-                {entry.confirmationNumber ? (
-                  <div className="shrink-0 rounded-lg border bg-background px-3 py-2 text-center shadow-sm">
-                    <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">
-                      Confirmation
-                    </p>
-                    <p className="font-mono text-sm font-semibold text-foreground mt-0.5">
-                      {entry.confirmationNumber}
+          {entryLoading ? (
+            <div className="flex items-center justify-center py-16 text-muted-foreground">
+              <Loader2 className="h-5 w-5 animate-spin mr-2" />
+              Loading entry…
+            </div>
+          ) : !entry ? (
+            <p className="text-sm text-muted-foreground py-4">Reservation entry not found.</p>
+          ) : entry.unfulfilledRooms <= 0 ? (
+            <p className="text-sm text-muted-foreground py-4">
+              All rooms on this entry are already converted.
+            </p>
+          ) : (
+            <div className="space-y-6">
+              <div className="rounded-xl border bg-gradient-to-br from-muted/40 to-muted/10 px-5 py-4">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div className="min-w-0 space-y-1">
+                    <p className="text-lg font-semibold leading-tight">{entry.guestName || 'Guest'}</p>
+                    <p className="text-sm text-muted-foreground">
+                      {checkInDate} → {checkOutDate}
+                      <span className="mx-2 text-border">|</span>
+                      {nights} night{nights === 1 ? '' : 's'}
+                      <span className="mx-2 text-border">|</span>
+                      {entry.unfulfilledRooms} room{entry.unfulfilledRooms === 1 ? '' : 's'} to convert
                     </p>
                   </div>
-                ) : null}
-              </div>
-              {showMultiRoomNote ? (
-                <p className="text-xs text-amber-900 mt-4 rounded-lg border border-amber-200/80 bg-amber-50 px-3 py-2.5 leading-relaxed">
-                  Each room becomes its own booking with a separate guest profile and registration
-                  number. All bookings keep the entry confirmation number above.
-                </p>
-              ) : null}
-            </div>
-
-            <Card className="border-slate-200/80 shadow-sm overflow-hidden">
-              <CardContent className="p-0">
-                <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-slate-50/80 px-5 py-3.5">
-                  <p className="text-sm font-semibold text-slate-900">Financial summary</p>
-                  {discountSummary ? (
-                    <span className="text-xs rounded-full bg-violet-100 text-violet-800 px-3 py-1 font-medium">
-                      Discount: {discountSummary}
-                    </span>
+                  {entry.confirmationNumber ? (
+                    <div className="shrink-0 rounded-lg border bg-background px-3 py-2 text-center shadow-sm">
+                      <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">
+                        Confirmation
+                      </p>
+                      <p className="font-mono text-sm font-semibold text-foreground mt-0.5">
+                        {entry.confirmationNumber}
+                      </p>
+                    </div>
                   ) : null}
                 </div>
-                <div className="flex flex-wrap divide-y sm:divide-y-0 sm:divide-x divide-border">
-                  <SummaryStat label="Room charges" value={formatBdt(summary.roomCharges)} className="flex-1 min-w-[9.5rem]" />
-                  {entry.discountEnabled ? (
+                {showMultiRoomNote ? (
+                  <p className="text-xs text-amber-900 mt-4 rounded-lg border border-amber-200/80 bg-amber-50 px-3 py-2.5 leading-relaxed">
+                    Each room becomes its own booking with a separate guest profile and registration
+                    number. All bookings keep the entry confirmation number above.
+                  </p>
+                ) : null}
+              </div>
+
+              <Card className="border-slate-200/80 shadow-sm overflow-hidden">
+                <CardContent className="p-0">
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-slate-50/80 px-5 py-3.5">
+                    <p className="text-sm font-semibold text-slate-900">Financial summary</p>
+                    {discountSummary ? (
+                      <span className="text-xs rounded-full bg-violet-100 text-violet-800 px-3 py-1 font-medium">
+                        Discount: {discountSummary}
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="flex flex-wrap divide-y sm:divide-y-0 sm:divide-x divide-border">
+                    <SummaryStat label="Room charges" value={formatBdt(summary.roomCharges)} className="flex-1 min-w-[9.5rem]" />
+                    {entry.discountEnabled ? (
+                      <SummaryStat
+                        label="Discount"
+                        value={`−${formatBdt(summary.discountTotal)}`}
+                        valueClassName="text-violet-700"
+                        className="flex-1 min-w-[9.5rem]"
+                      />
+                    ) : null}
                     <SummaryStat
-                      label="Discount"
-                      value={`−${formatBdt(summary.discountTotal)}`}
-                      valueClassName="text-violet-700"
+                      label="Total (incl. VAT)"
+                      value={formatBdt(summary.grandTotal)}
+                      valueClassName="font-semibold"
                       className="flex-1 min-w-[9.5rem]"
                     />
+                    <SummaryStat
+                      label="Advance pool"
+                      value={formatBdt(summary.advancePool)}
+                      valueClassName="text-emerald-700 font-semibold"
+                      className="flex-1 min-w-[9.5rem]"
+                    />
+                    <SummaryStat
+                      label="Allocated advance"
+                      value={formatBdt(summary.allocatedAdvance)}
+                      valueClassName={
+                        advanceOverAllocated
+                          ? 'text-red-600 font-semibold'
+                          : 'text-emerald-700 font-semibold'
+                      }
+                      className="flex-1 min-w-[9.5rem]"
+                    />
+                    <SummaryStat
+                      label="Balance due"
+                      value={formatBdt(summary.balanceDue)}
+                      valueClassName="text-amber-800 font-semibold"
+                      className="flex-1 min-w-[9.5rem]"
+                    />
+                  </div>
+                  {(summary.unallocatedAdvance > 0.009 && !advanceOverAllocated) || advanceOverAllocated ? (
+                    <div className="border-t px-5 py-3 bg-muted/20">
+                      {summary.unallocatedAdvance > 0.009 && !advanceOverAllocated ? (
+                        <p className="text-xs text-muted-foreground">
+                          {formatBdt(summary.unallocatedAdvance)} advance remains unallocated on the
+                          entry after convert.
+                        </p>
+                      ) : null}
+                      {advanceOverAllocated ? (
+                        <p className="text-xs text-red-600 font-medium">
+                          Allocated advance exceeds the available pool by{' '}
+                          {formatBdt(summary.allocatedAdvance - summary.advancePool)}.
+                        </p>
+                      ) : null}
+                    </div>
                   ) : null}
-                  <SummaryStat
-                    label="Total (incl. VAT)"
-                    value={formatBdt(summary.grandTotal)}
-                    valueClassName="font-semibold"
-                    className="flex-1 min-w-[9.5rem]"
-                  />
-                  <SummaryStat
-                    label="Advance pool"
-                    value={formatBdt(summary.advancePool)}
-                    valueClassName="text-emerald-700 font-semibold"
-                    className="flex-1 min-w-[9.5rem]"
-                  />
-                  <SummaryStat
-                    label="Allocated advance"
-                    value={formatBdt(summary.allocatedAdvance)}
-                    valueClassName={
-                      advanceOverAllocated
-                        ? 'text-red-600 font-semibold'
-                        : 'text-emerald-700 font-semibold'
-                    }
-                    className="flex-1 min-w-[9.5rem]"
-                  />
-                  <SummaryStat
-                    label="Balance due"
-                    value={formatBdt(summary.balanceDue)}
-                    valueClassName="text-amber-800 font-semibold"
-                    className="flex-1 min-w-[9.5rem]"
-                  />
+                </CardContent>
+              </Card>
+
+              <div className="space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <Label className="text-sm font-semibold">Room assignment & payment split</Label>
+                  {assignedSlots.length > 1 ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-9 gap-2 shrink-0"
+                      onClick={handleDistributeAdvance}
+                      disabled={!allRoomsAssigned}
+                    >
+                      <Scale className="h-4 w-4" />
+                      Split advance by room total
+                    </Button>
+                  ) : null}
                 </div>
-                {(summary.unallocatedAdvance > 0.009 && !advanceOverAllocated) || advanceOverAllocated ? (
-                  <div className="border-t px-5 py-3 bg-muted/20">
-                    {summary.unallocatedAdvance > 0.009 && !advanceOverAllocated ? (
-                      <p className="text-xs text-muted-foreground">
-                        {formatBdt(summary.unallocatedAdvance)} advance remains unallocated on the
-                        entry after convert.
-                      </p>
-                    ) : null}
-                    {advanceOverAllocated ? (
-                      <p className="text-xs text-red-600 font-medium">
-                        Allocated advance exceeds the available pool by{' '}
-                        {formatBdt(summary.allocatedAdvance - summary.advancePool)}.
-                      </p>
-                    ) : null}
-                  </div>
-                ) : null}
-              </CardContent>
-            </Card>
 
-            <div className="space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <Label className="text-sm font-semibold">Room assignment & payment split</Label>
-                {assignedSlots.length > 1 ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-9 gap-2 shrink-0"
-                    onClick={handleDistributeAdvance}
-                    disabled={!allRoomsAssigned}
-                  >
-                    <Scale className="h-4 w-4" />
-                    Split advance by room total
-                  </Button>
-                ) : null}
-              </div>
-
-              {roomsLoading ? (
-                <p className="text-sm text-muted-foreground py-6 text-center">
-                  Loading available rooms…
-                </p>
-              ) : (
-                <div className="overflow-x-auto">
-                <div className="min-w-[42rem] rounded-xl border overflow-hidden bg-card shadow-sm">
-                  <div className="grid grid-cols-[minmax(7rem,1fr)_minmax(9rem,1.4fr)_minmax(6.5rem,0.9fr)_minmax(7.5rem,1fr)_minmax(6.5rem,0.9fr)] gap-4 px-5 py-3 bg-muted/40 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    <span>Room</span>
-                    <span>Category</span>
-                    <span className="text-right">Total</span>
-                    <span className="text-right">Advance (BDT)</span>
-                    <span className="text-right">Due</span>
-                  </div>
-                  <Separator />
-                  {convertSlots.map((slot) => {
-                    const line = unfulfilledLines.find((row) => row.id === slot.lineId)
-                    if (!line) return null
-                    const financial = slotFinancials.find((row) => row.key === slot.key)
-                    const isPreset = Boolean(slot.presetRoomNumber && line.unfulfilledCount === 1)
-
-                    return (
-                      <div
-                        key={slot.key}
-                        className="grid grid-cols-[minmax(7rem,1fr)_minmax(9rem,1.4fr)_minmax(6.5rem,0.9fr)_minmax(7.5rem,1fr)_minmax(6.5rem,0.9fr)] gap-4 px-5 py-4 border-b last:border-b-0 items-center bg-background even:bg-muted/10"
-                      >
-                        <div className="min-w-0">
-                          {isPreset ? (
-                            <p className="text-base font-semibold">{slot.presetRoomNumber}</p>
-                          ) : (
-                            <Select
-                              value={slot.roomId || undefined}
-                              onValueChange={(value) => {
-                                setRoomAssignments((prev) => {
-                                  const next = [...(prev[line.id] ?? [])]
-                                  next[slot.lineIndex] = value
-                                  return { ...prev, [line.id]: next }
-                                })
-                              }}
-                            >
-                              <SelectTrigger className="w-full h-10 text-sm font-medium">
-                                <SelectValue placeholder="Select room" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {roomsForLine(line, slot.lineIndex, slot.roomId).map((room) => (
-                                  <SelectItem key={room.id} value={room.id}>
-                                    Room {room.roomNumber}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          )}
-                        </div>
-
-                        <div className="min-w-0">
-                          <p className="text-sm text-foreground leading-snug">{slot.roomTypeName}</p>
-                        </div>
-
-                        <div>
-                          <p className="text-sm font-medium tabular-nums text-right">
-                            {financial?.roomId ? formatBdt(financial.totalWithVat) : '—'}
-                          </p>
-                        </div>
-
-                        <div>
-                          <Input
-                            type="number"
-                            min={0}
-                            step="0.01"
-                            className="h-10 w-full min-w-[6.5rem] text-right tabular-nums text-sm font-medium"
-                            value={advanceBySlot[slot.key] ?? ''}
-                            placeholder="0.00"
-                            disabled={!slot.roomId}
-                            onChange={(e) => handleAdvanceChange(slot.key, e.target.value)}
-                          />
-                        </div>
-
-                        <div>
-                          <p className="text-sm font-semibold tabular-nums text-right text-amber-800">
-                            {financial?.roomId ? formatBdt(financial.due) : '—'}
-                          </p>
-                        </div>
+                {roomsLoading ? (
+                  <p className="text-sm text-muted-foreground py-6 text-center">
+                    Loading available rooms…
+                  </p>
+                ) : (
+                  <div className="overflow-x-auto custom-scrollbar">
+                    <div className="min-w-[42rem] rounded-xl border overflow-hidden bg-card shadow-sm">
+                      <div className="grid grid-cols-[minmax(7rem,1fr)_minmax(9rem,1.4fr)_minmax(6.5rem,0.9fr)_minmax(7.5rem,1fr)_minmax(6.5rem,0.9fr)] gap-4 px-5 py-3 bg-muted/40 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        <span>Room</span>
+                        <span>Category</span>
+                        <span className="text-right">Total</span>
+                        <span className="text-right">Advance (BDT)</span>
+                        <span className="text-right">Due</span>
                       </div>
-                    )
-                  })}
-                </div>
-                </div>
-              )}
-            </div>
+                      <Separator />
+                      {convertSlots.map((slot) => {
+                        const line = unfulfilledLines.find((row) => row.id === slot.lineId)
+                        if (!line) return null
+                        const financial = slotFinancials.find((row) => row.key === slot.key)
+                        const isPreset = Boolean(slot.presetRoomNumber && line.unfulfilledCount === 1)
 
-            <div className="flex items-center justify-between rounded-xl border bg-muted/20 px-5 py-4">
-              <div>
-                <p className="text-sm font-medium">Check in immediately</p>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Mark converted rooms as checked in on arrival day
-                </p>
+                        return (
+                          <div
+                            key={slot.key}
+                            className="grid grid-cols-[minmax(7rem,1fr)_minmax(9rem,1.4fr)_minmax(6.5rem,0.9fr)_minmax(7.5rem,1fr)_minmax(6.5rem,0.9fr)] gap-4 px-5 py-4 border-b last:border-b-0 items-center bg-background even:bg-muted/10"
+                          >
+                            <div className="min-w-0">
+                              {isPreset ? (
+                                <p className="text-base font-semibold">{slot.presetRoomNumber}</p>
+                              ) : (
+                                <Select
+                                  value={slot.roomId || undefined}
+                                  onValueChange={(value) => {
+                                    setRoomAssignments((prev) => {
+                                      const next = [...(prev[line.id] ?? [])]
+                                      next[slot.lineIndex] = value
+                                      return { ...prev, [line.id]: next }
+                                    })
+                                  }}
+                                >
+                                  <SelectTrigger className="w-full h-10 text-sm font-medium">
+                                    <SelectValue placeholder="Select room" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {roomsForLine(line, slot.lineIndex, slot.roomId).map((room) => (
+                                      <SelectItem key={room.id} value={room.id}>
+                                        Room {room.roomNumber}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              )}
+                            </div>
+
+                            <div className="min-w-0">
+                              <p className="text-sm text-foreground leading-snug">{slot.roomTypeName}</p>
+                            </div>
+
+                            <div>
+                              <p className="text-sm font-medium tabular-nums text-right">
+                                {financial?.roomId ? formatBdt(financial.totalWithVat) : '—'}
+                              </p>
+                            </div>
+
+                            <div>
+                              <Input
+                                type="number"
+                                min={0}
+                                step="0.01"
+                                className="h-10 w-full min-w-[6.5rem] text-right tabular-nums text-sm font-medium"
+                                value={advanceBySlot[slot.key] ?? ''}
+                                placeholder="0.00"
+                                disabled={!slot.roomId}
+                                onChange={(e) => handleAdvanceChange(slot.key, e.target.value)}
+                              />
+                            </div>
+
+                            <div>
+                              <p className="text-sm font-semibold tabular-nums text-right text-amber-800">
+                                {financial?.roomId ? formatBdt(financial.due) : '—'}
+                              </p>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
-              <Switch checked={checkInNow} onCheckedChange={setCheckInNow} />
+
+              <div className="flex items-center justify-between rounded-xl border bg-muted/20 px-5 py-4">
+                <div>
+                  <p className="text-sm font-medium">Check in immediately</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Mark converted rooms as checked in on arrival day
+                  </p>
+                </div>
+                <Switch checked={checkInNow} onCheckedChange={setCheckInNow} />
+              </div>
             </div>
-          </div>
-        )}
+          )}
         </div>
 
-        <DialogFooter className="shrink-0 gap-3 border-t bg-muted/20 px-6 py-4 sm:justify-end">
-          <Button variant="outline" className="min-w-[6rem]" onClick={() => onOpenChange(false)}>
+        <DialogFooter className="shrink-0 flex-col-reverse sm:flex-row gap-2 border-t bg-muted/20 px-6 py-4 sm:justify-end">
+          <Button variant="outline" className="w-full sm:w-auto min-w-[6rem]" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
           <Button
@@ -648,7 +648,7 @@ export function ReservationEntryConvertDialog({
             disabled={
               !canSubmit || convertMutation.isPending || entryLoading || entry?.unfulfilledRooms === 0
             }
-            className="min-w-[10rem] bg-amber-600 hover:bg-amber-700"
+            className="w-full sm:w-auto min-w-[10rem] bg-amber-600 hover:bg-amber-700"
           >
             {convertMutation.isPending ? (
               <>
@@ -656,8 +656,7 @@ export function ReservationEntryConvertDialog({
                 Converting…
               </>
             ) : (
-              `Convert ${assignedSlots.length || entry?.unfulfilledRooms || 0} room${
-                (assignedSlots.length || entry?.unfulfilledRooms || 0) === 1 ? '' : 's'
+              `Convert ${assignedSlots.length || entry?.unfulfilledRooms || 0} room${(assignedSlots.length || entry?.unfulfilledRooms || 0) === 1 ? '' : 's'
               }`
             )}
           </Button>

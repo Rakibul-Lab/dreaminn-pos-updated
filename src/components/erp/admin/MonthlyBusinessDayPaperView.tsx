@@ -40,8 +40,8 @@ export function MonthlyBusinessDayPaperView({ data }: MonthlyBusinessDayPaperVie
               <th className="border border-black px-2 py-1.5 text-right font-bold">Bank Payment</th>
               <th className="border border-black px-2 py-1.5 text-right font-bold">M.Finance</th>
               <th className="border border-black px-2 py-1.5 text-right font-bold">Due</th>
-              <th className="border border-black px-2 py-1.5 text-right font-bold">Food Bill</th>
               <th className="border border-black px-2 py-1.5 text-right font-bold">Total</th>
+              <th className="border border-black px-2 py-1.5 text-right font-bold">Food Bill</th>
             </tr>
           </thead>
           <tbody>
@@ -54,8 +54,8 @@ export function MonthlyBusinessDayPaperView({ data }: MonthlyBusinessDayPaperVie
                   <td className="border border-black px-2 py-1 text-right">{formatAmount(row.bankPayment)}</td>
                   <td className="border border-black px-2 py-1 text-right">{formatAmount(row.mFinance)}</td>
                   <td className="border border-black px-2 py-1 text-right">{formatAmount(row.due)}</td>
-                  <td className="border border-black px-2 py-1 text-right">{formatAmount(row.foodBill)}</td>
                   <td className="border border-black px-2 py-1 text-right font-semibold">{formatAmount(row.total)}</td>
+                  <td className="border border-black px-2 py-1 text-right">{formatAmount(row.foodBill)}</td>
                 </tr>
               ))
             ) : (
@@ -74,8 +74,8 @@ export function MonthlyBusinessDayPaperView({ data }: MonthlyBusinessDayPaperVie
               <td className="border border-black px-2 py-1.5 text-right font-bold">{formatAmount(totals?.bankPayment ?? 0)}</td>
               <td className="border border-black px-2 py-1.5 text-right font-bold">{formatAmount(totals?.mFinance ?? 0)}</td>
               <td className="border border-black px-2 py-1.5 text-right font-bold">{formatAmount(totals?.due ?? 0)}</td>
-              <td className="border border-black px-2 py-1.5 text-right font-bold">{formatAmount(totals?.foodBill ?? 0)}</td>
               <td className="border border-black px-2 py-1.5 text-right font-bold underline decoration-double">{formatAmount(totals?.totalSales ?? 0)}</td>
+              <td className="border border-black px-2 py-1.5 text-right font-bold">{formatAmount(totals?.foodBill ?? 0)}</td>
             </tr>
           </tbody>
         </table>

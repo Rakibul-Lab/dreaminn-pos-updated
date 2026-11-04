@@ -566,8 +566,8 @@ export default function DepositsPage() {
             </div>
           )}
 
-          <div className="rounded-md border overflow-x-auto">
-            <Table>
+          <div className="rounded-md border max-h-[600px] overflow-auto custom-scrollbar">
+            <Table className="min-w-[850px]">
               <TableHeader>
                 <TableRow>
                   <TableHead>Date</TableHead>
@@ -783,7 +783,7 @@ export default function DepositsPage() {
               </div>
             )}
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
               <div className="space-y-2">
                 <Label htmlFor="deposit-date" className="text-sm font-medium">
                   Deposit date
@@ -843,7 +843,7 @@ export default function DepositsPage() {
               />
             </div>
           </div>
-          <DialogFooter>
+          <DialogFooter className="flex-col-reverse sm:flex-row gap-2">
             <Button variant="outline" onClick={() => setShowAddDialog(false)}>
               Cancel
             </Button>

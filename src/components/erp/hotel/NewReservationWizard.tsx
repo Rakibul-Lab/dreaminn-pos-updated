@@ -2095,7 +2095,7 @@ export function NewReservationWizard({
 
               {showGuestDetails && (
                 <>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                     <div className="space-y-2">
                       <Label>Adults *</Label>
                       <Input
@@ -2511,7 +2511,7 @@ export function NewReservationWizard({
               <p className="text-xs text-muted-foreground rounded-md bg-muted/50 p-2">
                 {describeStayPeriod(times)}
               </p>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                 <div className="space-y-2">
                   <Label>Arrival date *</Label>
                   <Input

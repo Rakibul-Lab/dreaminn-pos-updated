@@ -477,8 +477,7 @@ function ERPApp() {
       case 'logs': return <ActivityLogsPage />
       case 'inventory': return <InventoryPage />
       case 'profile': return <ProfilePage />
-      default: return <HotelDashboard asssssss
-        ={handlePageNavigation} />
+      default: return <HotelDashboard onNavigate={handlePageNavigation} />
     }
   }, [currentPage, handlePageNavigation])
 
@@ -629,23 +628,26 @@ function ERPApp() {
       {/* Mobile Sidebar Overlay */}
       {sidebarOpen && (
         <div className="fixed inset-0 z-50 lg:hidden">
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setSidebarOpen(false)} />
-          <aside className="fixed inset-y-0 left-0 w-72 bg-card shadow-2xl z-50 animate-in slide-in-from-left duration-200">
-            <div className="p-4 border-b border-border flex justify-between items-center">
+          <div
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm transition-opacity"
+            onClick={() => setSidebarOpen(false)}
+          />
+          <aside className="fixed inset-y-0 left-0 w-72 max-w-[85vw] bg-card shadow-2xl z-50 animate-in slide-in-from-left duration-200 flex flex-col justify-between h-full">
+            <div className="p-3 sm:p-4 border-b border-border flex justify-between items-center shrink-0">
               <div className="flex items-center gap-2">
-                <div className="h-7 w-7 rounded-lg bg-card border border-border overflow-hidden">
+                <div className="h-7 w-7 rounded-lg bg-card border border-border overflow-hidden shrink-0">
                   <Image src="/brand-logo.png" alt="RRP Dream Inn logo" width={28} height={28} className="h-full w-full object-cover" />
                 </div>
-                <span className="font-bold text-foreground text-sm">ERP System</span>
+                <span className="font-bold text-foreground text-sm truncate">RRP Dream Inn</span>
               </div>
-              <Button variant="ghost" size="icon" onClick={() => setSidebarOpen(false)} className="h-8 w-8">
+              <Button variant="ghost" size="icon" onClick={() => setSidebarOpen(false)} className="h-8 w-8 shrink-0">
                 <X className="h-4 w-4" />
               </Button>
             </div>
-            <nav className="p-2.5 space-y-0.5 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 120px)' }}>
+            <nav className="flex-1 p-2 sm:p-2.5 space-y-0.5 overflow-y-auto custom-scrollbar">
               {Object.entries(groupedNav).map(([group, items]) => renderNavItems(items, group))}
             </nav>
-            <div className="absolute bottom-0 left-0 right-0 p-3 border-t border-border bg-card">
+            <div className="p-3 border-t border-border bg-card shrink-0">
               <Button
                 variant="ghost"
                 className="w-full justify-start gap-2 text-muted-foreground hover:text-foreground"
@@ -667,44 +669,58 @@ function ERPApp() {
         className={cn(
           'flex flex-1 flex-col transition-[margin] duration-300 ease-in-out min-w-0 max-w-full',
           currentPage === 'roles-permissions'
-            ? 'h-svh max-h-svh min-h-0 overflow-hidden'
+            ? 'lg:h-svh lg:max-h-svh lg:min-h-0 lg:overflow-hidden min-h-screen'
             : 'min-h-screen',
           sidebarCollapsed ? 'lg:ml-16' : 'lg:ml-60'
         )}
       >
         {/* Top Bar */}
-        <header className="sticky top-0 z-50 bg-background/90 backdrop-blur-md border-b border-border px-4 py-3 flex items-center justify-between shadow-sm">
-          <div className="flex items-center gap-3">
-            <Button variant="ghost" size="icon" className="lg:hidden" onClick={() => setSidebarOpen(true)}>
+        <header className="sticky top-0 z-40 bg-background/95 backdrop-blur-md border-b border-border px-2.5 sm:px-4 py-2.5 sm:py-3 flex items-center justify-between shadow-xs gap-2">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="lg:hidden h-8 w-8 sm:h-9 sm:w-9 shrink-0 text-muted-foreground hover:text-foreground"
+              onClick={() => setSidebarOpen(true)}
+              aria-label="Toggle navigation menu"
+            >
               <Menu className="h-5 w-5" />
             </Button>
-            <div>
-              <h2 className="text-lg font-semibold text-foreground">
+            <div className="min-w-0">
+              <h2
+                className="text-sm sm:text-base md:text-lg font-semibold text-foreground truncate max-w-[130px] xs:max-w-[180px] sm:max-w-[280px] md:max-w-none"
+                title={pageTitles[currentPage] || currentPage}
+              >
                 {pageTitles[currentPage] || currentPage}
               </h2>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="flex flex-row flex-wrap items-center justify-end gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            <div className="flex flex-row items-center justify-end gap-1.5 sm:gap-2">
               {businessDateRes?.data?.businessDate && (
                 <div
                   className={cn(
-                    'rounded-md border px-2.5 py-1 text-[11px] font-semibold sm:text-xs',
+                    'rounded-md border px-2 py-0.5 sm:px-2.5 sm:py-1 text-[10px] sm:text-xs font-semibold whitespace-nowrap',
                     businessDateRes.data.dayCloseRequired
-                      ? 'border-amber-400 bg-amber-50 text-amber-800'
-                      : 'border-amber-300 bg-amber-50 text-amber-800'
+                      ? 'border-amber-400 bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300'
+                      : 'border-amber-300 bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300'
                   )}
                   title={
                     businessDateRes.data.dayCloseRequired
                       ? businessDateRes.data.dayCloseMessage ?? 'Day close pending'
-                      : undefined
+                      : `Business Date: ${businessDateRes.data.businessDate}`
                   }
                 >
-                  Business: {businessDateRes.data.businessDate}
-                  {businessDateRes.data.dayCloseRequired ? ' · Close pending' : ''}
+                  <span className="sm:hidden">
+                    Biz: {businessDateRes.data.businessDate.slice(5)}
+                  </span>
+                  <span className="hidden sm:inline">
+                    Business: {businessDateRes.data.businessDate}
+                    {businessDateRes.data.dayCloseRequired ? ' · Pending' : ''}
+                  </span>
                 </div>
               )}
-              <div className="rounded-md border border-border bg-card px-2.5 py-1 text-[11px] font-medium text-muted-foreground sm:text-xs">
+              <div className="hidden sm:flex rounded-md border border-border bg-card px-2.5 py-1 text-[11px] font-medium text-muted-foreground sm:text-xs whitespace-nowrap">
                 {now.toLocaleDateString('en-US', {
                   weekday: 'short',
                   month: 'short',
@@ -712,26 +728,18 @@ function ERPApp() {
                   year: 'numeric',
                 })}
               </div>
-              <div className="rounded-md border border-border bg-card px-2.5 py-1 text-[11px] font-medium text-muted-foreground sm:text-xs">
-                <span className="sm:hidden">
-                  {now.toLocaleTimeString('en-US', {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })}
-                </span>
-                <span className="hidden sm:inline">
-                  {now.toLocaleTimeString('en-US', {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    second: '2-digit',
-                  })}
-                </span>
+              <div className="hidden md:flex rounded-md border border-border bg-card px-2.5 py-1 text-[11px] font-medium text-muted-foreground sm:text-xs whitespace-nowrap">
+                {now.toLocaleTimeString('en-US', {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  second: '2-digit',
+                })}
               </div>
             </div>
             <ThemeToggle />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="relative h-9 w-9">
+                <Button variant="ghost" size="icon" className="relative h-8 w-8 sm:h-9 sm:w-9 shrink-0">
                   <Bell className="h-4 w-4 text-muted-foreground" />
                   {unreadCount > 0 && (
                     <span className="absolute -top-0.5 -right-0.5 min-w-4 h-4 px-1 rounded-full bg-red-500 text-[10px] font-semibold text-white flex items-center justify-center">
@@ -740,7 +748,7 @@ function ERPApp() {
                   )}
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-[340px] p-0">
+              <DropdownMenuContent align="end" className="w-[calc(100vw-2rem)] sm:w-80 max-w-[360px] p-0 shadow-lg">
                 <div className="px-3 py-2 border-b bg-muted/70">
                   <div className="flex items-center justify-between">
                     <p className="text-sm font-semibold text-foreground">Notifications</p>
@@ -748,7 +756,7 @@ function ERPApp() {
                       type="button"
                       onClick={() => markAllReadMutation.mutate()}
                       disabled={markAllReadMutation.isPending || unreadCount === 0}
-                      className="text-xs text-amber-700 hover:text-amber-800 disabled:text-muted-foreground"
+                      className="text-xs text-amber-700 hover:text-amber-800 disabled:text-muted-foreground font-medium"
                     >
                       Mark all read
                     </button>
@@ -757,7 +765,7 @@ function ERPApp() {
                     {unreadCount} unread
                   </p>
                 </div>
-                <div className="max-h-80 overflow-y-auto">
+                <div className="max-h-80 overflow-y-auto custom-scrollbar">
                   {notifications.length === 0 ? (
                     <div className="px-3 py-6 text-center text-xs text-muted-foreground">
                       No notifications yet
@@ -790,8 +798,8 @@ function ERPApp() {
             </DropdownMenu>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" className="h-9 gap-2 px-2">
-                  <div className="h-8 w-8 rounded-full border border-border bg-muted overflow-hidden flex items-center justify-center text-sm font-bold text-muted-foreground shrink-0">
+                <Button variant="ghost" className="h-8 sm:h-9 gap-1.5 sm:gap-2 px-1 sm:px-2">
+                  <div className="h-7 w-7 sm:h-8 sm:w-8 rounded-full border border-border bg-muted overflow-hidden flex items-center justify-center text-xs sm:text-sm font-bold text-muted-foreground shrink-0">
                     {user?.avatar ? (
                       <img src={user.avatar} alt={user.name || 'User'} className="h-full w-full object-cover" />
                     ) : (
@@ -803,7 +811,7 @@ function ERPApp() {
                   </span>
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuContent align="end" className="w-56 shadow-lg">
                 <div className="px-3 py-2 border-b">
                   <p className="text-sm font-semibold text-foreground truncate">{user?.name}</p>
                   <p className="text-xs text-muted-foreground truncate">{user?.email}</p>
@@ -829,7 +837,7 @@ function ERPApp() {
         </header>
 
         {businessDateRes?.data?.dayCloseRequired && canAccessHotel(user?.role) && (
-          <div className="px-4 md:px-6 pt-3">
+          <div className="px-2.5 sm:px-4 md:px-6 pt-3">
             <DayCloseGateBanner onGoToDayClose={() => handlePageNavigation('day-close')} />
           </div>
         )}
@@ -838,7 +846,7 @@ function ERPApp() {
         <div
           key={`${currentPage}-${pageRefreshNonce}`}
           className={cn(
-            'flex-1 p-4 md:p-6 min-w-0 max-w-full',
+            'flex-1 p-2.5 sm:p-4 md:p-6 min-w-0 max-w-full',
             currentPage === 'roles-permissions'
               ? 'flex min-h-0 flex-col overflow-hidden'
               : 'overflow-y-auto overflow-x-hidden'

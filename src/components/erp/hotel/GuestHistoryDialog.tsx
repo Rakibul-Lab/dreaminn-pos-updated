@@ -644,12 +644,12 @@ export function GuestHistoryDialog({
           )}
         </div>
 
-        <DialogFooter className="px-6 py-4 border-t shrink-0 gap-2 sm:gap-3">
-          <Button variant="outline" onClick={onClose}>
+        <DialogFooter className="px-6 py-4 border-t shrink-0 flex-col-reverse sm:flex-row gap-2 sm:gap-3">
+          <Button variant="outline" className="w-full sm:w-auto" onClick={onClose}>
             Close
           </Button>
           <Button
-            className="bg-amber-600 hover:bg-amber-700 text-white gap-2"
+            className="w-full sm:w-auto bg-amber-600 hover:bg-amber-700 text-white gap-2"
             onClick={() => void handleExportPdf()}
             disabled={!history || exportingPdf || isLoading}
           >

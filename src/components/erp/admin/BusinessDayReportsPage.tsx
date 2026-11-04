@@ -705,7 +705,7 @@ export default function BusinessDayReportsPage() {
                   type="date"
                   value={rangeDateFrom}
                   onChange={(e) => setRangeDateFrom(e.target.value)}
-                  className="w-[180px]"
+                  className="w-full sm:w-[180px]"
                 />
               </div>
               <div className="space-y-2">
@@ -715,7 +715,7 @@ export default function BusinessDayReportsPage() {
                   type="date"
                   value={rangeDateTo}
                   onChange={(e) => setRangeDateTo(e.target.value)}
-                  className="w-[180px]"
+                  className="w-full sm:w-[180px]"
                 />
               </div>
               <div className="flex items-end">
@@ -773,7 +773,7 @@ export default function BusinessDayReportsPage() {
                 type="date"
                 value={customDate}
                 onChange={(e) => setCustomDate(e.target.value)}
-                className="w-[180px]"
+                className="w-full sm:w-[180px]"
               />
             </div>
           )}
@@ -822,16 +822,18 @@ export default function BusinessDayReportsPage() {
         </Card>
       ) : (
         <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as BusinessDayReportTab)} className="min-w-0 max-w-full">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <TabsList>
-              <TabsTrigger value="summary">All summary</TabsTrigger>
-              <TabsTrigger value="sales">Sales report</TabsTrigger>
-              <TabsTrigger value="collections">Collections report</TabsTrigger>
-              <TabsTrigger value="discounts">Discount report</TabsTrigger>
-              <TabsTrigger value="checkin-checkout">Check-in / Check-out</TabsTrigger>
-              <TabsTrigger value="police">Police report</TabsTrigger>
-            </TabsList>
-            <div className="flex gap-2">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center justify-between">
+            <div className="overflow-x-auto custom-scrollbar max-w-full pb-1">
+              <TabsList className="w-auto flex-nowrap">
+                <TabsTrigger value="summary">All summary</TabsTrigger>
+                <TabsTrigger value="sales">Sales report</TabsTrigger>
+                <TabsTrigger value="collections">Collections report</TabsTrigger>
+                <TabsTrigger value="discounts">Discount report</TabsTrigger>
+                <TabsTrigger value="checkin-checkout">Check-in / Check-out</TabsTrigger>
+                <TabsTrigger value="police">Police report</TabsTrigger>
+              </TabsList>
+            </div>
+            <div className="flex flex-wrap gap-2 shrink-0">
               <Button
                 variant="outline"
                 size="sm"

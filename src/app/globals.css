@@ -328,6 +328,12 @@
   background-color: color-mix(in oklch, var(--muted-foreground) 70%, transparent);
 }
 
+.overflow-x-auto,
+.overflow-auto,
+.custom-scrollbar {
+  -webkit-overflow-scrolling: touch;
+}
+
 /* Reservations list: sticky header (collapse breaks sticky in Chrome/Safari) */
 .bookings-sticky-table {
   border-collapse: separate;
@@ -336,31 +342,36 @@
 
 .bookings-sticky-table thead th {
   position: sticky;
-  top: var(--erp-topbar-height);
-  z-index: 30;
+  top: 0;
+  z-index: 20;
   background-color: var(--muted);
   white-space: nowrap;
   box-shadow:
     0 1px 0 var(--border),
-    0 4px 6px -2px rgb(0 0 0 / 0.08);
+    0 2px 4px -1px rgb(0 0 0 / 0.06);
 }
 
-/* Sticky header inside a scrollable table panel (not the main page scroll) */
+/* Sticky header inside a scrollable table panel */
 .bookings-sticky-table--in-scroll thead th {
   top: 0;
-  z-index: 10;
+  z-index: 20;
 }
 
-/* Compact reservations list — fits main content without horizontal scroll */
+/* Compact reservations list — fits main content without horizontal scroll on wide screens, scrolls smoothly on smaller viewports */
 .bookings-list-table {
   table-layout: fixed;
   width: 100%;
+  min-width: 1160px;
   font-size: 13px;
   line-height: 1.45;
 }
 
 .bookings-list-table thead th {
-  font-size: 13px;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--muted-foreground);
+  padding: 10px 8px;
 }
 
 .bookings-list-table thead th,
@@ -375,12 +386,14 @@
   white-space: nowrap;
 }
 
-.bookings-list-table .col-guest { width: 12%; }
-.bookings-list-table .col-room { width: 7%; }
-.bookings-list-table .col-checkin { width: 9%; }
-.bookings-list-table .col-checkout { width: 9%; }
+.bookings-list-table .col-guest { width: 14%; min-width: 155px; }
+.bookings-list-table .col-room { width: 8.5%; min-width: 95px; }
+.bookings-list-table .col-regno { width: 9.5%; min-width: 100px; }
+.bookings-list-table .col-checkin { width: 9%; min-width: 95px; }
+.bookings-list-table .col-checkout { width: 9%; min-width: 95px; }
 .bookings-list-table .col-booking {
-  width: 11%;
+  width: 8.5%;
+  min-width: 90px;
   max-width: 0;
   overflow: hidden;
   vertical-align: top;
@@ -407,19 +420,15 @@
   text-overflow: ellipsis;
 }
 .bookings-list-table .col-company {
-  width: 9%;
+  width: 8%;
+  min-width: 85px;
   max-width: 0;
-}
-.bookings-list-table .col-regno {
-  width: 11%;
-  max-width: 0;
-  overflow: hidden;
 }
 
 .bookings-list-table .col-regno .bl-truncate {
   font-variant-numeric: tabular-nums;
 }
-.bookings-list-table .col-discount { width: 8%; }
+.bookings-list-table .col-discount { width: 7%; min-width: 75px; text-align: right; }
 .bookings-list-table .col-company .bl-source-badge {
   display: inline-flex;
   max-width: 100%;
@@ -427,15 +436,15 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.bookings-list-table .col-vat { width: 8%; }
-.bookings-list-table .col-total { width: 8%; }
-.bookings-list-table .col-due { width: 7%; }
+.bookings-list-table .col-vat { width: 6.5%; min-width: 70px; text-align: right; }
+.bookings-list-table .col-total { width: 7.5%; min-width: 80px; text-align: right; }
+.bookings-list-table .col-due { width: 6.5%; min-width: 70px; text-align: right; }
 .bookings-list-table .col-actions {
-  width: 220px;
-  min-width: 220px;
-  max-width: 220px;
+  width: 185px;
+  min-width: 185px;
+  max-width: 200px;
   padding-left: 4px;
-  padding-right: 6px;
+  padding-right: 8px;
   overflow: visible;
 }
 
@@ -455,7 +464,7 @@
   flex-wrap: nowrap;
   align-items: center;
   justify-content: flex-end;
-  gap: 3px;
+  gap: 4px;
   width: 100%;
   max-width: 100%;
   margin-left: auto;
@@ -465,18 +474,23 @@
   flex: 0 0 auto;
 }
 
-/* Icon-only row actions — do not force width on labeled buttons (Convert, Cancel). */
+/* Icon-only row actions — comfortable touch/click target without being microscopic */
 .bookings-list-table .col-actions .bl-actions button.h-7.w-7 {
-  height: 1.4rem;
-  width: 1.4rem;
-  min-height: 1.4rem;
-  min-width: 1.4rem;
+  height: 1.6rem;
+  width: 1.6rem;
+  min-height: 1.6rem;
+  min-width: 1.6rem;
   padding: 0;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
 }
 
 .bookings-list-table .col-actions .bl-actions button.h-7.w-7 svg {
-  width: 0.7rem;
-  height: 0.7rem;
+  width: 0.8rem;
+  height: 0.8rem;
 }
 
 .bookings-list-table .col-actions .bl-actions button:not(.h-7.w-7) {
@@ -513,6 +527,7 @@
 .guests-list-table {
   table-layout: fixed;
   width: 100%;
+  min-width: 980px;
   font-size: 13px;
   line-height: 1.45;
 }
@@ -1280,4 +1295,12 @@ input.erp-date-input::-webkit-calendar-picker-indicator,
 input.erp-time-input::-webkit-calendar-picker-indicator {
   margin-left: 0.25rem;
   flex-shrink: 0;
+}
+
+@media (max-width: 480px) {
+  input.erp-date-input,
+  input.erp-time-input {
+    min-width: 0 !important;
+    width: 100% !important;
+  }
 }

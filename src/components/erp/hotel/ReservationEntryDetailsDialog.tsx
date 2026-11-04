@@ -218,11 +218,11 @@ export function ReservationEntryDetailsDialog({ entryId, open, onOpenChange }: P
           </div>
         )}
 
-        <DialogFooter className="gap-2 sm:gap-0">
+        <DialogFooter className="flex-col-reverse sm:flex-row gap-2">
           {entry ? (
             <Button
               variant="outline"
-              className="gap-2"
+              className="w-full sm:w-auto gap-2"
               onClick={() =>
                 window.open(`/reservation-entry/${entry.id}`, '_blank', 'noopener,noreferrer')
               }
@@ -231,7 +231,7 @@ export function ReservationEntryDetailsDialog({ entryId, open, onOpenChange }: P
               Confirmation
             </Button>
           ) : null}
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+          <Button variant="outline" className="w-full sm:w-auto" onClick={() => onOpenChange(false)}>
             Close
           </Button>
         </DialogFooter>

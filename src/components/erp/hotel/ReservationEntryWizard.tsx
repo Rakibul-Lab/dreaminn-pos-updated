@@ -596,14 +596,7 @@ export function ReservationEntryWizard() {
           </div>
 
           {!companyLedgerId ? (
-            <div
-              className="grid grid-cols-1 gap-4 md:grid-cols-3"
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-                gap: '1rem',
-              }}
-            >
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
               <div className="min-w-0">
                 <NationalityField
                   value={guestNationality}
@@ -967,7 +960,7 @@ export function ReservationEntryWizard() {
             </div>
             <Button
               type="button"
-              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+              className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white"
               onClick={handleRecordPayment}
             >
               Record payment

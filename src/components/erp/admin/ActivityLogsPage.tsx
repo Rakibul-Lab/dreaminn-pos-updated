@@ -188,9 +188,9 @@ export default function ActivityLogsPage() {
       {/* Filters */}
       <Card>
         <CardContent className="p-4">
-          <div className="flex flex-col sm:flex-row gap-3">
+          <div className="flex flex-col sm:flex-row flex-wrap gap-3">
             <Select value={moduleFilter} onValueChange={(v) => { setModuleFilter(v); setPage(1) }}>
-              <SelectTrigger className="w-full sm:w-48">
+              <SelectTrigger className="w-full sm:w-44">
                 <Filter className="h-4 w-4 mr-2 text-muted-foreground" />
                 <SelectValue placeholder="Module" />
               </SelectTrigger>
@@ -207,23 +207,25 @@ export default function ActivityLogsPage() {
               placeholder="Filter by action (e.g., LOGIN, CREATE_BOOKING)"
               value={actionFilter}
               onChange={(e) => { setActionFilter(e.target.value); setPage(1) }}
-              className="flex-1"
+              className="flex-1 min-w-[200px]"
             />
-            <Input
-              type="date"
-              value={dateFrom}
-              onChange={(e) => { setDateFrom(e.target.value); setPage(1) }}
-              className="w-40"
-              placeholder="From"
-            />
-            <Input
-              type="date"
-              value={dateTo}
-              onChange={(e) => { setDateTo(e.target.value); setPage(1) }}
-              className="w-40"
-              placeholder="To"
-            />
-            <Button variant="outline" size="icon" onClick={() => setPage(1)}>
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              <Input
+                type="date"
+                value={dateFrom}
+                onChange={(e) => { setDateFrom(e.target.value); setPage(1) }}
+                className="w-full sm:w-36"
+                placeholder="From"
+              />
+              <Input
+                type="date"
+                value={dateTo}
+                onChange={(e) => { setDateTo(e.target.value); setPage(1) }}
+                className="w-full sm:w-36"
+                placeholder="To"
+              />
+            </div>
+            <Button variant="outline" size="icon" onClick={() => setPage(1)} className="shrink-0">
               <RefreshCw className="h-4 w-4" />
             </Button>
           </div>
@@ -233,8 +235,8 @@ export default function ActivityLogsPage() {
       {/* Logs Table */}
       <Card>
         <CardContent className="p-0">
-          <div className="max-h-96 overflow-y-auto">
-            <Table>
+          <div className="max-h-[600px] overflow-auto custom-scrollbar">
+            <Table className="min-w-[750px]">
               <TableHeader>
                 <TableRow>
                   <TableHead>Timestamp</TableHead>

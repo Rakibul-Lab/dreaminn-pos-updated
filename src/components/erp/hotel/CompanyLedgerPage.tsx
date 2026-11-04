@@ -394,7 +394,7 @@ export function CompanyLedgerPage() {
                 onChange={(e) => setCompanyForm((f) => ({ ...f, contactPerson: e.target.value }))}
               />
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-2">
                 <Label>Phone</Label>
                 <Input
@@ -431,12 +431,12 @@ export function CompanyLedgerPage() {
             </div>
           </div>
           <DialogFooter>
-            <div className="flex gap-2 w-full justify-end">
-              <Button variant="outline" onClick={() => setCompanyDialogOpen(false)}>
+            <div className="flex flex-col-reverse sm:flex-row gap-2 w-full sm:justify-end">
+              <Button variant="outline" className="w-full sm:w-auto" onClick={() => setCompanyDialogOpen(false)}>
                 Cancel
               </Button>
               <Button
-                className="bg-amber-600 hover:bg-amber-700 text-white"
+                className="w-full sm:w-auto bg-amber-600 hover:bg-amber-700 text-white"
                 disabled={!companyForm.name.trim() || companyEmailBlocking || saveCompanyMutation.isPending}
                 onClick={() => saveCompanyMutation.mutate()}
               >

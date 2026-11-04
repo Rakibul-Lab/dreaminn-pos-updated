@@ -839,6 +839,7 @@ export function RoomsPage() {
     .sort((a, b) => a - b)
     .map((floor) => ({
       floor,
+      rooms: filteredRooms.filter((r) => r.floor === floor),
       rows: chunkRooms(
         filteredRooms.filter((r) => r.floor === floor),
         ROOMS_PER_ROW
@@ -1300,13 +1301,11 @@ export function RoomsPage() {
       {/* Content */}
       {isLoading ? (
         <div className="space-y-4">
-          {Array.from({ length: 2 }).map((_, row) => (
-            <div key={row} className="grid grid-cols-8 gap-2">
-              {Array.from({ length: ROOMS_PER_ROW }).map((_, i) => (
-                <Skeleton key={i} className="h-[92px] rounded-lg" />
-              ))}
-            </div>
-          ))}
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-2.5">
+            {Array.from({ length: 16 }).map((_, i) => (
+              <Skeleton key={i} className="h-[120px] rounded-lg" />
+            ))}
+          </div>
         </div>
       ) : viewMode === 'grid' ? (
         <div className="space-y-6">
@@ -1358,17 +1357,12 @@ export function RoomsPage() {
             </span>
           </div>
 
-          {floorGroups.map(({ floor, rows }) => (
+          {floorGroups.map(({ floor, rooms }) => (
             <div key={floor} className="space-y-2">
               <h3 className="text-sm font-semibold text-muted-foreground">Floor {floor}</h3>
-              {rows.map((rowRooms, rowIndex) => (
-                <div
-                  key={`${floor}-${rowIndex}`}
-                  className="grid grid-cols-8 gap-2"
-                >
-                  {rowRooms.map((room) => renderRoomTile(room))}
-                </div>
-              ))}
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-2.5">
+                {rooms.map((room) => renderRoomTile(room))}
+              </div>
             </div>
           ))}
 
@@ -1377,8 +1371,8 @@ export function RoomsPage() {
           )}
         </div>
       ) : (
-        <div className="rounded-lg border max-h-[600px] overflow-y-auto custom-scrollbar">
-          <table className="w-full text-sm">
+        <div className="rounded-lg border max-h-[600px] overflow-auto custom-scrollbar">
+          <table className="w-full min-w-[700px] text-sm">
             <thead className="bg-muted/50 sticky top-0">
               <tr>
                 <th className="text-left p-3 font-medium">Room</th>

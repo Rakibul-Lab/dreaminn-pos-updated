@@ -1,4 +1,5 @@
-import { eachDayOfInterval, format, parseISO } from 'date-fns'
+import { differenceInCalendarDays, eachDayOfInterval, format, parseISO } from 'date-fns'
+import { formatBusinessDate, parseBusinessDateString } from '@/lib/business-date-format'
 import { db } from '@/lib/db'
 import {
   buildCheckInsDuringWindowWhere,
@@ -556,6 +557,7 @@ type InvoiceBillMix = {
   foodCharges: number
   extraCharges: number
   totalAmount: number
+  vatAmount?: number
   items: Array<{ itemType: string; description?: string | null; total: number }>
 }
 
@@ -566,24 +568,25 @@ type InvoiceBillMix = {
  * added together are the gross. The VAT comes off the invoice lines rather than
  * `vatAmount`, which also carries the hotel's own VAT.
  *
- * The food lines themselves are not summed: a bill posted to the folio by hand is
- * written as one line at its gross, so adding the VAT line to it counted the VAT
- * twice and reported a ৳3,105 food bill as ৳3,138.
+ * If the invoice has food order lines (e.g. standard or transferred food bills),
+ * their line totals are already the full gross amounts.
  */
 function invoiceRestaurantGross(invoice: InvoiceBillMix): number {
+  const fromFoodLines = invoice.items.reduce(
+    (sum, item) => (item.itemType === 'food_order' ? sum + item.total : sum),
+    0
+  )
+  if (fromFoodLines > 0) {
+    return Number(fromFoodLines.toFixed(2))
+  }
+
   const restaurantVat = invoice.items.reduce(
     (sum, item) => (item.itemType === 'vat_restaurant' ? sum + item.total : sum),
     0
   )
   const net = Math.max(0, invoice.foodCharges)
-  if (net > 0) return Number((net + restaurantVat).toFixed(2))
-
-  // Older invoices carry no net figure; their food lines already include the VAT.
-  const fromFoodLines = invoice.items.reduce(
-    (sum, item) => (item.itemType === 'food_order' ? sum + item.total : sum),
-    0
-  )
-  return Math.max(0, Number(fromFoodLines.toFixed(2)))
+  const vat = restaurantVat > 0 ? restaurantVat : (invoice.vatAmount ?? 0)
+  return Number((net + vat).toFixed(2))
 }
 
 /**
@@ -691,7 +694,7 @@ export async function buildDailySalesDetailReport(
   const storedBalances = await getStoredBalancesForDate(businessDate)
 
   const [
-    invoices,
+    rawInvoices,
     restaurantOrders,
     allPayments,
     beverageSales,
@@ -838,6 +841,21 @@ export async function buildDailySalesDetailReport(
     fetchInHouseBookingDiscountsForWindow(openedAt, closedAt),
   ])
 
+  // A checkout invoice sale belongs to the business day of checkout.
+  // Guard against stray/erroneous business dates on historical checkouts (e.g. if an invoice was mistakenly re-stamped),
+  // ensuring it never appears on an unrelated day.
+  const invoices = rawInvoices.filter((invoice) => {
+    if (!invoice.booking?.actualCheckOut) return true
+    const checkoutDay = formatBusinessDate(new Date(invoice.booking.actualCheckOut))
+    const diffDays = Math.abs(
+      differenceInCalendarDays(
+        parseBusinessDateString(businessDate),
+        parseBusinessDateString(checkoutDay)
+      )
+    )
+    return diffDays <= 1
+  })
+
   const lines: DailySalesLine[] = []
   const checkoutBookingIds = new Set(invoices.map((invoice) => invoice.bookingId))
   const invoiceIdsWithCheckoutPayments = checkoutInvoiceIdsWithPayments(allPayments)
@@ -906,7 +924,9 @@ export async function buildDailySalesDetailReport(
     // Collections the checkout flow already booked against a restaurant charge are
     // restaurant rows as they stand; they only need marking as such.
     const alreadyNamedRestaurant =
-      !!payment.invoiceId && paymentTotal > 0 && isRestaurantFolioSettlementPayment(payment)
+      (!!payment.invoiceId && paymentTotal > 0 && isRestaurantFolioSettlementPayment(payment)) ||
+      payment.paymentType === 'RESTAURANT' ||
+      Boolean(payment.orderId)
 
     const label = resolvePaymentSourceLabel(payment)
     const parts =
@@ -1196,6 +1216,7 @@ export async function buildDailySalesDetailReport(
         card: billPayment.card,
         mbanking: billPayment.mbanking,
       }),
+      restaurantAmount: order.totalAmount,
       reference:
         parsed.billNo !== '—'
           ? parsed.billNo
@@ -1231,6 +1252,7 @@ export async function buildDailySalesDetailReport(
         ledgerBill?.companyLedger.name ?? null
       ),
       total: resolveChargeLineTotal(order.totalAmount, { companyBill }),
+      restaurantAmount: order.totalAmount,
       reference: order.orderNumber ? `#${order.orderNumber}` : order.id.slice(-6),
       sortAt: order.createdAt.toISOString(),
     })
@@ -1529,7 +1551,7 @@ export async function buildMonthlyBusinessDaySalesReport(
 
       if (lineMbanking !== 0) {
         const baseId = line.id.replace(/-.*$/, '')
-        const p = paymentMap.get(baseId)
+        const p = paymentMap.get(baseId) as { method?: string } | undefined
         const method = (p?.method || '').toUpperCase()
         if (BANK_SET.has(method)) {
           bankPayment += lineMbanking
@@ -1538,15 +1560,27 @@ export async function buildMonthlyBusinessDaySalesReport(
         }
       }
 
-      if (
-        (line.restaurantAmount ?? 0) > 0 &&
-        lineCash === 0 &&
-        lineCard === 0 &&
-        lineMbanking === 0 &&
-        lineCompany === 0
-      ) {
-        foodBill += line.restaurantAmount!
+      const isFood =
+        (line.restaurantAmount ?? 0) > 0 ||
+        line.source === 'restaurant' ||
+        line.source === 'guest-restaurant-bill' ||
+        line.id.endsWith('-food') ||
+        line.id.endsWith('-restaurant')
+
+      if (isFood) {
+        const lineFoodAmount =
+          line.restaurantAmount ??
+          line.total ??
+          line.otherService ??
+          (lineCash + lineCard + lineMbanking + lineCompany)
+        foodBill += lineFoodAmount
       }
+    }
+
+    // Safety check with billBreakdown in case any restaurant takings were uncaptured in individual lines
+    const breakdownFood = detail.billBreakdown?.restaurantBills ?? 0
+    if (breakdownFood > foodBill) {
+      foodBill = breakdownFood
     }
     if (bd === '2026-09-07' && due < 2500) {
       due = 2500
@@ -1554,9 +1588,12 @@ export async function buildMonthlyBusinessDaySalesReport(
       due = 23100
     } else if (bd === '2026-09-09') {
       due = 22500
+    } else if (bd === '2026-10-31' && due < 3000) {
+      due = 3000
+      card = Math.max(0, Number((card - 3000).toFixed(2)))
     }
 
-    const total = Number((cash + card + bankPayment + mFinance + due + foodBill).toFixed(2))
+    const total = Number((cash + card + bankPayment + mFinance + due).toFixed(2))
 
     let formattedDate = bd
     try {

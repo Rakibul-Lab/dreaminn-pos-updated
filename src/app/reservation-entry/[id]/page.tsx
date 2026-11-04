@@ -14,7 +14,7 @@ export default function ReservationEntryPrintPage() {
 
   return (
     <div className="min-h-screen flex flex-col bg-background">
-      <main className="flex-1 mx-auto w-full p-6 print:bg-white print:p-0 flex justify-center">
+      <main className="flex-1 mx-auto w-full p-2 sm:p-4 md:p-6 print:bg-white print:p-0 flex justify-center overflow-x-auto custom-scrollbar">
         <ReservationEntryDocumentView
           entryId={entryId}
           showToolbar

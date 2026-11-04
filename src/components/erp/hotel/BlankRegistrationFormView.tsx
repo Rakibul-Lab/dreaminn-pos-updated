@@ -129,7 +129,7 @@ export function BlankRegistrationFormView({ showToolbar = true }: BlankRegistrat
   }
 
   return (
-    <div className="print-container flex flex-col items-center">
+    <div className="print-container flex flex-col items-center w-full overflow-x-auto custom-scrollbar">
       {showToolbar && (
         <div className="mb-4 flex w-full max-w-[210mm] flex-wrap items-center justify-end gap-3 print:hidden">
           <div className="flex flex-wrap gap-2">

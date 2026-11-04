@@ -532,7 +532,7 @@ export function TransportSalesPage() {
               {recentSales.map((sale) => (
                 <div
                   key={sale.id}
-                  className="flex items-center justify-between rounded-lg border px-3 py-2 text-sm"
+                  className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm"
                 >
                   <div>
                     <p className="font-medium">{sale.customerName}</p>

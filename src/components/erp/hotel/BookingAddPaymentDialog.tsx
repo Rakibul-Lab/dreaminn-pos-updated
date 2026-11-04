@@ -331,12 +331,12 @@ export function BookingAddPaymentDialog({
             </div>
           )}
         </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+        <DialogFooter className="flex-col-reverse sm:flex-row gap-2">
+          <Button variant="outline" className="w-full sm:w-auto" onClick={() => onOpenChange(false)}>
             Done
           </Button>
           <Button
-            className="bg-emerald-600 hover:bg-emerald-700 text-white"
+            className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white"
             disabled={paymentMutation.isPending || !!validationError}
             onClick={() => {
               if (validationError) {

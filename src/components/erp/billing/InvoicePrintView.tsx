@@ -579,7 +579,7 @@ export function InvoicePrintView({
 
   return (
     <div className="invoice-print-root min-h-screen flex flex-col bg-background print:min-h-0 print:h-auto print:block">
-      <div className="flex-1 p-6 print:p-0 print:m-0 print:min-h-0 print:h-auto print:bg-white">
+      <div className="flex-1 p-2.5 sm:p-4 md:p-6 print:p-0 print:m-0 print:min-h-0 print:h-auto print:bg-white overflow-x-auto custom-scrollbar">
       {showToolbar && (
         <div className="mx-auto mb-4 flex max-w-4xl flex-wrap items-center justify-between gap-3 print:hidden">
           <div>
@@ -628,7 +628,7 @@ export function InvoicePrintView({
 
       <main
         ref={documentRef}
-        className="print-container invoice-print-page mx-auto max-w-4xl rounded-xl border border-border bg-white p-6 text-black shadow-sm print:border-0 print:bg-white print:p-0 print:shadow-none print:text-black"
+        className="print-container invoice-print-page mx-auto max-w-4xl rounded-xl border border-border bg-white p-3.5 sm:p-6 text-black shadow-sm print:border-0 print:bg-white print:p-0 print:shadow-none print:text-black min-w-[320px]"
       >
         <div className="invoice-a4-sheet text-black font-bold text-[9pt] print:border-0">
           <div className="invoice-pdf-header mb-4 flex items-start justify-between border-b border-border pb-3">

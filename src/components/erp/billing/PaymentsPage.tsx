@@ -812,8 +812,8 @@ export default function PaymentsPage() {
       {/* Payments Table */}
       <Card>
         <CardContent className="p-0">
-          <div className="max-h-96 overflow-y-auto">
-            <Table>
+          <div className="max-h-[600px] overflow-auto custom-scrollbar">
+            <Table className="min-w-[1050px]">
               <TableHeader>
                 <TableRow>
                   <TableHead>Date</TableHead>

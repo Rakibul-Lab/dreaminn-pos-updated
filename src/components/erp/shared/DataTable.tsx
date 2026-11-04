@@ -105,8 +105,8 @@ export function DataTable<TData, TValue>({
         </div>
       )}
 
-      <div className="rounded-lg border max-h-96 overflow-y-auto custom-scrollbar">
-        <Table>
+      <div className="rounded-lg border max-h-[600px] overflow-auto custom-scrollbar">
+        <Table className="min-w-[650px]">
           <TableHeader>
             {table.getHeaderGroups().map((headerGroup) => (
               <TableRow key={headerGroup.id} className="bg-muted/50 hover:bg-muted/50">
@@ -152,11 +152,11 @@ export function DataTable<TData, TValue>({
         </Table>
       </div>
 
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+        <p className="text-sm text-muted-foreground text-center sm:text-left">
           {totalRows} record{totalRows !== 1 ? 's' : ''} total
         </p>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap justify-center">
           <Button
             variant="outline"
             size="icon"

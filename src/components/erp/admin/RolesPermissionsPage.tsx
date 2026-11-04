@@ -834,7 +834,7 @@ export default function RolesPermissionsPage() {
                     System and custom role templates
                   </CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-0.5 px-2 pb-2 pt-0">
+                <CardContent className="space-y-0.5 px-2 pb-2 pt-0 max-h-48 sm:max-h-60 lg:max-h-none overflow-y-auto custom-scrollbar">
                   {catalogQuery.isLoading ? (
                     <div className="space-y-2 px-1">
                       <Skeleton className="h-12 w-full" />
@@ -936,7 +936,7 @@ export default function RolesPermissionsPage() {
                     Override permissions for a specific person.
                   </CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-0.5 px-2 pb-2 pt-0">
+                <CardContent className="space-y-0.5 px-2 pb-2 pt-0 max-h-48 sm:max-h-60 lg:max-h-none overflow-y-auto custom-scrollbar">
                   {catalogQuery.isLoading ? (
                     <div className="space-y-2 px-1">
                       <Skeleton className="h-12 w-full" />

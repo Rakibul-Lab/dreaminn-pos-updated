@@ -417,13 +417,13 @@ export default function ReportsPage() {
           <p className="text-muted-foreground text-sm mt-1">Comprehensive business insights</p>
         </div>
         <div className="flex flex-wrap gap-2 items-end">
-          <div className="space-y-1">
+          <div className="space-y-1 w-full sm:w-auto">
             <Label className="text-xs text-muted-foreground">Period</Label>
             <Select
               value={datePreset}
               onValueChange={(v) => setDatePreset(v as BookingDatePreset)}
             >
-              <SelectTrigger className="w-44">
+              <SelectTrigger className="w-full sm:w-44">
                 <CalendarRange className="h-4 w-4 mr-2 text-muted-foreground" />
                 <SelectValue placeholder="Period" />
               </SelectTrigger>
@@ -437,28 +437,28 @@ export default function ReportsPage() {
             </Select>
           </div>
           {datePreset === 'custom' && (
-            <>
-              <div className="space-y-1">
+            <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+              <div className="space-y-1 flex-1">
                 <Label htmlFor="report-date-from" className="text-xs text-muted-foreground">From</Label>
                 <Input
                   id="report-date-from"
                   type="date"
                   value={customDateFrom}
                   onChange={(e) => setCustomDateFrom(e.target.value)}
-                  className="w-40"
+                  className="w-full sm:w-36"
                 />
               </div>
-              <div className="space-y-1">
+              <div className="space-y-1 flex-1">
                 <Label htmlFor="report-date-to" className="text-xs text-muted-foreground">To</Label>
                 <Input
                   id="report-date-to"
                   type="date"
                   value={customDateTo}
                   onChange={(e) => setCustomDateTo(e.target.value)}
-                  className="w-40"
+                  className="w-full sm:w-36"
                 />
               </div>
-            </>
+            </div>
           )}
           <Button
             variant="outline"

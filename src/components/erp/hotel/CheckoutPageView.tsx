@@ -1182,12 +1182,12 @@ export function CheckoutPageView({ bookingId }: CheckoutPageViewProps) {
       </Card>
       )}
 
-      <div className="flex flex-wrap justify-end gap-2 border-t pt-4">
-        <Button variant="outline" onClick={() => window.close()}>
+      <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 border-t pt-4">
+        <Button variant="outline" className="w-full sm:w-auto" onClick={() => window.close()}>
           Cancel
         </Button>
         <Button
-          className="bg-slate-800 hover:bg-slate-900 text-white"
+          className="w-full sm:w-auto bg-slate-800 hover:bg-slate-900 text-white"
           disabled={
             checkOutMutation.isPending ||
             recordPaymentMutation.isPending ||

@@ -354,7 +354,7 @@ export default function DayClosePage() {
             />
           </div>
           <Button
-            className="bg-amber-600 hover:bg-amber-700 text-white"
+            className="w-full sm:w-auto bg-amber-600 hover:bg-amber-700 text-white"
             disabled={closeMutation.isPending}
             onClick={() => setConfirmCloseOpen(true)}
           >
@@ -380,10 +380,10 @@ export default function DayClosePage() {
                 : ''}
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={closeMutation.isPending}>Cancel</AlertDialogCancel>
+          <AlertDialogFooter className="flex-col-reverse sm:flex-row gap-2">
+            <AlertDialogCancel disabled={closeMutation.isPending} className="w-full sm:w-auto">Cancel</AlertDialogCancel>
             <AlertDialogAction
-              className="bg-amber-600 hover:bg-amber-700 text-white"
+              className="w-full sm:w-auto bg-amber-600 hover:bg-amber-700 text-white"
               disabled={closeMutation.isPending}
               onClick={(event) => {
                 event.preventDefault()

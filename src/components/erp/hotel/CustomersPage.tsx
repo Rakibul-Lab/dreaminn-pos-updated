@@ -347,7 +347,7 @@ export function CustomersPage() {
             setPage(1);
           }}
         >
-          <SelectTrigger className="w-44">
+          <SelectTrigger className="w-full sm:w-44">
             <CalendarRange className="mr-2 h-4 w-4 shrink-0 text-muted-foreground" />
             <SelectValue placeholder="Date" />
           </SelectTrigger>
@@ -361,7 +361,7 @@ export function CustomersPage() {
         </Select>
         {datePreset === 'custom' && (
           <>
-            <div className="space-y-1">
+            <div className="space-y-1 w-full sm:w-40">
               <Label htmlFor="guest-date-from" className="text-xs text-muted-foreground">
                 From
               </Label>
@@ -373,10 +373,10 @@ export function CustomersPage() {
                   setCustomDateFrom(e.target.value);
                   setPage(1);
                 }}
-                className="w-40"
+                className="w-full"
               />
             </div>
-            <div className="space-y-1">
+            <div className="space-y-1 w-full sm:w-40">
               <Label htmlFor="guest-date-to" className="text-xs text-muted-foreground">
                 To
               </Label>
@@ -389,7 +389,7 @@ export function CustomersPage() {
                   setCustomDateTo(e.target.value);
                   setPage(1);
                 }}
-                className="w-40"
+                className="w-full"
               />
             </div>
           </>
@@ -613,7 +613,7 @@ export function CustomersPage() {
               onChange={handleNationalityChange}
               placeholder="Type or select nationality…"
             />
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
               <div className="space-y-2">
                 <Label>ID Type</Label>
                 <Select value={formIdType} onValueChange={setFormIdType}>
@@ -639,10 +639,10 @@ export function CustomersPage() {
               <Textarea value={formNotes} onChange={(e) => setFormNotes(e.target.value)} placeholder="Special notes..." rows={2} />
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={closeDialog}>Cancel</Button>
+          <DialogFooter className="flex-col-reverse sm:flex-row gap-2">
+            <Button variant="outline" className="w-full sm:w-auto" onClick={closeDialog}>Cancel</Button>
             <Button
-              className="bg-amber-600 hover:bg-amber-700 text-white"
+              className="w-full sm:w-auto bg-amber-600 hover:bg-amber-700 text-white"
               onClick={handleSubmit}
               disabled={createMutation.isPending || formEmailBlocking}
             >

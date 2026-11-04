@@ -1905,8 +1905,8 @@ async function writeMonthlyBusinessDayExcel(
   sheet.getColumn(4).width = 16
   sheet.getColumn(5).width = 16
   sheet.getColumn(6).width = 14
-  sheet.getColumn(7).width = 14
-  sheet.getColumn(8).width = 16
+  sheet.getColumn(7).width = 16
+  sheet.getColumn(8).width = 14
 
   let row = 1
   sheet.getCell(row, 1).value = `Period: ${dateLabel}`
@@ -1933,7 +1933,7 @@ async function writeMonthlyBusinessDayExcel(
   titleCell.alignment = { horizontal: 'center', vertical: 'middle' }
 
   row = 4
-  const headers = ['Date', 'Cash', 'Card', 'Bank Payment', 'M.Finance', 'Due', 'Food Bill', 'Total']
+  const headers = ['Date', 'Cash', 'Card', 'Bank Payment', 'M.Finance', 'Due', 'Total', 'Food Bill']
   headers.forEach((header, index) => {
     const cell = sheet.getCell(row, index + 1)
     cell.value = header
@@ -1953,8 +1953,8 @@ async function writeMonthlyBusinessDayExcel(
         d.bankPayment,
         d.mFinance,
         d.due,
-        d.foodBill,
         d.total,
+        d.foodBill,
       ]
       vals.forEach((val, idx) => {
         const cell = sheet.getCell(row, idx + 1)
@@ -1974,8 +1974,8 @@ async function writeMonthlyBusinessDayExcel(
     totals?.bankPayment ?? 0,
     totals?.mFinance ?? 0,
     totals?.due ?? 0,
-    totals?.foodBill ?? 0,
     totals?.totalSales ?? 0,
+    totals?.foodBill ?? 0,
   ]
   totalVals.forEach((val, idx) => {
     const cell = sheet.getCell(row, idx + 1)
@@ -2032,8 +2032,8 @@ async function writeMonthlyBusinessDayPdf(
   const rawDateLabel = meta.businessDateDisplay ?? monthlyData.businessDateDisplay ?? `${monthlyData.dateFrom} to ${monthlyData.dateTo}`
   const dateLabel = sanitizePdfDateText(rawDateLabel)
 
-  const headers = ['Date', 'Cash', 'Card', 'Bank Payment', 'M.Finance', 'Due', 'Food Bill', 'Total']
-  const colWidths = [22, 24, 24, 26, 26, 22, 22, 24]
+  const headers = ['Date', 'Cash', 'Card', 'Bank Payment', 'M.Finance', 'Due', 'Total', 'Food Bill']
+  const colWidths = [22, 24, 24, 26, 26, 22, 24, 22]
   const tableWidth = colWidths.reduce((s, w) => s + w, 0)
   const startX = (pageWidth - tableWidth) / 2
 
@@ -2106,8 +2106,8 @@ async function writeMonthlyBusinessDayPdf(
       formatExportAmount(day.bankPayment),
       formatExportAmount(day.mFinance),
       formatExportAmount(day.due),
-      formatExportAmount(day.foodBill),
       formatExportAmount(day.total),
+      formatExportAmount(day.foodBill),
     ]
 
     let x = startX
@@ -2116,9 +2116,9 @@ async function writeMonthlyBusinessDayPdf(
       if (i === 0) {
         pdf.text(text, x + colWidths[i]! / 2, y + 3.8, { align: 'center' })
       } else {
-        if (i === 7) pdf.setFont('helvetica', 'bold')
+        if (i === 6) pdf.setFont('helvetica', 'bold')
         pdf.text(text, x + colWidths[i]! - 1.5, y + 3.8, { align: 'right' })
-        if (i === 7) pdf.setFont('helvetica', 'normal')
+        if (i === 6) pdf.setFont('helvetica', 'normal')
       }
       x += colWidths[i]!
     })
@@ -2138,8 +2138,8 @@ async function writeMonthlyBusinessDayPdf(
     formatExportAmount(totals?.bankPayment ?? 0),
     formatExportAmount(totals?.mFinance ?? 0),
     formatExportAmount(totals?.due ?? 0),
-    formatExportAmount(totals?.foodBill ?? 0),
     formatExportAmount(totals?.totalSales ?? 0),
+    formatExportAmount(totals?.foodBill ?? 0),
   ]
 
   pdf.setFillColor(245, 245, 245)

@@ -270,7 +270,7 @@ function HotelAdminDashboard({
       {(showRoomStats || showArrivalCards) && (
         <div className="space-y-4">
           {/* Guest Flow & Live Movement Stats */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
             <StatCard
               title="Total In-House Guests"
               value={`${inHousePax} Pax`}
@@ -307,7 +307,7 @@ function HotelAdminDashboard({
 
           {/* Room Inventory Stats */}
           {showRoomStats && (
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
               <StatCard
                 title="Total Rooms"
                 value={rooms.total}
@@ -339,7 +339,7 @@ function HotelAdminDashboard({
 
       {/* Revenue stats */}
       {showRevenueCards && data.revenue && (
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
           <StatCard
             title="Hotel Revenue"
             value={`৳${data.revenue.hotelRevenue.toLocaleString()}`}
@@ -363,14 +363,14 @@ function HotelAdminDashboard({
 
       {/* Charts Row */}
       {(showOccupancyChart || showRevenueChart) && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
           {showOccupancyChart && (
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-base">Room Occupancy</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="flex items-center gap-6">
+                <div className="flex flex-col sm:flex-row items-center gap-4 sm:gap-6">
                   <div className="w-48 h-48">
                     <ResponsiveContainer width="100%" height="100%">
                       <PieChart>
@@ -584,7 +584,7 @@ function DashboardSkeleton() {
         <Skeleton className="h-10 w-28" />
       </div>
       <div className="space-y-4">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
           {Array.from({ length: 4 }).map((_, i) => (
             <Card key={i}>
               <CardContent className="p-4">

@@ -312,51 +312,53 @@ export function BookingRestaurantBillDialog({
                 No restaurant bills on this stay yet.
               </p>
             ) : (
-              <div className="rounded-lg border overflow-hidden">
-                <div className="grid grid-cols-[minmax(0,1fr)_minmax(4.5rem,0.6fr)_minmax(4.5rem,0.6fr)_minmax(5rem,0.7fr)] gap-3 px-4 py-2.5 bg-muted/40 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  <span>Bill No.</span>
-                  <span>Payment</span>
-                  <span className="text-right">Date</span>
-                  <span className="text-right">Total</span>
-                </div>
-                <Separator />
-                {bills.map((bill) => {
-                  const parsed = parseBookingRestaurantBillNotes(bill.notes)
-                  return (
-                    <div
-                      key={bill.id}
-                      className="grid grid-cols-[minmax(0,1fr)_minmax(4.5rem,0.6fr)_minmax(4.5rem,0.6fr)_minmax(5rem,0.7fr)] gap-3 px-4 py-3 border-b last:border-b-0 items-start text-sm"
-                    >
-                      <div className="min-w-0">
-                        <p className="font-medium leading-snug font-mono">{parsed.billNo}</p>
-                        <p className="text-xs text-muted-foreground font-mono mt-0.5">
-                          {bill.orderNumber}
-                          {bill.vatPercent > 0 ? ` · VAT ${bill.vatPercent}% incl.` : ''}
+              <div className="rounded-lg border overflow-x-auto custom-scrollbar">
+                <div className="min-w-[420px]">
+                  <div className="grid grid-cols-[minmax(0,1fr)_minmax(4.5rem,0.6fr)_minmax(4.5rem,0.6fr)_minmax(5rem,0.7fr)] gap-3 px-4 py-2.5 bg-muted/40 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    <span>Bill No.</span>
+                    <span>Payment</span>
+                    <span className="text-right">Date</span>
+                    <span className="text-right">Total</span>
+                  </div>
+                  <Separator />
+                  {bills.map((bill) => {
+                    const parsed = parseBookingRestaurantBillNotes(bill.notes)
+                    return (
+                      <div
+                        key={bill.id}
+                        className="grid grid-cols-[minmax(0,1fr)_minmax(4.5rem,0.6fr)_minmax(4.5rem,0.6fr)_minmax(5rem,0.7fr)] gap-3 px-4 py-3 border-b last:border-b-0 items-start text-sm"
+                      >
+                        <div className="min-w-0">
+                          <p className="font-medium leading-snug font-mono">{parsed.billNo}</p>
+                          <p className="text-xs text-muted-foreground font-mono mt-0.5">
+                            {bill.orderNumber}
+                            {bill.vatPercent > 0 ? ` · VAT ${bill.vatPercent}% incl.` : ''}
+                          </p>
+                        </div>
+                        <p className="text-xs text-muted-foreground pt-0.5">
+                          {parsed.paymentMethod ?? '—'}
+                        </p>
+                        <p className="text-xs text-muted-foreground text-right tabular-nums pt-0.5">
+                          {format(new Date(bill.createdAt), 'dd MMM yyyy')}
+                        </p>
+                        <p className="font-semibold tabular-nums text-right text-orange-800">
+                          {formatBdt(bill.totalAmount)}
                         </p>
                       </div>
-                      <p className="text-xs text-muted-foreground pt-0.5">
-                        {parsed.paymentMethod ?? '—'}
-                      </p>
-                      <p className="text-xs text-muted-foreground text-right tabular-nums pt-0.5">
-                        {format(new Date(bill.createdAt), 'dd MMM yyyy')}
-                      </p>
-                      <p className="font-semibold tabular-nums text-right text-orange-800">
-                        {formatBdt(bill.totalAmount)}
-                      </p>
-                    </div>
-                  )
-                })}
+                    )
+                  })}
+                </div>
               </div>
             )}
           </div>
         </div>
 
-        <DialogFooter className="shrink-0 gap-3 border-t bg-muted/20 px-6 py-4">
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+        <DialogFooter className="shrink-0 flex-col-reverse sm:flex-row gap-2 border-t bg-muted/20 px-6 py-4">
+          <Button variant="outline" className="w-full sm:w-auto" onClick={() => onOpenChange(false)}>
             Close
           </Button>
           <Button
-            className="bg-orange-600 hover:bg-orange-700"
+            className="w-full sm:w-auto bg-orange-600 hover:bg-orange-700"
             disabled={addMutation.isPending}
             onClick={handleSubmit}
           >
